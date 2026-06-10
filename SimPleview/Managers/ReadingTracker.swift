@@ -164,48 +164,19 @@ class ReadingTracker: ObservableObject {
         return recordToReturn
     }
     
-    // [最高权限覆盖：防止脏数据回流]
-    // 当在全局设置界面（SettingsGlobalAuthorsView）里直接修改了作者简历后，
-    // 为了防止当前打开的旧 PDF 在关闭时（或者修改了其他字段导致触发 saveAllRecords 时），
-    // 意外地用旧的 bio 把全局的 bio 给覆盖掉，我们必须在全局修改后，
-    // 立刻级联更新掉内存里所有缓存的文献的对应作者数据。
+    // [最高权限覆盖] 当在全局设置修改作者后，立刻更新内存缓存，防止脏数据回流
     func syncLoadedRecordsWithGlobalAuthor(name: String, globalAuthor: GlobalAuthor) {
-        var anyChanged = false
-        
+        var needsRefresh = false
         for (docID, var record) in recordsCache {
-            var recordChanged = false
-            for i in 0..<record.authors.count {
-                if record.authors[i].name.trimmingCharacters(in: .whitespacesAndNewlines) == name {
-                    if record.authors[i].bio != globalAuthor.bio {
-                        record.authors[i].bio = globalAuthor.bio
-                        recordChanged = true
-                        anyChanged = true
-                    }
-                    if record.authors[i].firstName != globalAuthor.firstName {
-                        record.authors[i].firstName = globalAuthor.firstName
-                        recordChanged = true
-                        anyChanged = true
-                    }
-                    if record.authors[i].lastName != globalAuthor.lastName {
-                        record.authors[i].lastName = globalAuthor.lastName
-                        recordChanged = true
-                        anyChanged = true
-                    }
-                }
-            }
-            if recordChanged {
+            for i in 0..<record.authors.count where record.authors[i].name.trimmingCharacters(in: .whitespacesAndNewlines) == name {
+                record.authors[i].firstName = globalAuthor.firstName
+                record.authors[i].lastName = globalAuthor.lastName
+                record.authors[i].bio = globalAuthor.bio
                 recordsCache[docID] = record
-                // 不用设为 dirty，因为 bio 已经不需要在本地存 JSON 了
+                if docID == currentDocumentID { needsRefresh = true }
             }
         }
-        
-        // 如果当前正好绑定的就是被修改的那个，强制刷新一次 UI，让界面立刻体现！
-        if anyChanged, let current = currentDocumentID, recordsCache[current] != nil {
-            // 通过触发 currentRecord 的变更，强制 SwiftUI 重新取值
-            DispatchQueue.main.async {
-                self.objectWillChange.send()
-            }
-        }
+        if needsRefresh { DispatchQueue.main.async { self.objectWillChange.send() } }
     }
     
     // [高性能存储流水线]
