@@ -222,9 +222,9 @@ class FileMonitor: NSObject {
     
     private var lastKnownModDate: Date?
     private var fileDescriptor: CInt = -1
-    private var source: DispatchSourceFileSystemObject?
+    nonisolated(unsafe) private var source: DispatchSourceFileSystemObject?
     /// 实例级防抖任务，替代全局 cancelPreviousPerformRequests，避免多窗口互相干扰
-    private var debounceWorkItem: DispatchWorkItem?
+    nonisolated(unsafe) private var debounceWorkItem: DispatchWorkItem?
     
     init(url: URL) {
         self.url = url
@@ -309,5 +309,9 @@ class FileMonitor: NSObject {
     private func triggerChange() {
         guard !isSelfSaving else { return }
         onDidChange?()
+    }
+    deinit {
+        debounceWorkItem?.cancel()
+        source?.cancel()
     }
 }
