@@ -217,7 +217,7 @@ struct L {
             "Icon Only": [.zh: "仅图标", .en: "Icon Only"],
             "Icon and Text": [.zh: "图标和文本", .en: "Icon and Text"],
             "Customize Toolbar...": [.zh: "自定义工具栏...", .en: "Customize Toolbar..."],
-            "Bio": [.zh: "生平简介", .en: "Bio"],
+            "Bio": [.zh: "简介", .en: "Bio"],
             "General Options": [.zh: "常规选项", .en: "General Options"]
     ]
     static func s(_ key: String, _ lang: AppLanguage) -> String {

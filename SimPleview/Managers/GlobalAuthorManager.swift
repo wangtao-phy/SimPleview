@@ -126,31 +126,27 @@ class GlobalAuthorManager: ObservableObject {
     }
     
     // [加载数据]
+    // 必须同步加载！否则如果在 App 启动初期用户立刻关闭标签页触发 upsert，
+    // 后台加载还没完成，此时内存为 [:]，upsert 会直接覆盖并清空整个硬盘的旧数据！这是极其危险的 Race Condition！
     func loadAuthors() {
         let url = fileURL
-        // [专家级防泄漏] 异步操作必须捕获 [weak self]，否则当 Manager 卸载时，后台线程将无限期强持有对象引发内存泄漏。
-        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
-            guard FileManager.default.fileExists(atPath: url.path) else { return }
+        guard FileManager.default.fileExists(atPath: url.path) else { return }
+        
+        do {
+            let data = try Data(contentsOf: url)
+            let decoded = try JSONDecoder().decode([String: GlobalAuthor].self, from: data)
             
-            do {
-                let data = try Data(contentsOf: url)
-                let decoded = try JSONDecoder().decode([String: GlobalAuthor].self, from: data)
-                
-                // 为了防止部分旧数据的 Key 不对齐，我们做一次重新映射。
-                var migrated: [String: GlobalAuthor] = [:]
-                for (_, author) in decoded {
-                    migrated[author.name] = author
-                }
-                
-                // 将准备好的数据喂给 SwiftUI (主线程)
-                DispatchQueue.main.async {
-                    guard let self = self else { return }
-                    self.authors = migrated
-                    self.recalculateArticleCounts() // 顺手校验并重新统计所有论文的引用关系
-                }
-            } catch {
-                // Ignore
+            // 为了防止部分旧数据的 Key 不对齐，我们做一次重新映射。
+            var migrated: [String: GlobalAuthor] = [:]
+            for (_, author) in decoded {
+                migrated[author.name] = author
             }
+            
+            self.authors = migrated
+            // 校验并在后台统计
+            self.recalculateArticleCounts()
+        } catch {
+            print("Failed to load GlobalAuthors.json: \(error)")
         }
     }
     
@@ -241,20 +237,12 @@ class GlobalAuthorManager: ObservableObject {
                 guard !name.isEmpty else { continue }
                 
                 if var existing = self.authors[name] {
-                    // 更新现有档案：采用增量更新策略，坚决不覆盖旧数据
-                    let newBio = author.bio.trimmingCharacters(in: .whitespacesAndNewlines)
-                    // 只有当新传入的履历不为空，且老的履历里不包含这段话时，才视为有新信息
-                    let hasNewBio = !newBio.isEmpty && !existing.bio.contains(newBio)
+                    // 更新现有档案：看看是否有新的简介，以及这篇论文是不是新增给他的
+                    let bioChanged = existing.bio != author.bio
                     let newDocAdded = existing.documentIDs.insert(docID).inserted
                     
-                    if hasNewBio || newDocAdded {
-                        if hasNewBio {
-                            if existing.bio.isEmpty {
-                                existing.bio = newBio
-                            } else {
-                                existing.bio += "\n" + newBio
-                            }
-                        }
+                    if bioChanged || newDocAdded {
+                        existing.bio = author.bio
                         existing.lastUsed = Date() // 提高这名作者的热度
                         self.authors[name] = existing
                         changed = true
