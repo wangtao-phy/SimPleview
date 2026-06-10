@@ -177,8 +177,11 @@ struct PDFKitRepresentable: NSViewRepresentable {
     func makeNSView(context: Context) -> CustomPDFView {
         pdfView.autoScales = true
         
-        // [UI 优化] 移除获得焦点时的系统默认蓝色高亮外框
+        // [UI 优化] 原生逻辑：移除内部 ScrollView 获得焦点时的系统默认蓝色高亮外框
         pdfView.focusRingType = .none
+        if let scrollView = pdfView.subviews.first(where: { $0 is NSScrollView }) as? NSScrollView {
+            scrollView.focusRingType = .none
+        }
         
         let policy = MemoryMode.current.policy
         pdfView.interpolationQuality = policy.interpolationQuality
