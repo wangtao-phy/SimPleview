@@ -1,0 +1,2 @@
+--- xcodebuild: WARNING: Using the first of multiple matching destinations:
+/Users/wangtao/AI-mini/SimPleview/SimPleview.xcodeproj: warning: The macOS deployment target 'MACOSX_DEPLOYMENT_TARGET' is set to 27.0, but the range of supported deployment target versions is 10.13 to 26.5.99. (in target 'SimPleview' from project 'SimPleview')
