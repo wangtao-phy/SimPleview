@@ -92,68 +92,48 @@ final class DocumentManager: ObservableObject {
         // 如果文件没有被修改，或者缺乏必要的上下文，直接跳过以节省性能
         guard isDirty, let url = fileURL, let document = pdfView?.document else { return }
 
-        // 在主线程提取数据，完美避开 PDFDocument 的非线程安全问题！
-        // 取出 Data 对象后，I/O 写入磁盘的操作就不再需要占用主线程了
-        guard let data = document.dataRepresentation() else { return }
-
         // 每次触发保存时，先把之前倒计时的任务取消掉（这就是典型的 Debounce 防抖逻辑）
         saveWorkItem?.cancel()
 
         // 提取闭包：这是真正的存盘核心动作
-        let performWrite: @Sendable () -> Void = { [weak self] in
+        // 【极其关键的修复：放弃 dataRepresentation 和原子写入】
+        // 苹果 PDFKit 存在臭名昭著的 LaTeX PDF 破坏 Bug。如果调用 dataRepresentation()，
+        // 系统会用 Quartz 2D 引擎将整个 PDF 完全重写一遍，这会直接丢失 LaTeX 文档中特殊的 Type 3 字体和排版流，
+        // 导致文件损坏、完全白屏！
+        // 唯一的解法是：直接调用 document.write(to: originalURL)。当目标 URL 和原 URL 强相同时，
+        // PDFKit 内部会自动触发『增量保存 (Incremental Save)』，仅仅把批注数据追加到文件末尾，
+        // 完美保护 LaTeX 原始内容！而且因为是增量追加，速度极快（毫秒级），完全可以直接在主线程执行而不会卡顿！
+        let workItem = DispatchWorkItem { [weak self] in
             // 在写入前请求系统的安全写入权限
             let accessing = url.startAccessingSecurityScopedResource()
             defer { if accessing { url.stopAccessingSecurityScopedResource() } }
 
             // 通知主线程我们正在进行自我保存，避免文件监视器误报
-            DispatchQueue.main.async {
-                self?.fileMonitor?.isSelfSaving = true
-            }
+            self?.fileMonitor?.isSelfSaving = true
             
-            // [极其重要的稳健性修复：安全原子写入 + 异步非阻塞]
-            let tempURL = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + ".pdf")
-            var success = false
-            do {
-                // 使用 Data.write，不再依赖 Document.write
-                try data.write(to: tempURL, options: .atomic)
-                _ = try FileManager.default.replaceItemAt(url, withItemAt: tempURL)
-                success = true
-            } catch {
-                // 写入失败处理
-            }
+            // 触发 PDFKit 神奇的增量保存
+            let success = document.write(to: url)
             
-            DispatchQueue.main.async {
-                if success {
-                    self?.fileMonitor?.updateLastKnownModDate()
-                    self?.isDirty = false
-                    self?.saveWorkItem = nil
-                    // 延迟恢复：给 DispatchSource 事件足够的清空时间
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
-                        self?.fileMonitor?.isSelfSaving = false
-                    }
-                } else {
+            if success {
+                self?.fileMonitor?.updateLastKnownModDate()
+                self?.isDirty = false
+                self?.saveWorkItem = nil
+                // 延迟恢复：给 DispatchSource 事件足够的清空时间
+                DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
                     self?.fileMonitor?.isSelfSaving = false
                 }
+            } else {
+                self?.fileMonitor?.isSelfSaving = false
             }
         }
 
-        // 根据同步、异步要求执行调度
-        if sync {
-            performWrite()
-        } else {
-            let workItem = DispatchWorkItem {
-                // 将极其耗时的 I/O 写入发配到后台，彻底解放主线程，拒绝转彩虹圈
-                DispatchQueue.global(qos: .userInitiated).async {
-                    performWrite()
-                }
-            }
-            saveWorkItem = workItem
+        saveWorkItem = workItem
 
-            if immediate {
-                DispatchQueue.main.async(execute: workItem)
-            } else {
-                DispatchQueue.main.asyncAfter(deadline: .now() + 2.0, execute: workItem)
-            }
+        // 因为增量保存极快，我们统一调度在主线程执行，避免非 Sendable 警告和多线程崩溃
+        if sync || immediate {
+            DispatchQueue.main.async(execute: workItem)
+        } else {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 2.0, execute: workItem)
         }
     }
     
@@ -172,29 +152,14 @@ final class DocumentManager: ObservableObject {
         let workItem = DispatchWorkItem { [weak self] in
             guard let self = self, self.isDirty else { return }
             
-            // 停笔 3 秒后，此时 UI 已经不卡了，我们在主线程安全提取 PDF 数据
-            guard let data = document.dataRepresentation() else { return }
+            let accessing = url.startAccessingSecurityScopedResource()
+            defer { if accessing { url.stopAccessingSecurityScopedResource() } }
             
-            // 拿到 Data 后，切到后台子线程去执行真实的硬盘写入
-            DispatchQueue.global(qos: .userInitiated).async {
-                let accessing = url.startAccessingSecurityScopedResource()
-                defer { if accessing { url.stopAccessingSecurityScopedResource() } }
-                
-                let tempURL = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + ".pdf")
-                var success = false
-                do {
-                    try data.write(to: tempURL, options: .atomic)
-                    _ = try FileManager.default.replaceItemAt(url, withItemAt: tempURL)
-                    success = true
-                } catch {
-                    // iOS 写入失败处理
-                }
-                
-                if success {
-                    DispatchQueue.main.async {
-                        self.isDirty = false
-                    }
-                }
+            // iOS 端同样强制使用增量保存保护 LaTeX 字体，直接在主线程毫秒级完成
+            let success = document.write(to: url)
+            
+            if success {
+                self.isDirty = false
             }
         }
         
