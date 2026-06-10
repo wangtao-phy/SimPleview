@@ -305,6 +305,9 @@ class GlobalAuthorManager: ObservableObject {
             self.authors[oldName] = updated
         }
         self.saveAuthors()
+        
+        // 【最高优先级防覆盖】向所有打开的文档广播，强制覆写内存里的数据，防止等会儿保存时旧数据回流！
+        ReadingTracker.shared.syncLoadedRecordsWithGlobalAuthor(name: newFullName, globalAuthor: updated)
     }
 
     
