@@ -1,5 +1,6 @@
 import SwiftUI
 import UniformTypeIdentifiers
+import os
 
 #if os(macOS)
 import AppKit
@@ -103,7 +104,7 @@ struct SignaturePopoverView: View {
                 return d1 > d2
             }
         } catch {
-            print("Failed to load signatures: \(error)")
+            Logger.signature.error("\(SignatureError.loadFailed(underlying: error).localizedDescription)")
         }
     }
     
@@ -117,9 +118,12 @@ struct SignaturePopoverView: View {
         
         panel.begin { response in
             if response == .OK, let url = panel.url {
-                if state.importSignature(from: url) != nil {
+                do {
+                    let _ = try state.importSignature(from: url)
                     // 导入成功，刷新列表
                     loadSignatures()
+                } catch {
+                    Logger.signature.error("\(error.localizedDescription)")
                 }
             }
         }
@@ -134,7 +138,7 @@ struct SignaturePopoverView: View {
                 signatureURLs.removeAll { $0 == url }
             }
         } catch {
-            print("Failed to delete signature: \(error)")
+            Logger.signature.error("\(SignatureError.deleteFailed(underlying: error).localizedDescription)")
         }
     }
 }

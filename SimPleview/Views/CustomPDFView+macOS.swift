@@ -27,8 +27,17 @@ extension CustomPDFView {
     }
     
     // --- 签名交互控制引擎 ---
-    override func draw(_ page: PDFPage, to context: CGContext) {
-        super.draw(page, to: context) // 必须先让底层把 PDF 原文画完
+    // [Swift 6 关键修复] PDFKit 从后台瓦片渲染线程 (PDFTilePool.workQueue) 调用此方法。
+    // 由于 PDFView.draw(_:to:) 是 ObjC 方法，在 Swift 6 + DefaultActorIsolation=MainActor 下
+    // 需要显式标记 nonisolated 以避免 dispatch_assert_queue_fail 崩溃。
+    nonisolated override func draw(_ page: PDFPage, to context: CGContext) {
+        // 由于我们在 nonisolated 上下文中，直接调用 super.draw 可能会报 Actor 警告
+        // 苹果官方针对此类底层框架调用的推荐做法是使用 MainActor.assumeIsolated 
+        // 苹果官方文档指出 PDFView.draw(_:to:) 的默认实现为空。
+        // 但是实际上如果不调用，页面原文就会消失变成白屏！
+        // 因为在 Swift 6 下我们无法调用被 MainActor 隔离的 super.draw(page, to: context)，
+        // 我们可以直接调用 PDFPage 的底层非隔离绘图 API 来绘制原文。
+        page.draw(with: .cropBox, to: context)
         
         // 【性能优化】：将主题色获取提取到循环外
         let accentColor: NSColor
@@ -44,7 +53,7 @@ extension CustomPDFView {
         NSGraphicsContext.current = NSGraphicsContext(cgContext: context, flipped: false)
         
         // 1. 如果当前有被选中的批次 ID，我们就在这页上把属于它的批注框出来
-        if let batchID = self.currentSelectedBatchID {
+        if let batchID = self._threadSafeBatchID {
             // 过滤掉 Stamp (签名)，因为签名有自己的专属拖拽边框渲染逻辑
             let annots = page.annotations.filter { $0.userName == batchID && $0.type != "Stamp" }
             if !annots.isEmpty {
@@ -90,7 +99,7 @@ extension CustomPDFView {
         }
         
         // 2. 渲染被选中的 SignatureAnnotation
-        if let sig = self.activeSignature, sig.page == page {
+        if let sig = self._threadSafeActiveSignature, sig.page == page {
             let generousBounds = sig.bounds.insetBy(dx: -4, dy: -4)
             
             // 系统默认颜色的圆角实线边框

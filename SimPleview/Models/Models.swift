@@ -4,6 +4,28 @@ import SwiftUI
 import UniformTypeIdentifiers
 import os
 
+/// [Swift 6 新特性：Typed Throws]
+/// 签名模块的专用错误类型。利用 Swift 6 的 Typed Throws 特性，
+/// 在 catch 块中编译器能自动推断具体错误类型，支持穷举匹配。
+enum SignatureError: Error, LocalizedError {
+    case importFailed(underlying: any Error)
+    case loadFailed(underlying: any Error)
+    case deleteFailed(underlying: any Error)
+    
+    var errorDescription: String? {
+        switch self {
+        case .importFailed(let e): "Failed to import signature: \(e.localizedDescription)"
+        case .loadFailed(let e): "Failed to load signatures: \(e.localizedDescription)"
+        case .deleteFailed(let e): "Failed to delete signature: \(e.localizedDescription)"
+        }
+    }
+}
+
+/// 统一的日志输出器，替代散落的 print()
+extension Logger {
+    static let signature = Logger(subsystem: "com.tau.SimPleview", category: "Signature")
+}
+
 /// [教程注释：文件职责]
 /// 这是整个 App 的底层基石之一，存放了基础的数据结构（模型 Models）、状态定义以及多语言字典。
 /// 在基于 SwiftUI 的现代开发中，将与具体视图（View）无关的数据结构和枚举独立存放，是一个极佳的架构习惯。

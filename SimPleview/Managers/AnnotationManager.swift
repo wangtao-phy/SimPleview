@@ -1,5 +1,5 @@
 import SwiftUI
-@preconcurrency import PDFKit
+import PDFKit
 import Combine
 
 extension PDFAnnotation {

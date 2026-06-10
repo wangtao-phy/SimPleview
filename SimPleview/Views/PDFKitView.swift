@@ -1,5 +1,5 @@
 import SwiftUI
-import PDFKit
+@preconcurrency import PDFKit
 #if os(iOS)
 import PencilKit // Apple 专门用来处理 Apple Pencil 绘图的强大底层框架
 #endif
@@ -44,7 +44,13 @@ class CustomPDFView: PDFView {
         case resizingBottomRight
     }
     
-    var activeSignature: PDFAnnotation? // 实际类型为 SignatureAnnotation
+    var activeSignature: PDFAnnotation? {
+        didSet {
+            _threadSafeActiveSignature = activeSignature
+        }
+    }
+    nonisolated(unsafe) var _threadSafeActiveSignature: PDFAnnotation?
+    
     var dragMode: DragMode = .none
     var dragStartPoint: CGPoint = .zero
     var dragStartBounds: CGRect = .zero
@@ -53,6 +59,7 @@ class CustomPDFView: PDFView {
     // 【新增】：用于判断哪个批注正在被选中，以决定画框或弹窗
     var currentSelectedBatchID: String? {
         didSet {
+            _threadSafeBatchID = currentSelectedBatchID
             if currentSelectedBatchID != oldValue {
                 #if os(macOS)
                 self.documentView?.setNeedsDisplay(self.documentView?.bounds ?? .zero)
@@ -63,6 +70,7 @@ class CustomPDFView: PDFView {
             }
         }
     }
+    nonisolated(unsafe) var _threadSafeBatchID: String?
     
     #if os(iOS)
     var allowMenuForCurrentSelection = false
@@ -115,7 +123,7 @@ class CustomPDFView: PDFView {
     
     #if os(macOS)
     // [P1优化] 缓存 SF Symbol 图标，避免在高频 draw 方法中每帧重建
-    var _cachedNoteIcon: NSImage?
+    nonisolated(unsafe) var _cachedNoteIcon: NSImage?
     #endif
     
     // 当前状态（是在看书、划线、还是手写？）

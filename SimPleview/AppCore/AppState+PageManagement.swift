@@ -4,6 +4,7 @@ import CoreImage
 import CoreImage.CIFilterBuiltins
 import UniformTypeIdentifiers
 import Combine
+import os
 
 /// [教程注释：PDF 页面操作引擎]
 /// 涵盖了删除、插入、重排、导出等高阶操作。
@@ -222,7 +223,7 @@ extension AppState {
     }
     
     // 从外部导入一张新图片作为签名，保存到专属文件夹中
-    func importSignature(from url: URL) -> URL? {
+    func importSignature(from url: URL) throws(SignatureError) -> URL {
         let signatureDir = getSignatureDirectory()
         // 生成唯一安全的文件名以防重名覆盖
         let ext = url.pathExtension.isEmpty ? "png" : url.pathExtension
@@ -232,8 +233,7 @@ extension AppState {
             try FileManager.default.copyItem(at: url, to: newURL)
             return newURL
         } catch {
-            print("Failed to import signature: \(error)")
-            return nil
+            throw .importFailed(underlying: error)
         }
     }
     

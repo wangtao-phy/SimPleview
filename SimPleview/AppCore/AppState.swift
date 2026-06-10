@@ -1,4 +1,4 @@
-@preconcurrency import Combine
+import Combine
 import PDFKit
 import SwiftUI
 import UniformTypeIdentifiers
