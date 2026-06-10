@@ -205,6 +205,8 @@ struct AuthorDetailEditor: View {
     @State private var draftLastName: String = ""
     @State private var draftBio: String = ""
     
+    @State private var bioDebounceTimer: Timer?
+    
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             
@@ -268,8 +270,18 @@ struct AuthorDetailEditor: View {
         .onChange(of: author) { newAuthor in
             syncDrafts()
         }
-        // TextEditor 没有 onSubmit 回车事件，所以只好委曲求全，只要字有一丁点变动，就立刻强制提交。
-        .onChange(of: draftBio) {
+        // TextEditor 没有 onSubmit 回车事件，所以使用防抖 (Debounce) 机制：
+        // 只要用户在连续打字，就不停地重置计时器。当用户停下手 0.8 秒后，再触发保存。
+        // 这彻底解决了一边打字一边保存导致的 SwiftUI 状态回流冲刷 Bug！
+        .onChange(of: draftBio) { newValue in
+            bioDebounceTimer?.invalidate()
+            bioDebounceTimer = Timer.scheduledTimer(withTimeInterval: 0.8, repeats: false) { _ in
+                update()
+            }
+        }
+        .onDisappear {
+            // 界面消失前，做最后一次强制兜底保存
+            bioDebounceTimer?.invalidate()
             update()
         }
     }
