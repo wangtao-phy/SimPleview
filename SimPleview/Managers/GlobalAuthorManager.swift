@@ -241,12 +241,20 @@ class GlobalAuthorManager: ObservableObject {
                 guard !name.isEmpty else { continue }
                 
                 if var existing = self.authors[name] {
-                    // 更新现有档案：看看是否有新的简介，以及这篇论文是不是新增给他的
-                    let bioChanged = existing.bio != author.bio
+                    // 更新现有档案：采用增量更新策略，坚决不覆盖旧数据
+                    let newBio = author.bio.trimmingCharacters(in: .whitespacesAndNewlines)
+                    // 只有当新传入的履历不为空，且老的履历里不包含这段话时，才视为有新信息
+                    let hasNewBio = !newBio.isEmpty && !existing.bio.contains(newBio)
                     let newDocAdded = existing.documentIDs.insert(docID).inserted
                     
-                    if bioChanged || newDocAdded {
-                        existing.bio = author.bio
+                    if hasNewBio || newDocAdded {
+                        if hasNewBio {
+                            if existing.bio.isEmpty {
+                                existing.bio = newBio
+                            } else {
+                                existing.bio += "\n" + newBio
+                            }
+                        }
                         existing.lastUsed = Date() // 提高这名作者的热度
                         self.authors[name] = existing
                         changed = true
