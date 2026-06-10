@@ -152,9 +152,8 @@ extension AppState {
     
 
     #if os(macOS)
-    private func createTransparentSignature(from inputImage: NSImage) -> NSImage? {
-        guard let tiffData = inputImage.tiffRepresentation,
-              let ciImage = CIImage(data: tiffData) else { return nil }
+    private func createTransparentSignature(from imageURL: URL) -> NSImage? {
+        guard let ciImage = CIImage(contentsOf: imageURL) else { return nil }
         
         // 1. 获取灰度图（提取明暗信息）
         let monoFilter = CIFilter.photoEffectMono()
@@ -184,13 +183,13 @@ extension AppState {
         let context = CIContext(options: nil)
         guard let cgImage = context.createCGImage(finalCIImage, from: finalCIImage.extent) else { return nil }
         
-        // 重新包装回 NSImage，并保持原有 inputImage 的 points 尺寸，从而保证高分屏下的锐度
-        return NSImage(cgImage: cgImage, size: inputImage.size)
+        // 重新包装回 NSImage，基于原始像素宽高建立物理尺寸
+        let size = NSSize(width: cgImage.width, height: cgImage.height)
+        return NSImage(cgImage: cgImage, size: size)
     }
 
     func processAndInsertSignature(imageURL: URL) {
-        guard let image = NSImage(contentsOf: imageURL),
-              let transparentImage = createTransparentSignature(from: image) else { return }
+        guard let transparentImage = createTransparentSignature(from: imageURL) else { return }
         
         DispatchQueue.main.async { [weak self] in
             guard let self = self, let page = self.pdfView.currentPage else { return }

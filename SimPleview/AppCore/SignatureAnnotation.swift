@@ -35,7 +35,17 @@ class SignatureAnnotation: PDFAnnotation {
         guard let cgImage = image.cgImage else { return }
         #endif
         
+        
+        context.saveGState()
+        // [核心修复]：强制使用高质量抗锯齿和插值采样
+        // 在 macOS Sequoia 中，PDFKit 给定的默认上下文在执行大幅度缩放时，
+        // 采样质量极低（会呈现马赛克或严重模糊）。必须显式提升插值质量！
+        context.interpolationQuality = .high
+        context.setShouldAntialias(true)
+        
         // 绘制图像（这里需要注意 PDF 的坐标系原点在左下角，CoreGraphics 绘制默认也对应左下角，所以通常不需要翻转）
         context.draw(cgImage, in: bounds)
+        
+        context.restoreGState()
     }
 }
