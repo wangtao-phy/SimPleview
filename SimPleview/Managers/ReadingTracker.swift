@@ -122,40 +122,46 @@ class ReadingTracker: ObservableObject {
     }
     
     func loadRecord(for title: String) -> DocumentRecord {
+        var recordToReturn: DocumentRecord
+        
         if let cached = recordsCache[title] {
-            return cached
+            recordToReturn = cached
+        } else {
+            let url = fileURL(for: title)
+            if FileManager.default.fileExists(atPath: url.path) {
+                do {
+                    let data = try Data(contentsOf: url)
+                    let decoder = JSONDecoder()
+                    recordToReturn = try decoder.decode(DocumentRecord.self, from: data)
+                } catch {
+                    recordToReturn = DocumentRecord(documentID: title, documentTitle: title)
+                }
+            } else {
+                recordToReturn = DocumentRecord(documentID: title, documentTitle: title)
+            }
         }
         
-        let url = fileURL(for: title)
-        guard FileManager.default.fileExists(atPath: url.path) else {
-            // 没有？就建个新的
-            let newRecord = DocumentRecord(documentID: title, documentTitle: title)
-            recordsCache[title] = newRecord
-            return newRecord
-        }
-        
-        do {
-            let data = try Data(contentsOf: url)
-            let decoder = JSONDecoder()
-            var record = try decoder.decode(DocumentRecord.self, from: data)
-            
-            // [极其巧妙的数据同步]
-            // 因为单个 JSON 文件不再保存作者的 bio，所以我们在这里动态向全局大字典里借用最新的 bio！
-            // 这样能保证你在 A 论文里把作者的履历更新了，打开 B 论文时，立刻就能看到更新后的履历！
-            for i in 0..<record.authors.count {
-                let name = record.authors[i].name.trimmingCharacters(in: .whitespacesAndNewlines)
-                if let globalAuthor = GlobalAuthorManager.shared.authors[name] {
-                    record.authors[i].bio = globalAuthor.bio
+        // [极致的数据同步]
+        // 不管是刚从硬盘解析出来，还是从内存缓存里直接取出的旧对象，
+        // 每次提取记录时，都强制去全局大字典里拉一次最新的 bio！
+        // 这样确保用户在其他标签页修改作者履历后，切回本页面能立刻体现！
+        var hasChanges = false
+        for i in 0..<recordToReturn.authors.count {
+            let name = recordToReturn.authors[i].name.trimmingCharacters(in: .whitespacesAndNewlines)
+            if let globalAuthor = GlobalAuthorManager.shared.authors[name] {
+                if recordToReturn.authors[i].bio != globalAuthor.bio {
+                    recordToReturn.authors[i].bio = globalAuthor.bio
+                    hasChanges = true
                 }
             }
-            
-            recordsCache[title] = record
-            return record
-        } catch {
-            let newRecord = DocumentRecord(documentID: title, documentTitle: title)
-            recordsCache[title] = newRecord
-            return newRecord
         }
+        
+        // 如果同步导致了数据更新，或者本来就是新建/刚读取的，覆盖更新到缓存中
+        if hasChanges || recordsCache[title] == nil {
+            recordsCache[title] = recordToReturn
+        }
+        
+        return recordToReturn
     }
     
     // [高性能存储流水线]
