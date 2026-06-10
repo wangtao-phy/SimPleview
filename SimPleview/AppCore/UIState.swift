@@ -68,8 +68,9 @@ class UIState: ObservableObject {
         
         // 动画（0.2秒）结束后，再恢复 PDFView 的自动缩放
         if let state = state {
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) {
-                state.pdfView.autoScales = true
+            // [专家级防泄漏] 虽然延迟仅有 0.25 秒，但在复杂的视图卸载场景下，强行保留大体积的 AppState 可能引发短暂的内存峰值或卸载失败。
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) { [weak state] in
+                state?.pdfView.autoScales = true
             }
         }
     }
@@ -81,8 +82,9 @@ class UIState: ObservableObject {
             showRightSidebar.toggle()
         }
         if let state = state {
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) {
-                state.pdfView.autoScales = true
+            // [专家级防泄漏]
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) { [weak state] in
+                state?.pdfView.autoScales = true
             }
         }
     }
@@ -107,8 +109,9 @@ class UIState: ObservableObject {
             self.focusSearchTrigger = UUID()
             
             if let state = state {
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) {
-                    state.pdfView.autoScales = true
+                // [专家级防泄漏]
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) { [weak state] in
+                    state?.pdfView.autoScales = true
                 }
             }
         }

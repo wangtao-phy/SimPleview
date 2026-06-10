@@ -128,8 +128,8 @@ class GlobalAuthorManager: ObservableObject {
     // [加载数据]
     func loadAuthors() {
         let url = fileURL
-        // 这可能涉及庞大的 IO 操作，绝不能卡住主线程
-        DispatchQueue.global(qos: .userInitiated).async {
+        // [专家级防泄漏] 异步操作必须捕获 [weak self]，否则当 Manager 卸载时，后台线程将无限期强持有对象引发内存泄漏。
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
             guard FileManager.default.fileExists(atPath: url.path) else { return }
             
             do {
@@ -144,6 +144,7 @@ class GlobalAuthorManager: ObservableObject {
                 
                 // 将准备好的数据喂给 SwiftUI (主线程)
                 DispatchQueue.main.async {
+                    guard let self = self else { return }
                     self.authors = migrated
                     self.recalculateArticleCounts() // 顺手校验并重新统计所有论文的引用关系
                 }
@@ -159,7 +160,8 @@ class GlobalAuthorManager: ObservableObject {
     /// 将每一篇文献里登记的作者，反向汇总给这个作者本人，从而纠正他的 `documentIDs` 集合。
     func recalculateArticleCounts() {
         let directoryURL = ReadingTracker.shared.saveDirectoryURL
-        DispatchQueue.global(qos: .background).async {
+        // [专家级防泄漏]
+        DispatchQueue.global(qos: .background).async { [weak self] in
             do {
                 let files = try FileManager.default.contentsOfDirectory(at: directoryURL, includingPropertiesForKeys: nil)
                 let jsonFiles = files.filter { $0.pathExtension == "json" && $0.lastPathComponent != "GlobalAuthors.json" }
@@ -191,6 +193,7 @@ class GlobalAuthorManager: ObservableObject {
                 
                 // 比对并写入
                 DispatchQueue.main.async {
+                    guard let self = self else { return }
                     var changed = false
                     for (name, existing) in self.authors {
                         let actualDocs = authorToDocs[name] ?? []
