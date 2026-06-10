@@ -8,11 +8,11 @@ import PDFKit
 /// 自定义签名图片标注类
 /// 用于将通过 CoreImage 去背后的透明签名图片作为贴纸渲染在 PDF 页面上。
 class SignatureAnnotation: PDFAnnotation {
-    nonisolated(unsafe) var image: PlatformImage?
+    nonisolated(unsafe) var customCGImage: CGImage?
     
     // 初始化标注
-    init(image: PlatformImage, bounds: CGRect) {
-        self.image = image
+    init(cgImage: CGImage, bounds: CGRect) {
+        self.customCGImage = cgImage
         // 声明为 Stamp 类型，以提供更好的原生交互支持
         super.init(bounds: bounds, forType: .stamp, withProperties: nil)
     }
@@ -28,12 +28,7 @@ class SignatureAnnotation: PDFAnnotation {
     
     // 重写绘制方法，将透明签名图片绘制到标注的边界内
     nonisolated override func draw(with box: PDFDisplayBox, in context: CGContext) {
-        guard let image = image else { return }
-        #if os(macOS)
-        guard let cgImage = image.cgImage(forProposedRect: nil, context: nil, hints: nil) else { return }
-        #else
-        guard let cgImage = image.cgImage else { return }
-        #endif
+        guard let cgImage = customCGImage else { return }
         
         
         context.saveGState()

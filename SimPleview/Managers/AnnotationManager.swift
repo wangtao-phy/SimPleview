@@ -249,12 +249,12 @@ final class AnnotationManager: ObservableObject {
     // [统一架构：签名插入与标注逻辑保持一致]
     // 为了支持安全且原生的撤销 (Undo)，签名不能直接强塞给 PDFPage，必须经过 AnnotationManager 的调度和缓存！
     @discardableResult
-    func applySignature(image: PlatformImage, bounds: CGRect, to page: PDFPage, pdfView: PDFView?, onThumbnailUpdate: (Int) -> Void) -> Bool {
+    func applySignature(cgImage: CGImage, bounds: CGRect, to page: PDFPage, pdfView: PDFView?, onThumbnailUpdate: (Int) -> Void) -> Bool {
         guard let doc = page.document else { return false }
         let pageIndex = doc.index(for: page)
         
         let batchID = "S-\(Int(Date().timeIntervalSince1970))-\(UUID().uuidString.prefix(4))"
-        let annotation = SignatureAnnotation(image: image, bounds: bounds)
+        let annotation = SignatureAnnotation(cgImage: cgImage, bounds: bounds)
         annotation.userName = batchID
         annotation.modificationDate = Date()
         

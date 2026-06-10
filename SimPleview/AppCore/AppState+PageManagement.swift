@@ -152,8 +152,10 @@ extension AppState {
     
 
     #if os(macOS)
-    private func createTransparentSignature(from imageURL: URL) -> NSImage? {
-        guard let ciImage = CIImage(contentsOf: imageURL) else { return nil }
+    private func createTransparentSignature(from imageURL: URL) -> CGImage? {
+        // [极重要修复]: 必须应用图片的 EXIF 方向信息！否则手机拍的签名会因为方向不对而被挤压变形，导致“极其模糊”。
+        let options: [CIImageOption: Any] = [.applyOrientationProperty: true]
+        guard let ciImage = CIImage(contentsOf: imageURL, options: options) else { return nil }
         
         // 1. 获取灰度图（提取明暗信息）
         let monoFilter = CIFilter.photoEffectMono()
@@ -178,26 +180,21 @@ extension AppState {
         guard let finalCIImage = blendFilter.outputImage else { return nil }
         
         // 【核心修复】: 必须使用 CIContext 将 CIImage 显式渲染为高分辨率的 CGImage！
-        // 如果直接用 NSCIImageRep 包装，在 macOS Sequoia/Xcode 16 中，
-        // 延迟渲染的滤镜图在被 PDFKit 或者 SwiftUI 绘制时，会使用极低的分辨率上下文，导致提取结果极其模糊。
         let context = CIContext(options: nil)
-        guard let cgImage = context.createCGImage(finalCIImage, from: finalCIImage.extent) else { return nil }
-        
-        // 重新包装回 NSImage，基于原始像素宽高建立物理尺寸
-        let size = NSSize(width: cgImage.width, height: cgImage.height)
-        return NSImage(cgImage: cgImage, size: size)
+        return context.createCGImage(finalCIImage, from: finalCIImage.extent)
     }
 
     func processAndInsertSignature(imageURL: URL) {
-        guard let transparentImage = createTransparentSignature(from: imageURL) else { return }
+        guard let transparentCGImage = createTransparentSignature(from: imageURL) else { return }
         
         DispatchQueue.main.async { [weak self] in
             guard let self = self, let page = self.pdfView.currentPage else { return }
             
             // 计算合适的大小，限制最大宽度为 200
-            let imageSize = transparentImage.size
-            let targetWidth: CGFloat = min(200, imageSize.width)
-            let targetHeight = imageSize.height * (targetWidth / imageSize.width)
+            let cgWidth = CGFloat(transparentCGImage.width)
+            let cgHeight = CGFloat(transparentCGImage.height)
+            let targetWidth: CGFloat = min(200, cgWidth)
+            let targetHeight = cgHeight * (targetWidth / cgWidth)
             
             // 放在页面中心
             let pageBounds = page.bounds(for: .cropBox)
@@ -205,7 +202,7 @@ extension AppState {
             let y = pageBounds.midY - targetHeight / 2
             let bounds = NSRect(x: x, y: y, width: targetWidth, height: targetHeight)
             
-            self.annotationManager.applySignature(image: transparentImage, bounds: bounds, to: page, pdfView: self.pdfView) { index in
+            self.annotationManager.applySignature(cgImage: transparentCGImage, bounds: bounds, to: page, pdfView: self.pdfView) { index in
                 self.thumbnailManager.cancelThumbnail(for: index)
                 self.thumbnailManager.removeThumbnail(for: index)
                 self.generateThumbnail(for: index)
