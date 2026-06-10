@@ -137,7 +137,18 @@ class ReadingTracker: ObservableObject {
         do {
             let data = try Data(contentsOf: url)
             let decoder = JSONDecoder()
-            let record = try decoder.decode(DocumentRecord.self, from: data)
+            var record = try decoder.decode(DocumentRecord.self, from: data)
+            
+            // [极其巧妙的数据同步]
+            // 因为单个 JSON 文件不再保存作者的 bio，所以我们在这里动态向全局大字典里借用最新的 bio！
+            // 这样能保证你在 A 论文里把作者的履历更新了，打开 B 论文时，立刻就能看到更新后的履历！
+            for i in 0..<record.authors.count {
+                let name = record.authors[i].name.trimmingCharacters(in: .whitespacesAndNewlines)
+                if let globalAuthor = GlobalAuthorManager.shared.authors[name] {
+                    record.authors[i].bio = globalAuthor.bio
+                }
+            }
+            
             recordsCache[title] = record
             return record
         } catch {

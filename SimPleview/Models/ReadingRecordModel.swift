@@ -84,7 +84,7 @@ struct AuthorInfo: Codable, Identifiable, Equatable, Sendable {
         try container.encode(id, forKey: .id)
         try container.encode(firstName, forKey: .firstName)
         try container.encode(lastName, forKey: .lastName)
-        try container.encode(bio, forKey: .bio)
+        // 故意不写入 bio 字段，强制系统在打开 PDF 时去 GlobalAuthor 里拉取最新的！
     }
 }
 
