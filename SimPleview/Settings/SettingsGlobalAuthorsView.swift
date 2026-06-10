@@ -263,9 +263,10 @@ struct AuthorDetailEditor: View {
         .padding()
         // [生命周期钩子] 这个界面“一睁眼出现(appear)”的时候，立刻照着传进来的大牛抄一份数据进草稿本。
         .onAppear {
-            draftFirstName = author.firstName
-            draftLastName = author.lastName
-            draftBio = author.bio
+            syncDrafts()
+        }
+        .onChange(of: author) { newAuthor in
+            syncDrafts()
         }
         // TextEditor 没有 onSubmit 回车事件，所以只好委曲求全，只要字有一丁点变动，就立刻强制提交。
         .onChange(of: draftBio) {
@@ -280,5 +281,13 @@ struct AuthorDetailEditor: View {
         let newLast = draftLastName.trimmingCharacters(in: .whitespacesAndNewlines)
         // 命令全局大脑发动神威：全库检索并替换这个人的数据。
         globalManager.updateAuthor(oldName: author.name, newFirstName: newFirst, newLastName: newLast, newBio: draftBio)
+    }
+    
+    private func syncDrafts() {
+        draftFirstName = author.firstName
+        draftLastName = author.lastName
+        if draftBio != author.bio { // 避免光标乱跳
+            draftBio = author.bio
+        }
     }
 }
