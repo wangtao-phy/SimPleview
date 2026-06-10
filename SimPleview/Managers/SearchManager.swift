@@ -1,6 +1,6 @@
 import SwiftUI
-@preconcurrency import PDFKit
-@preconcurrency import Combine
+import PDFKit
+import Combine
 
 /// [教程注释：搜索系统引擎 (SearchManager)]
 /// `SearchManager` 负责管理 PDF 内的全局搜索逻辑：
@@ -80,7 +80,7 @@ final class SearchManager: ObservableObject {
             // 构建一个指向起始页开头的零长度 Selection，作为“光标”起点
             var currentSelection: PDFSelection? = nil
             if let startPage = safeDocument.page(at: startIndex) {
-                currentSelection = document.selection(from: startPage, atCharacterIndex: 0, to: startPage, atCharacterIndex: 0)
+                currentSelection = safeDocument.selection(from: startPage, atCharacterIndex: 0, to: startPage, atCharacterIndex: 0)
             }
             
             var matches: [SearchMatch] = []
@@ -132,7 +132,7 @@ final class SearchManager: ObservableObject {
                     let bounds = sel.selectionsByLine().map { $0.bounds(for: page) }
                     let match = SearchMatch(
                         boundsArray: bounds,
-                        pageIndex: document.index(for: page),
+                        pageIndex: safeDocument.index(for: page),
                         context: sel.string ?? ""
                     )
                     matches.append(match)
@@ -194,7 +194,7 @@ final class SearchManager: ObservableObject {
         let match = searchResults[index]
         
         // UI 更新和页面跳转必须在主线程执行
-        DispatchQueue.main.async {
+        Task { @MainActor in
             guard let pdfView = pdfView, let document = pdfView.document else { return }
             guard match.pageIndex < document.pageCount, let page = document.page(at: match.pageIndex) else { return }
             
@@ -232,35 +232,28 @@ final class SearchManager: ObservableObject {
                     return annot
                 }
                 
-                // 使用 Timer 实现平滑褪色动画 (0.5秒内褪色完毕)
-                var step = 0
-                let totalSteps = 12 // 12 帧，每帧 0.04 秒 ≈ 0.5 秒动画
-                let timer = Timer(timeInterval: 0.04, repeats: true) { t in
-                    step += 1
-                    let alpha = CGFloat(1.0 - Double(step) / Double(totalSteps))
-                    
-                    if step >= totalSteps {
-                        t.invalidate()
-                        for annot in flashAnnotations {
-                            page.removeAnnotation(annot)
-                        }
-                    } else {
-                        for annot in flashAnnotations {
-                            #if os(macOS)
-                            annot.color = NSColor.yellow.withAlphaComponent(alpha)
-                            #else
-                            annot.color = UIColor.yellow.withAlphaComponent(alpha)
-                            #endif
-                        }
-                    }
-                }
-                // 必须加入 common 模式，否则用户在滑动触控板时动画会卡顿
-                RunLoop.main.add(timer, forMode: .common)
-                
                 #if os(iOS)
                 pdfView.highlightedSelections = [selection]
                 pdfView.becomeFirstResponder()
                 #endif
+                
+                // 使用 Task.sleep 实现平滑褪色动画 (0.5秒内褪色完毕)
+                let totalSteps = 12 // 12 帧，每帧 0.04 秒 ≈ 0.5 秒动画
+                for step in 1...totalSteps {
+                    try? await Task.sleep(nanoseconds: 40_000_000)
+                    let alpha = CGFloat(1.0 - Double(step) / Double(totalSteps))
+                    for annot in flashAnnotations {
+                        #if os(macOS)
+                        annot.color = NSColor.yellow.withAlphaComponent(alpha)
+                        #else
+                        annot.color = UIColor.yellow.withAlphaComponent(alpha)
+                        #endif
+                    }
+                }
+                
+                for annot in flashAnnotations {
+                    page.removeAnnotation(annot)
+                }
             }
         }
     }
