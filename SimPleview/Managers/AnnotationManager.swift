@@ -2,6 +2,24 @@ import SwiftUI
 import PDFKit
 import Combine
 
+extension PDFAnnotation {
+    /// 用于替代原生的 `contents` 属性。
+    /// 因为只要 `contents` 有值，PDFKit 就会强制绘制一个原生的黄色便签小标记。
+    /// 为了彻底隐藏该标记，我们将备注数据存在自定义的 Key 中。
+    var simPleNote: String {
+        get {
+            if let custom = self.value(forAnnotationKey: PDFAnnotationKey(rawValue: "/SimPleNote")) as? String, !custom.isEmpty {
+                return custom
+            }
+            return self.contents ?? ""
+        }
+        set {
+            self.setValue(newValue, forAnnotationKey: PDFAnnotationKey(rawValue: "/SimPleNote"))
+            self.contents = "" // 强制清空原生 contents，彻底消除自带的小标记
+        }
+    }
+}
+
 /// [教程注释：批注管理器 (AnnotationManager)]
 /// 它的责任是：
 /// 1. 负责 PDF 中的高亮、下划线、删除线、手写笔迹的颜色设置和实时绘制
@@ -183,7 +201,7 @@ final class AnnotationManager: ObservableObject {
             // 创建 PDFKit 原生批注对象
             let annot = PDFAnnotation(bounds: line.bounds(for: page), forType: subtype, withProperties: nil)
             annot.color = color
-            annot.contents = ""
+            annot.simPleNote = ""
             annot.userName = batchID // 借用 userName 存我们的内部 ID
             
             // 真正将批注写入该页面

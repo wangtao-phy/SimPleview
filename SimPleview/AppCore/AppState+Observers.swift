@@ -22,13 +22,13 @@ extension AppState {
                     for i in start..<end {
                         if let searchPage = doc.page(at: i) {
                             for searchAnnot in searchPage.annotations where searchAnnot.userName == id {
-                                searchAnnot.contents = text
+                                searchAnnot.simPleNote = text
                                 searchAnnot.modificationDate = Date()
                             }
                         }
                     }
                 } else {
-                    annot.contents = text // 兜底
+                    annot.simPleNote = text // 兜底
                     annot.modificationDate = Date()
                 }
                 self?.isDirty = true

@@ -184,7 +184,7 @@ struct AnnotationRow: View {
             
             // [底部文本展示区]
             // 用户逻辑：1. 不需要状态，直接读取内容。 2. 必须预留展示空间。 3. 支持超长文本局部滚动。
-            let text = annotation.contents ?? ""
+            let text = annotation.simPleNote
             if text.isEmpty {
                 Text(" ")
                     .font(.system(size: PlatformUtils.isiOS ? 16 : 11))

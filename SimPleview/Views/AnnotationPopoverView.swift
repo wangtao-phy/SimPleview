@@ -19,7 +19,7 @@ struct AnnotationPopoverView: View {
         // [核心修复]：必须在初始化时直接赋予真实值，而不能等于 ""！
         // 否则 SwiftUI 的 onReceive 会在视图刚挂载（onAppear 还没来得及运行）的瞬间，
         // 带着默认的 "" 触发第一次回调，直接把底层数据全部清空！
-        self._text = State(initialValue: annotation.contents ?? "")
+        self._text = State(initialValue: annotation.simPleNote)
     }
     
     var body: some View {
@@ -69,7 +69,7 @@ struct AnnotationPopoverView: View {
                 .onDisappear {
                     // [节约模式下的防御性同步]
                     // 无论什么模式，关闭悬浮窗时都进行最后一次兜底同步
-                    if text != (annotation.contents ?? "") {
+                    if text != annotation.simPleNote {
                         onContentsChanged(annotation, text)
                     }
                 }
@@ -78,7 +78,7 @@ struct AnnotationPopoverView: View {
                     guard !isSyncing else { return }
                     // 性能模式：极速实时同步（所见即所得）
                     if MemoryMode.current.policy.syncAnnotationsInRealtime {
-                        if newValue != (annotation.contents ?? "") {
+                        if newValue != annotation.simPleNote {
                             isSyncing = true
                             onContentsChanged(annotation, newValue)
                             DispatchQueue.main.async { isSyncing = false }
@@ -87,7 +87,7 @@ struct AnnotationPopoverView: View {
                 }
                 .onAppear {
                     // 每次被赋予全新的 showID 时，触发 onAppear 强行抓取真实的 contents
-                    text = annotation.contents ?? ""
+                    text = annotation.simPleNote
                 }
         }
         .padding(12)

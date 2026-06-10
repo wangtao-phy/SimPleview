@@ -132,7 +132,7 @@ extension CustomPDFView {
         // 每次点击边框必定新建！保证完美的初始尺寸计算和原生的毛玻璃穿透
         let popoverView = AnnotationPopoverView(annotation: annotation) { [weak self] annot, newText in
             guard let self = self else { return }
-            annot.contents = newText
+            annot.simPleNote = newText
             self.onAnnotationContentsChanged?(annot, newText)
         }
         

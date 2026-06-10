@@ -110,7 +110,7 @@ extension CustomPDFView {
             // 生成官方 PDF 规范承认的 .ink (墨水) 格式批注对象！
             let annot = PDFAnnotation(bounds: finalBounds, forType: .ink, withProperties: nil)
             annot.userName = batchID // 藏入我们自定义的批次 ID
-            annot.contents = ""
+            annot.simPleNote = ""
             annot.color = self.manager?.pendingColorOverride ?? self.manager?.inkColor ?? UIColor.systemBlue
             
             // 归一化偏移量 (PDFKit 内部计算要求)
