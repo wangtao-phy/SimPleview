@@ -142,6 +142,10 @@ struct ContentView: View {
                 ))
                 #endif
         }
+        #if os(macOS)
+        .toolbarBackground(.ultraThinMaterial, for: .windowToolbar)
+        .toolbarBackground(.visible, for: .windowToolbar)
+        #endif
         // [核心概念：环境聚焦值传递]
         // 让整个应用里所有的“专注事件” (如菜单栏快捷键) 都能顺利找到我！
         .focusedSceneValue(\.appState, state)
@@ -431,8 +435,6 @@ struct MacToolbarModifier: ViewModifier {
                 .customizationBehavior(.disabled)
             }
             .toolbarRole(.editor)
-            .toolbarBackground(.ultraThinMaterial, for: .windowToolbar)
-            .toolbarBackground(.visible, for: .windowToolbar)
     }
 }
 
