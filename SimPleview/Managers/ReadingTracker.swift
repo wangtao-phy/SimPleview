@@ -70,23 +70,23 @@ class ReadingTracker: ObservableObject {
         // 注册各种乱七八糟的系统通知。
         // 目的是：不管是在 Mac 还是 iOS，只要应用被推到后台，或者被强制杀死，我们都能第一时间接到通知！
         #if os(macOS)
-        NotificationCenter.default.addObserver(forName: NSApplication.willResignActiveNotification, object: nil, queue: .main) { _ in
+        NotificationCenter.default.addObserver(forName: NSApplication.willResignActiveNotification, object: nil, queue: .main) { [weak self] _ in
             Task { @MainActor [weak self] in self?.handleAppDeactivated() }
         }
-        NotificationCenter.default.addObserver(forName: NSApplication.didBecomeActiveNotification, object: nil, queue: .main) { _ in
+        NotificationCenter.default.addObserver(forName: NSApplication.didBecomeActiveNotification, object: nil, queue: .main) { [weak self] _ in
             Task { @MainActor [weak self] in self?.handleAppActivated() }
         }
-        NotificationCenter.default.addObserver(forName: NSApplication.willTerminateNotification, object: nil, queue: .main) { _ in
+        NotificationCenter.default.addObserver(forName: NSApplication.willTerminateNotification, object: nil, queue: .main) { [weak self] _ in
             Task { @MainActor [weak self] in self?.handleAppDeactivated() }
         }
         #else
-        NotificationCenter.default.addObserver(forName: UIApplication.didEnterBackgroundNotification, object: nil, queue: .main) { _ in
+        NotificationCenter.default.addObserver(forName: UIApplication.didEnterBackgroundNotification, object: nil, queue: .main) { [weak self] _ in
             Task { @MainActor [weak self] in self?.handleAppDeactivated() }
         }
-        NotificationCenter.default.addObserver(forName: UIApplication.willEnterForegroundNotification, object: nil, queue: .main) { _ in
+        NotificationCenter.default.addObserver(forName: UIApplication.willEnterForegroundNotification, object: nil, queue: .main) { [weak self] _ in
             Task { @MainActor [weak self] in self?.handleAppActivated() }
         }
-        NotificationCenter.default.addObserver(forName: UIApplication.willTerminateNotification, object: nil, queue: .main) { _ in
+        NotificationCenter.default.addObserver(forName: UIApplication.willTerminateNotification, object: nil, queue: .main) { [weak self] _ in
             Task { @MainActor [weak self] in self?.handleAppDeactivated() }
         }
         #endif
@@ -169,7 +169,7 @@ class ReadingTracker: ObservableObject {
         }
         
         // 第二步：拿着数据的快照，跑去后台线程进行 CPU 密集型的 JSON 编码和硬盘读写操作
-        DispatchQueue.global(qos: .background).async {
+        DispatchQueue.global(qos: .background).async { [weak self] in
             let encoder = JSONEncoder()
             encoder.outputFormatting = .prettyPrinted
             

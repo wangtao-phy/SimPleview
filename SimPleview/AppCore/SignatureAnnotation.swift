@@ -8,7 +8,7 @@ import PDFKit
 /// 自定义签名图片标注类
 /// 用于将通过 CoreImage 去背后的透明签名图片作为贴纸渲染在 PDF 页面上。
 class SignatureAnnotation: PDFAnnotation {
-    var image: PlatformImage?
+    nonisolated(unsafe) var image: PlatformImage?
     
     // 初始化标注
     init(image: PlatformImage, bounds: CGRect) {

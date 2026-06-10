@@ -21,7 +21,7 @@ extension AppState {
         uiState.columnVisibility = .detailOnly
         uiState.showRightSidebar = false
         
-        DispatchQueue.main.async { [weak self, weak window] in
+        DispatchQueue.main.async { [weak self, weak window, weak uiState] in
             guard let self = self, let win = window else { return }
             // 3. 将 PDF 的排版强制切换成“幻灯片排版”：每次只显示完整的一页
             self.pdfView.displayMode = .singlePage

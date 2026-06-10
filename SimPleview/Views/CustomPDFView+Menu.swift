@@ -20,7 +20,7 @@ extension CustomPDFView {
             colorObserver?.invalidate()
             colorObserver = annotation.observe(\.color, options: [.new]) { [weak self] annot, _ in
                 nonisolated(unsafe) let safeAnnot = annot
-                Task { @MainActor in
+                Task { @MainActor [weak self] in
                     self?.syncBatchColor(for: safeAnnot)
                 }
             }

@@ -57,7 +57,7 @@ final class ThumbnailManager: ObservableObject {
         
         // 仅监听 memoryMode 键的变化，避免任意 UserDefaults 变更都触发缓存策略重评估
         NotificationCenter.default.addObserver(forName: UserDefaults.didChangeNotification, object: nil, queue: .main) { [weak self] _ in
-            Task { @MainActor in
+            Task { @MainActor [weak self] in
                 guard let self = self else { return }
                 let newMode = MemoryMode.current
                 if self.currentMemoryMode != newMode {
