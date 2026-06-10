@@ -52,53 +52,52 @@ struct AnnotationSidebarView: View {
                 .listStyle(.plain)
                 #else
                 // [macOS 专用列表]
-                // Mac 上因为需要精确控制键盘焦点、上下方向键导航，所以弃用 List，改用 ScrollView + LazyVStack 手动打造
+                // 响应用户需求：使用原生左滑删除替代右键菜单，这要求我们必须使用原生的 List 组件。
                 ScrollViewReader { proxy in // 用于代码控制滚动条的位置
-                    ScrollView {
-                        LazyVStack(spacing: 0) {
-                            ForEach(state.allAnnotations, id: \.safeID) { annotation in
-                                let id = annotation.safeID
-                                let isSelected = state.selectedAnnotation?.userName == id
-                                
-                                AnnotationRow(annotation: annotation, isSelected: isSelected, focusedField: $focusedField, onSelect: {
+                    List {
+                        ForEach(state.allAnnotations, id: \.safeID) { annotation in
+                            let id = annotation.safeID
+                            let isSelected = state.selectedAnnotation?.userName == id
+                            
+                            AnnotationRow(annotation: annotation, isSelected: isSelected, focusedField: $focusedField, onSelect: {
+                                state.selectedAnnotation = annotation
+                                focusedField = id
+                            })
+                                // [键盘事件拦截] 仅当这一行被选中时，按下 Delete 或 Backspace 键才触发删除
+                                .onKeyPress(.delete) {
+                                    if focusedField == id {
+                                        state.deleteSelectedAnnotation()
+                                        return .handled
+                                    }
+                                    return .ignored
+                                }
+                                .onKeyPress("\u{7F}") {
+                                    if focusedField == id {
+                                        state.deleteSelectedAnnotation()
+                                        return .handled
+                                    }
+                                    return .ignored
+                                }
+                                .onTapGesture {
                                     state.selectedAnnotation = annotation
                                     focusedField = id
-                                })
-                                        // [键盘事件拦截] 仅当这一行被选中时，按下 Delete 或 Backspace 键才触发删除
-                                        .onKeyPress(.delete) {
-                                            if focusedField == id {
-                                                state.deleteSelectedAnnotation()
-                                                return .handled
-                                            }
-                                            return .ignored
-                                        }
-                                        .onKeyPress("\u{7F}") {
-                                            if focusedField == id {
-                                                state.deleteSelectedAnnotation()
-                                                return .handled
-                                            }
-                                            return .ignored
-                                        }
-                                        .onTapGesture {
-                                            state.selectedAnnotation = annotation
-                                            focusedField = id
-                                        }
-                                .id(annotation.safeID)
-                                .contextMenu { // 原生右键菜单
-                                    Button(role: .destructive) {
-                                        state.selectedAnnotation = annotation
-                                        state.deleteSelectedAnnotation()
-                                    } label: {
-                                        Label("删除标注", systemImage: "trash")
-                                    }
                                 }
-                                
-                                // 自定义分割线
-                                Divider().padding(.leading, 40).opacity(isSelected ? 0 : 1)
+                            .id(annotation.safeID)
+                            // [原生的左滑删除] 替代了原来的右键删除 (.contextMenu)
+                            .swipeActions(edge: .trailing, allowsFullSwipe: true) {
+                                Button(role: .destructive) {
+                                    state.deleteAnnotation(annotation)
+                                } label: {
+                                    Label("删除", systemImage: "trash")
+                                }
                             }
+                            // 消除 List 默认边距，实现无缝贴合
+                            .listRowInsets(EdgeInsets())
+                            .listRowBackground(Color.clear)
+                            .listRowSeparator(.visible, edges: .bottom)
                         }
-                        .padding(.vertical, 8)
                     }
+                    .listStyle(.plain)
                     // [主视图同步侧边栏]
                     // 当主视图点击了标注，这里的 selectedAnnotation 也会变，我们让列表自动滚动过去
                     .onChange(of: state.selectedAnnotation) { _, newSelection in

@@ -22,6 +22,9 @@ extension CustomPDFView {
     }
     
     override func mouseDown(with event: NSEvent) {
+        // [关键修复：焦点抢占] 当从侧边栏或悬浮窗点击进来时，PDFView 必须夺回 FirstResponder 身份，否则后续的 Backspace 键盘事件(keyDown) 会被系统丢弃！
+        self.window?.makeFirstResponder(self)
+        
         guard event.type == .leftMouseDown else {
             super.mouseDown(with: event)
             return
