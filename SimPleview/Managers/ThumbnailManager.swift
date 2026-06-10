@@ -4,11 +4,15 @@ import Combine
 
 /// 解决 Swift 6 中非 Sendable 类型弱引用捕获的问题
 final class WeakPDFBox: @unchecked Sendable {
-    weak var doc: PDFDocument?
-    weak var page: PDFPage?
+    nonisolated(unsafe) private let docTable = NSHashTable<PDFDocument>.weakObjects()
+    nonisolated(unsafe) private let pageTable = NSHashTable<PDFPage>.weakObjects()
+    
+    nonisolated var doc: PDFDocument? { docTable.allObjects.first }
+    nonisolated var page: PDFPage? { pageTable.allObjects.first }
+    
     init(doc: PDFDocument?, page: PDFPage?) {
-        self.doc = doc
-        self.page = page
+        if let doc = doc { docTable.add(doc) }
+        if let page = page { pageTable.add(page) }
     }
 }
 
@@ -135,16 +139,35 @@ final class ThumbnailManager: ObservableObject {
             return
         }
         
+        // [极速 OOM 保护] 缩略图并发爆炸修复：
+        // 疯狂滑动时可能瞬间产生几百个尚未执行的画图任务，这会导致巨大的内存排队压力。
+        // 如果排队任务过多，直接把旧任务全部砍掉，只保留最新的视野范围。
+        lock.lock()
+        if operations.count > 60 {
+            renderQueue.cancelAllOperations()
+            operations.removeAll()
+            generatingIndices.removeAll()
+            // 注意这里不直接 return，允许这个最新的任务入队
+        }
+        lock.unlock()
+        
+        // [内存泄漏终极修复]：必须使用 WeakPDFBox 弱引用 doc 和 page！
+        // 否则 Swift 的闭包会死死抓住这几百个非 Sendable 的 PDFPage 对象不放，
+        // 导致用户哪怕关掉了文档，内存里依然残留几百 MB 的 PDF 无法被释放！
+        let box = WeakPDFBox(doc: doc, page: page)
         nonisolated(unsafe) let safeCurrentDocChecker = currentDocChecker
-        nonisolated(unsafe) let safeDoc = doc
-        nonisolated(unsafe) let safePage = page
         let maxEdge = currentMemoryMode.policy.thumbnailMaxEdge
         
         let operation = BlockOperation()
-        // [内存泄漏终极修复]：必须弱引用 doc 和 page！否则排队中的几十个任务会死死抓住 PDF 文档不放，导致关掉窗口后内存依然被几百兆地占用！
         operation.addExecutionBlock { [weak self, weak operation] in
-            guard let self = self, let operation = operation, !operation.isCancelled, safeCurrentDocChecker(safeDoc) else {
+            guard let self = self, let operation = operation, !operation.isCancelled else {
                 DispatchQueue.main.async { self?.markAsFinished(index) }
+                return
+            }
+            
+            // 安全解包弱引用的文档和页面
+            guard let safeDoc = box.doc, let safePage = box.page, safeCurrentDocChecker(safeDoc) else {
+                DispatchQueue.main.async { self.markAsFinished(index) }
                 return
             }
             
@@ -179,8 +202,9 @@ final class ThumbnailManager: ObservableObject {
                 }
                 
                 // 画好了，通知主线程更新 UI
+                nonisolated(unsafe) let mainSafeDoc = safeDoc
                 DispatchQueue.main.async { [weak self] in
-                    guard let self = self, safeCurrentDocChecker(safeDoc) else { return }
+                    guard let self = self, safeCurrentDocChecker(mainSafeDoc) else { return }
                     
                     // 1. 存入安全的原生 NSCache
                     self.nscache.setObject(thumb, forKey: NSNumber(value: index))
