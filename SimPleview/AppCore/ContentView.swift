@@ -44,6 +44,9 @@ struct ContentView: View {
     @State private var hostingWindow: NSWindow?
     #endif
     
+    // 监听休眠时间的改变，以便实时对处于后台的标签页生效
+    @AppStorage("hibernationTimeoutStr") var hibernationTimeoutStr: String = "20"
+    
     /// 初始化函数（根据是否传了 URL 来创建不同的状态引擎）
     init(url: URL? = nil) {
         // [底层逻辑：手动初始化 @StateObject]
@@ -198,6 +201,13 @@ struct ContentView: View {
                         state.autoTagDocumentIfCompleted(url: doc.url)
                     }
                 }
+            }
+        }
+        // 当用户在设置中改变了休眠时间：
+        // 只有那些当前不在焦点（后台）的窗口，才需要用新时间重新启动一轮休眠倒计时。
+        .onChange(of: hibernationTimeoutStr) { _, _ in
+            if let window = hostingWindow, !window.isKeyWindow {
+                state.scheduleHibernation()
             }
         }
         #endif

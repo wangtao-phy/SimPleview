@@ -31,6 +31,15 @@ struct WindowAccessor: NSViewRepresentable {
                 if let wc = newWindow?.windowController as? AppWindowController, let state = state {
                     wc.appState = state
                 }
+                
+                // [P0 级核心修复：后台标签页休眠丢失 Bug]
+                // 场景：App 启动时恢复了 10 个标签页，或者用户在后台新开了一个标签页。
+                // 这些标签页在创建时默认就是“非活跃”状态，因此它们永远不会触发 didResignKeyNotification。
+                // 导致它们永远无法进入休眠逻辑，内存一直被占满。
+                // 修复：当视图刚被挂载到窗口时，如果发现自己不是焦点窗口，立刻强制启动休眠倒计时！
+                if let window = newWindow, !window.isKeyWindow {
+                    state?.scheduleHibernation()
+                }
             }
         }
         return view
