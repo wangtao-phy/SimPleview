@@ -5,17 +5,22 @@ import Combine
 extension PDFAnnotation {
     /// 用于替代原生的 `contents` 属性。
     /// 因为只要 `contents` 有值，PDFKit 就会强制绘制一个原生的黄色便签小标记。
-    /// 为了彻底隐藏该标记，我们将备注数据存在自定义的 Key 中。
+    /// 为了彻底隐藏该标记，我们将备注数据存在原生的 subject 字段中（通常不触发标记）。
     var simPleNote: String {
         get {
-            if let custom = self.value(forAnnotationKey: PDFAnnotationKey(rawValue: "/SimPleNote")) as? String, !custom.isEmpty {
-                return custom
+            if let subj = self.value(forAnnotationKey: PDFAnnotationKey(rawValue: "/Subj")) as? String, !subj.isEmpty {
+                return subj
             }
             return self.contents ?? ""
         }
         set {
-            self.setValue(newValue, forAnnotationKey: PDFAnnotationKey(rawValue: "/SimPleNote"))
-            self.contents = "" // 强制清空原生 contents，彻底消除自带的小标记
+            if newValue.isEmpty {
+                self.removeValue(forAnnotationKey: PDFAnnotationKey(rawValue: "/Subj"))
+            } else {
+                self.setValue(newValue, forAnnotationKey: PDFAnnotationKey(rawValue: "/Subj"))
+            }
+            // 关键：必须赋值 nil，彻底从 PDF 字典中抹去 contents 键
+            self.contents = nil 
         }
     }
 }
@@ -201,7 +206,6 @@ final class AnnotationManager: ObservableObject {
             // 创建 PDFKit 原生批注对象
             let annot = PDFAnnotation(bounds: line.bounds(for: page), forType: subtype, withProperties: nil)
             annot.color = color
-            annot.simPleNote = ""
             annot.userName = batchID // 借用 userName 存我们的内部 ID
             
             // 真正将批注写入该页面
