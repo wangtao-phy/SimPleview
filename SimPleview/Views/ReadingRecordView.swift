@@ -342,13 +342,17 @@ struct AuthorInputView: View {
         VStack(alignment: .leading, spacing: 4) {
             HStack(spacing: 8) {
                 // 使用我们刚刚加工过的带有“监听窃听器”的数据管线
-                TextField(state.L("Last Name"), text: lastNameBinding)
-                    .textFieldStyle(RoundedBorderTextFieldStyle())
-                    .onSubmit { handleCommit() }
+                TextField(state.L("Last Name"), text: lastNameBinding, onEditingChanged: { isEditing in
+                    if !isEditing { handleCommit() }
+                })
+                .textFieldStyle(RoundedBorderTextFieldStyle())
+                .onSubmit { handleCommit() }
                 
-                TextField(state.L("First Name"), text: firstNameBinding)
-                    .textFieldStyle(RoundedBorderTextFieldStyle())
-                    .onSubmit { handleCommit() }
+                TextField(state.L("First Name"), text: firstNameBinding, onEditingChanged: { isEditing in
+                    if !isEditing { handleCommit() }
+                })
+                .textFieldStyle(RoundedBorderTextFieldStyle())
+                .onSubmit { handleCommit() }
             }
             
             // 如果底层大数据库搜出东西来了，我们在输入框下方把它像列表一样弹出来 (类似于百度搜索下拉框)
@@ -385,11 +389,15 @@ struct AuthorInputView: View {
                 .padding(.bottom, 4)
             }
             
-            TextField(state.L("Author Bio"), text: $author.bio)
-                .textFieldStyle(RoundedBorderTextFieldStyle())
-                .onSubmit {
+            TextField(state.L("Author Bio"), text: $author.bio, onEditingChanged: { isEditing in
+                if !isEditing {
                     onCommit()
                 }
+            })
+            .textFieldStyle(RoundedBorderTextFieldStyle())
+            .onSubmit {
+                onCommit()
+            }
         }
     }
     
