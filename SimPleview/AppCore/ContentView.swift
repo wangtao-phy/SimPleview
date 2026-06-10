@@ -68,84 +68,82 @@ struct ContentView: View {
                 // 限制左栏宽度拉伸范围
                 .navigationSplitViewColumnWidth(min: 150, ideal: 200, max: 280)
         } detail: {
-            // [中间主内容区]
-            PDFContainerView
-                .navigationTitle(PlatformUtils.isiOS ? "" : state.fileName)
-                #if os(iOS)
-                // iOS 专用的导航栏排版
-                .toolbar {
-                    // [教程注释：ToolbarItemGroup]
-                    // 它可以把一堆按钮塞进导航栏的左上角 (navigationBarLeading)。
-                    ToolbarItemGroup(placement: .navigationBarLeading) {
-                        HStack(spacing: 2) {
-                            Button(action: state.goBack) {
-                                Image(systemName: "chevron.left").fontWeight(.bold)
-                            }
-                            // .disabled() 也是 SwiftUI 非常典型的响应式修饰符。
-                            // 当历史记录为空时，后退按钮自动变灰，完全不需要写手动判断逻辑。
-                            .disabled(state.navigationHistory.isEmpty)
-                            pageNumberInput
-                        }
-                    }
-                }
-                .toolbar {
-                    if uiState.showActionGroup {
-                        ToolbarItem(placement: .navigationBarTrailing) {
-                            ActionGroupView(state: state, uiState: uiState) {
-                                isImporting = true
+            HStack(spacing: 0) {
+                // [中间主内容区]
+                PDFContainerView
+                    .navigationTitle(PlatformUtils.isiOS ? "" : state.fileName)
+                    #if os(iOS)
+                    // iOS 专用的导航栏排版
+                    .toolbar {
+                        // [教程注释：ToolbarItemGroup]
+                        // 它可以把一堆按钮塞进导航栏的左上角 (navigationBarLeading)。
+                        ToolbarItemGroup(placement: .navigationBarLeading) {
+                            HStack(spacing: 2) {
+                                Button(action: state.goBack) {
+                                    Image(systemName: "chevron.left").fontWeight(.bold)
+                                }
+                                // .disabled() 也是 SwiftUI 非常典型的响应式修饰符。
+                                // 当历史记录为空时，后退按钮自动变灰，完全不需要写手动判断逻辑。
+                                .disabled(state.navigationHistory.isEmpty)
+                                pageNumberInput
                             }
                         }
                     }
-                }
-                .toolbar {
-                    if uiState.showAnnotationGroup {
+                    .toolbar {
+                        if uiState.showActionGroup {
+                            ToolbarItem(placement: .navigationBarTrailing) {
+                                ActionGroupView(state: state, uiState: uiState) {
+                                    isImporting = true
+                                }
+                            }
+                        }
+                    }
+                    .toolbar {
+                        if uiState.showAnnotationGroup {
+                            ToolbarItem(placement: .navigationBarTrailing) {
+                                AnnotationGroupView(state: state, uiState: uiState)
+                            }
+                        }
+                    }
+                    .toolbar {
                         ToolbarItem(placement: .navigationBarTrailing) {
-                            AnnotationGroupView(state: state, uiState: uiState)
+                            Button(action: { state.rotateCurrentPageLeft() }) {
+                                Image(systemName: "rotate.left")
+                            }
                         }
                     }
-                }
-                .toolbar {
-                    ToolbarItem(placement: .navigationBarTrailing) {
-                        Button(action: { state.rotateCurrentPageLeft() }) {
-                            Image(systemName: "rotate.left")
+                    .toolbar {
+                        if uiState.showColorGroup {
+                            ToolbarItem(placement: .navigationBarTrailing) {
+                                ColorGroupView(state: state, uiState: uiState)
+                            }
                         }
                     }
-                }
-                .toolbar {
-                    if uiState.showColorGroup {
-                        ToolbarItem(placement: .navigationBarTrailing) {
-                            ColorGroupView(state: state, uiState: uiState)
-                        }
+                    .popover(isPresented: $uiState.isShowingToolbarCustomizer) {
+                        ToolbarSelectionWindow(uiState: uiState)
                     }
-                }
-                .popover(isPresented: $uiState.isShowingToolbarCustomizer) {
-                    ToolbarSelectionWindow(uiState: uiState)
-                }
-                #endif
-                // [UI 布局：全新的 Inspector 右栏]
-                // inspector() 是比 sheet 更好用的一种右侧弹出面板（类似 Xcode 右边的属性检查器）。
-                .inspector(isPresented: Binding(
-                    get: { uiState.showRightSidebar && !uiState.isSlideshowActive },
-                    set: { uiState.showRightSidebar = $0 }
-                )) {
+                    #endif
+                    // 如果处于幻灯片演示模式，强行隐藏所有工具栏，只留全屏幕黑框
+                    .toolbar(uiState.isSlideshowActive ? .hidden : .visible)
+                    #if os(macOS)
+                    .modifier(MacToolbarModifier(
+                        state: state,
+                        uiState: uiState,
+                        shortcutManager: shortcutManager,
+                        pageNumberInput: AnyView(pageNumberInput)
+                    ))
+                    #endif
+                
+                // [右侧边栏]
+                // 变通方案：直接放在 HStack 里，这样它的高度自然会受到安全区域（Toolbar 底部）的限制，
+                // 分割线绝不会穿透到 Toolbar 上，完美解决重叠问题！
+                if uiState.showRightSidebar && !uiState.isSlideshowActive {
+                    Divider()
                     RightSidebarView(state: state, uiState: uiState)
-                        .inspectorColumnWidth(min: 200, ideal: 250, max: 400)
+                        .frame(width: 250)
                 }
-                // 如果处于幻灯片演示模式，强行隐藏所有工具栏，只留全屏幕黑框
-                .toolbar(uiState.isSlideshowActive ? .hidden : .visible)
-                #if os(macOS)
-                .modifier(MacToolbarModifier(
-                    state: state,
-                    uiState: uiState,
-                    shortcutManager: shortcutManager,
-                    pageNumberInput: AnyView(pageNumberInput)
-                ))
-                #endif
+            }
         }
-        #if os(macOS)
-        .toolbarBackground(.ultraThinMaterial, for: .windowToolbar)
-        .toolbarBackground(.visible, for: .windowToolbar)
-        #endif
         // [核心概念：环境聚焦值传递]
         // 让整个应用里所有的“专注事件” (如菜单栏快捷键) 都能顺利找到我！
         .focusedSceneValue(\.appState, state)
