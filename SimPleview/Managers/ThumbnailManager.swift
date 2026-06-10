@@ -138,7 +138,7 @@ final class ThumbnailManager: ObservableObject {
         nonisolated(unsafe) let safeCurrentDocChecker = currentDocChecker
         nonisolated(unsafe) let safeDoc = doc
         nonisolated(unsafe) let safePage = page
-        let safeMemoryMode = currentMemoryMode
+        let maxEdge = currentMemoryMode.policy.thumbnailMaxEdge
         
         let operation = BlockOperation()
         // [内存泄漏终极修复]：必须弱引用 doc 和 page！否则排队中的几十个任务会死死抓住 PDF 文档不放，导致关掉窗口后内存依然被几百兆地占用！
@@ -159,7 +159,7 @@ final class ThumbnailManager: ObservableObject {
                 let effectiveWidth = isRotated ? pageBounds.height : pageBounds.width
                 let effectiveHeight = isRotated ? pageBounds.width : pageBounds.height
                 
-                let maxEdge: CGFloat = safeMemoryMode.policy.thumbnailMaxEdge
+                // maxEdge 已经在主线程提前获取
                 let targetSize: CGSize
                 if effectiveWidth > effectiveHeight {
                     // 横向页面（如 PPT）

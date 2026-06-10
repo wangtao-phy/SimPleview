@@ -35,10 +35,12 @@ extension AppState {
         
         // [性能优化：后台线程解析 PDF]
         // 有些几百兆的学术巨作，如果在主线程打开，整个 App 会卡死好几秒。
-        // 所以我们用 `DispatchQueue.global(qos: .userInteractive)` 在高优先级后台线程读取文件。
-        DispatchQueue.global(qos: .userInteractive).async { [weak self] in
+        // 所以我们在高优先级后台线程读取文件。
+        Task.detached(priority: .userInitiated) { [weak self] in
             // 开始申请访问这个文件的系统级授权
-            let accessing = self?.documentManager.handleDocumentAccess(url: targetURL) ?? false
+            let accessing = await MainActor.run {
+                self?.documentManager.handleDocumentAccess(url: targetURL) ?? false
+            }
             
             // [系统架构级决策：为什么必须使用 URL 而不能用 Data(mmap) 避开缓存]
             // PDFKit 底层与基于 URL 的系统级全局缓存深度绑定。虽然这会导致关闭文档后内存看似无法立刻释放（表现为系统的 Purgeable 可回收缓存），

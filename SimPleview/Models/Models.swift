@@ -44,7 +44,7 @@ enum MemoryMode: String, CaseIterable {
     // 如果后台线程在同一微秒因为通知唤醒并试图获取锁，就会引发典型的“重入死锁 (Reentrancy Deadlock)”，导致界面彻底卡死闪退。
     // 事实证明：Apple 的 `UserDefaults.standard` 底层 (CFPreferences) 已经用 C++ 实现了极致性能的共享内存映射，
     // 读取一次仅需不到 1 微秒，并且绝对保证线程安全。因此直接透传读取，是既安全又极速的终极方案。
-    static var current: MemoryMode {
+    nonisolated static var current: MemoryMode {
         let raw = UserDefaults.standard.string(forKey: "memoryMode") ?? "saving"
         return MemoryMode(rawValue: raw) ?? .saving
     }

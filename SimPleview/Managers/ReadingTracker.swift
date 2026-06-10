@@ -169,7 +169,7 @@ class ReadingTracker: ObservableObject {
         }
         
         // 第二步：拿着数据的快照，跑去后台线程进行 CPU 密集型的 JSON 编码和硬盘读写操作
-        DispatchQueue.global(qos: .background).async { [weak self] in
+        DispatchQueue.global(qos: .background).async { [weak self, recordsToSave] in
             let encoder = JSONEncoder()
             encoder.outputFormatting = .prettyPrinted
             

@@ -94,7 +94,7 @@ extension PlatformColor {
 extension PDFPage {
     // 统一各个平台提取 PDF 页面缩略图的方法。虽然目前名字一样，但有时候两个平台的 API 会有细微的参数差别，
     // 把它们包裹在一个自定义函数里能有效隔离风险。
-    func platformThumbnail(of size: CGSize, for box: PDFDisplayBox) -> PlatformImage {
+    nonisolated func platformThumbnail(of size: CGSize, for box: PDFDisplayBox) -> PlatformImage {
         // 节约模式：手动使用底层的 CGContext 绘制缩略图，避免原生 thumbnail() 产生的底层缓存
         if MemoryMode.current == .saving {
             #if os(macOS)

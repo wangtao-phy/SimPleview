@@ -18,7 +18,7 @@ struct GlobalAuthor: Codable, Identifiable, Equatable {
     // [动态计算属性：智能姓名拼接]
     // 这是个很有意思的细节：中文习惯姓在前名在后（如 王涛），而英文习惯名在前姓在后（如 John Doe）。
     // 这个属性会自动侦测如果是中文字符，就去掉中间的空格。
-    var name: String {
+    nonisolated var name: String {
         let first = firstName.trimmingCharacters(in: .whitespacesAndNewlines)
         let last = lastName.trimmingCharacters(in: .whitespacesAndNewlines)
         if first.isEmpty { return last }
@@ -34,7 +34,7 @@ struct GlobalAuthor: Codable, Identifiable, Equatable {
     
     // [底层转换：拼音首字母提取]
     // 为了实现类似通讯录右侧边栏那种 A-Z 导航条的需求。
-    var pinyinInitial: String {
+    nonisolated var pinyinInitial: String {
         let last = lastName.trimmingCharacters(in: .whitespacesAndNewlines)
         let nameToUse = last.isEmpty ? firstName : last
         guard !nameToUse.isEmpty else { return "#" }

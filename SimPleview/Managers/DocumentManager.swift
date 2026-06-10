@@ -100,7 +100,7 @@ final class DocumentManager: ObservableObject {
         saveWorkItem?.cancel()
 
         // 提取闭包：这是真正的存盘核心动作
-        let performWrite = { [weak self] in
+        let performWrite: @Sendable () -> Void = { [weak self] in
             // 在写入前请求系统的安全写入权限
             let accessing = url.startAccessingSecurityScopedResource()
             defer { if accessing { url.stopAccessingSecurityScopedResource() } }

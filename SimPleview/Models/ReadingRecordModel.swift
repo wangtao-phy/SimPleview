@@ -14,7 +14,7 @@ struct AuthorInfo: Codable, Identifiable, Equatable, Sendable {
     
     // [教程注释：计算属性处理中英文字符]
     // 动态计算作者的完整显示名称。
-    var name: String {
+    nonisolated var name: String {
         // [逻辑流程]
         // 1. 去除首尾的空格和换行符，防止用户输入脏数据
         let first = firstName.trimmingCharacters(in: .whitespacesAndNewlines)
