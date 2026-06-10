@@ -401,6 +401,7 @@ struct MacToolbarModifier: ViewModifier {
                         SignaturePopoverView(state: state, uiState: uiState)
                     }
                 }
+                .customizationBehavior(.disabled) // [极其关键的修复] macOS SwiftUI Bug: 带有 .popover 的 ToolbarItem 放入自定义面板时会引发 AppKit Layout 瀑布流死循环崩溃。
                 ToolbarItem(id: "RotateLeft", placement: .primaryAction) {
                     Button(action: { state.rotateCurrentPageLeft() }) { Label(state.L("Rotate Left"), systemImage: "rotate.left") }
                     .disabled(state.fileURL == nil)
@@ -411,8 +412,7 @@ struct MacToolbarModifier: ViewModifier {
                 }
                 ToolbarItem(id: "Browser", placement: .primaryAction) {
                     Button(action: { state.openInBrowser() }) { Label(state.L("Browser"), systemImage: "safari") }
-                    .keyboardShortcut(shortcutManager.openInBrowser.keyEquivalent, modifiers: shortcutManager.openInBrowser.modifiers)
-                    .disabled(state.fileURL == nil)
+                        .disabled(state.fileURL == nil)
                 }
                 ToolbarItem(id: "Slideshow", placement: .primaryAction) {
                     Button(action: { uiState.isSlideshowActive.toggle() }) { Label(uiState.isSlideshowActive ? state.L("Exit Slideshow") : state.L("Enter Slideshow"), systemImage: uiState.isSlideshowActive ? "pause.circle.fill" : "play.circle") }
@@ -433,6 +433,13 @@ struct MacToolbarModifier: ViewModifier {
                 .customizationBehavior(.disabled)
             }
             .toolbarRole(.editor)
+            // [极其关键的修复] 将 ToolbarItem 中的快捷键提取到后台层，避免在 Customize Toolbar 面板中克隆带有 Shortcut 的按钮引发布局死循环崩溃
+            .background(
+                Button("") { state.openInBrowser() }
+                    .keyboardShortcut(shortcutManager.openInBrowser.keyEquivalent, modifiers: shortcutManager.openInBrowser.modifiers)
+                    .disabled(state.fileURL == nil)
+                    .opacity(0)
+            )
     }
 }
 
