@@ -38,22 +38,19 @@ struct GeneralSettingsView: View {
             
             Section {
                 // [设置项 1.5：内存运行模式]
-                LabeledContent {
-                    HStack {
-                        Spacer()
-                        Picker("", selection: $memoryMode) {
-                            ForEach(MemoryMode.allCases, id: \.self) { mode in
-                                Text(LS(mode == .performance ? "Performance" : "Saving")).tag(mode)
-                            }
-                        }
-                        .labelsHidden()
-                        .pickerStyle(.segmented)
-                        .id(appLanguage)
-                        .frame(width: 200)
-                    }
-                } label: {
+                HStack {
                     Text(LS("Memory Mode") + ":")
-                        .fixedSize(horizontal: true, vertical: false)
+                    Spacer()
+                    // 调整这里的宽度或 Spacer() 就能控制右侧间距。
+                    // 之前的定宽可能限制了它的伸缩。现在去掉 frame 限制，让它自由贴在最右边。
+                    Picker("", selection: $memoryMode) {
+                        ForEach(MemoryMode.allCases, id: \.self) { mode in
+                            Text(LS(mode == .performance ? "Performance" : "Saving")).tag(mode)
+                        }
+                    }
+                    .labelsHidden()
+                    .pickerStyle(.segmented)
+                    .id(appLanguage)
                 }
                 .padding(.vertical, 4)
                 
@@ -78,21 +75,16 @@ struct GeneralSettingsView: View {
             
             Section {
                 // [设置项 3：新文档开启方式]
-                LabeledContent {
-                    HStack {
-                        Spacer()
-                        Picker("", selection: $openInTab) {
-                            Text(LS("New Window")).tag(false)
-                            Text(LS("New Tab")).tag(true)
-                        }
-                        .labelsHidden()
-                        .pickerStyle(.segmented)
-                        .id(appLanguage)
-                        .frame(width: 200)
-                    }
-                } label: {
+                HStack {
                     Text(LS("New File Opens In") + ":")
-                        .fixedSize(horizontal: true, vertical: false)
+                    Spacer()
+                    Picker("", selection: $openInTab) {
+                        Text(LS("New Window")).tag(false)
+                        Text(LS("New Tab")).tag(true)
+                    }
+                    .labelsHidden()
+                    .pickerStyle(.segmented)
+                    .id(appLanguage)
                 }
                 .padding(.vertical, 4)
                 
@@ -152,10 +144,15 @@ struct GeneralSettingsView: View {
         #endif
         .frame(width: 420, height: 420) // 固定原生宽度和高度，缩小宽度让它看起来更精致
         .background(
-            // [黑科技修复] 强制吸纳系统初始焦点，放在 background 里就不会在第一行形成空项目
+            // [黑科技修复] 彻底解决带有 TextField 的 Form 启动时白屏闪烁的系统级 Bug：
+            // 添加 .textFieldStyle(.plain) 和 .focusEffectDisabled() 确保焦点被吸收的同时绝对不绘制任何背景白框
             TextField("", text: .constant(""))
-                .frame(width: 1, height: 1)
-                .opacity(0.01)
+                .textFieldStyle(.plain)
+                .frame(width: 0, height: 0)
+                .opacity(0)
+                #if os(macOS)
+                .focusEffectDisabled()
+                #endif
         )
     }
 }
