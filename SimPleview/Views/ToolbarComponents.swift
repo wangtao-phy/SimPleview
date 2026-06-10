@@ -124,12 +124,12 @@ struct ColorPickerMenu: View {
         Menu {
             // 循环生成 5 个标准颜色选项
             ForEach([
-                (state.L("Blue"), PlatformColor.platformBlue, "Blue"),
-                (state.L("Red"), PlatformColor.platformRed, "Red"),
-                (state.L("Yellow"), PlatformColor.platformYellow, "Yellow"),
-                (state.L("Green"), PlatformColor.platformGreen, "Green"),
-                (state.L("Purple"), PlatformColor.platformPurple, "Purple")
-            ], id: \.0) { name, color, key in
+                (state.L("Blue"), PlatformColor.platformBlue),
+                (state.L("Red"), PlatformColor.platformRed),
+                (state.L("Yellow"), PlatformColor.platformYellow),
+                (state.L("Green"), PlatformColor.platformGreen),
+                (state.L("Purple"), PlatformColor.platformPurple)
+            ], id: \.0) { name, color in
                 colorMenuOption(name, color)
             }
             
@@ -165,9 +165,15 @@ struct ColorPickerMenu: View {
     
     private func colorMenuOption(_ name: String, _ color: PlatformColor) -> some View {
         Button(action: { state.currentColor = color }) {
+            #if os(macOS)
             Label { Text(name) } icon: {
-                Image(systemName: "circle.fill").symbolRenderingMode(.palette).foregroundStyle(Color(color))
+                Image(nsImage: NSImage.flatColorDot(color: color))
             }
+            #else
+            Label { Text(name) } icon: {
+                Image(systemName: "circle.fill").foregroundStyle(Color(color))
+            }
+            #endif
         }
     }
 }
@@ -222,3 +228,46 @@ struct AnnotationEditorView: View {
         .frame(width: 250) // 限制宽度，让浮窗不要显得太大太笨重
     }
 }
+
+#if os(macOS)
+class ColorPanelManager: NSObject, NSWindowDelegate {
+    static let shared = ColorPanelManager()
+    private var colorUpdateCallback: ((NSColor) -> Void)?
+    private var isObserving = false
+    
+    func show(initialColor: NSColor, onUpdate: @escaping (NSColor) -> Void) {
+        self.colorUpdateCallback = onUpdate
+        
+        let panel = NSColorPanel.shared
+        panel.color = initialColor
+        panel.showsAlpha = false
+        panel.mode = .RGB
+        
+        if !isObserving {
+            panel.setTarget(self)
+            panel.setAction(#selector(colorDidChange(_:)))
+            isObserving = true
+        }
+        
+        panel.makeKeyAndOrderFront(nil)
+    }
+    
+    @objc private func colorDidChange(_ sender: NSColorPanel) {
+        colorUpdateCallback?(sender.color)
+    }
+}
+
+extension NSImage {
+    /// 动态绘制一个纯平面的实心圆点（无高光、无阴影、无模板化剥色）
+    static func flatColorDot(color: NSColor) -> NSImage {
+        let size = NSSize(width: 14, height: 14)
+        let image = NSImage(size: size)
+        image.lockFocus()
+        color.setFill()
+        NSBezierPath(ovalIn: NSRect(origin: NSPoint(x: 1, y: 1), size: NSSize(width: 12, height: 12))).fill()
+        image.unlockFocus()
+        image.isTemplate = false // 极度关键：禁止被 Menu 染成黑白单色！
+        return image
+    }
+}
+#endif

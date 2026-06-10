@@ -183,8 +183,8 @@ struct GlobalAuthorsSettingsView: View {
         #else
         .border(Color.secondary.opacity(0.3))
         #endif
-        // [UI布局] 整个全局作者编辑大框的高度，目前高度定死为 250。
-        .frame(height: 250)
+        // [UI布局] 整个全局作者编辑大框的高度，加大到 350 以留出更多 Bio 空间
+        .frame(height: 350)
     }
 }
 
@@ -209,24 +209,33 @@ struct AuthorDetailEditor: View {
         VStack(alignment: .leading, spacing: 12) {
             
             // 姓名双拼
-            HStack(spacing: 8) {
-                TextField(LS("Last Name"), text: $draftLastName)
-                    #if os(macOS)
-                    .focusEffectDisabled()
-                    #endif
-                    .textFieldStyle(.roundedBorder)
-                    .onSubmit { update() } // 回车瞬间：执行雷霆更新
+            HStack(spacing: 16) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(LS("Last Name")).font(.caption).foregroundColor(.secondary)
+                    TextField("", text: $draftLastName)
+                        #if os(macOS)
+                        .focusEffectDisabled()
+                        #endif
+                        .textFieldStyle(.roundedBorder)
+                        .multilineTextAlignment(.leading)
+                        .onSubmit { update() }
+                }
                 
-                TextField(LS("First Name"), text: $draftFirstName)
-                    #if os(macOS)
-                    .focusEffectDisabled()
-                    #endif
-                    .textFieldStyle(.roundedBorder)
-                    .onSubmit { update() }
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(LS("First Name")).font(.caption).foregroundColor(.secondary)
+                    TextField("", text: $draftFirstName)
+                        #if os(macOS)
+                        .focusEffectDisabled()
+                        #endif
+                        .textFieldStyle(.roundedBorder)
+                        .multilineTextAlignment(.leading)
+                        .onSubmit { update() }
+                }
             }
             
             // 生平传记框
             VStack(alignment: .leading, spacing: 4) {
+                // 如果翻译词典里没有 Bio 的翻译，默认会返回原文，这里我们可以用 "Bio"
                 Text(LS("Bio")).font(.caption).foregroundColor(.secondary)
                 // 版本兼容判断：老版的系统没法给 TextEditor 套边框，所以要走两条不同的 UI 渲染路径。
                 if #available(macOS 12.0, iOS 15.0, *) {
