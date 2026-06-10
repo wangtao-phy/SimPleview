@@ -116,6 +116,11 @@ struct SignaturePopoverView: View {
         panel.canChooseDirectories = false
         panel.allowsMultipleSelection = false
         
+        // [修复] Popover 本身层级较高，NSOpenPanel 默认层级较低容易被遮挡。
+        // 强制将文件选择器的窗口层级拉高到 popUpMenu 级别，并激活 App。
+        panel.level = .popUpMenu
+        NSApp.activate(ignoringOtherApps: true)
+        
         panel.begin { response in
             if response == .OK, let url = panel.url {
                 do {
