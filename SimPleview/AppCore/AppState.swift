@@ -1,5 +1,5 @@
-import Combine
-import PDFKit
+@preconcurrency import Combine
+@preconcurrency import PDFKit
 import SwiftUI
 import UniformTypeIdentifiers
 

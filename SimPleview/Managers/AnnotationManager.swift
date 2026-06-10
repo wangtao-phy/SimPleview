@@ -1,5 +1,5 @@
 import SwiftUI
-import PDFKit
+@preconcurrency import PDFKit
 import Combine
 
 extension PDFAnnotation {
@@ -126,12 +126,14 @@ final class AnnotationManager: ObservableObject {
             pageAnnotations.append(document.page(at: i)?.annotations ?? [])
         }
         
+        // 后台仅做过滤和排序，不再访问 PDFDocument
+        nonisolated(unsafe) let safePageAnnotations = pageAnnotations
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
             var seenIDs = Set<String>()
             var collectedAnnots: [PDFAnnotation] = []
             
             // 后台仅做过滤和排序，不再访问 PDFDocument
-            for annots in pageAnnotations {
+            for annots in safePageAnnotations {
                 if annots.isEmpty { continue }
                 for annot in annots {
                     guard let type = annot.type else { continue }
@@ -155,11 +157,12 @@ final class AnnotationManager: ObservableObject {
                 return d1 < d2
             }
             
+            nonisolated(unsafe) let safeSortedAnnots = sortedAnnots
             DispatchQueue.main.async {
                 guard let self = self else { return }
                 // 仅当自己是最新的请求时，才更新 UI
                 if self.currentRefreshUUID == token {
-                    self.allAnnotations = sortedAnnots
+                    self.allAnnotations = safeSortedAnnots
                 }
             }
         }

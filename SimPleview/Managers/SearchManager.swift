@@ -1,6 +1,6 @@
 import SwiftUI
-import PDFKit
-import Combine
+@preconcurrency import PDFKit
+@preconcurrency import Combine
 
 /// [教程注释：搜索系统引擎 (SearchManager)]
 /// `SearchManager` 负责管理 PDF 内的全局搜索逻辑：
