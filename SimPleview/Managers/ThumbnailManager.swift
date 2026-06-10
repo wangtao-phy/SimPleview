@@ -154,16 +154,21 @@ final class ThumbnailManager: ObservableObject {
                 
                 // 4. 执行高性能渲染，按页面原始比例动态计算目标尺寸
                 let pageBounds = safePage.bounds(for: .cropBox)
+                // 修复旋转 bug：PDF 页面旋转后 bounds 不会改变，必须根据 rotation 手动交换宽高
+                let isRotated = safePage.rotation == 90 || safePage.rotation == 270
+                let effectiveWidth = isRotated ? pageBounds.height : pageBounds.width
+                let effectiveHeight = isRotated ? pageBounds.width : pageBounds.height
+                
                 let maxEdge: CGFloat = safeMemoryMode.policy.thumbnailMaxEdge
                 let targetSize: CGSize
-                if pageBounds.width > pageBounds.height {
+                if effectiveWidth > effectiveHeight {
                     // 横向页面（如 PPT）
-                    let scale = maxEdge / pageBounds.width
-                    targetSize = CGSize(width: maxEdge, height: pageBounds.height * scale)
+                    let scale = maxEdge / effectiveWidth
+                    targetSize = CGSize(width: maxEdge, height: effectiveHeight * scale)
                 } else {
                     // 竖向页面（标准 A4 等）
-                    let scale = maxEdge / pageBounds.height
-                    targetSize = CGSize(width: pageBounds.width * scale, height: maxEdge)
+                    let scale = maxEdge / effectiveHeight
+                    targetSize = CGSize(width: effectiveWidth * scale, height: maxEdge)
                 }
                 
                 let thumb = safePage.platformThumbnail(of: targetSize, for: .cropBox)
