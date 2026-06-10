@@ -243,7 +243,7 @@ extension NSApplication {
         
         // UI 魔法：透明标题栏，让应用看起来极度现代化
         window.titleVisibility = .visible
-        window.titlebarAppearsTransparent = true
+        window.titlebarAppearsTransparent = false
         if #available(macOS 11.0, *) {
             window.toolbarStyle = .unified
         }
