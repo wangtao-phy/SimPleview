@@ -365,17 +365,17 @@ struct MacToolbarModifier: ViewModifier {
     
     func body(content: Content) -> some View {
         content
-            .toolbar(id: "MainToolbar") {
-                ToolbarItem(id: "Navigation", placement: .navigation) {
+            // [极其关键的修复] 将复杂的、容易引发排版崩溃的组件从带 ID 的 customization 池子中彻底独立出来！
+            .toolbar {
+                ToolbarItem(placement: .navigation) {
                     HStack(spacing: 4) {
                         Button(action: { state.goBack() }) { Image(systemName: "chevron.left.circle") }
                         .disabled(state.navigationHistory.isEmpty)
                         pageNumberInput.disabled(state.fileURL == nil)
                     }
                 }
-                .customizationBehavior(.disabled)
                 
-                ToolbarItem(id: "AnnotationTools", placement: .principal) {
+                ToolbarItem(placement: .principal) {
                     HStack(spacing: 8) {
                         Picker(state.L("Annotation Tools"), selection: $state.activeType) {
                             Label(state.L("none"), systemImage: "cursorarrow").tag(AnnotationType.none)
@@ -389,10 +389,8 @@ struct MacToolbarModifier: ViewModifier {
                     }
                     .disabled(state.fileURL == nil)
                 }
-                .customizationBehavior(.disabled)
                 
-
-                ToolbarItem(id: "Markup", placement: .primaryAction) {
+                ToolbarItem(placement: .primaryAction) {
                     Button(action: { uiState.isShowingSignaturePopover.toggle() }) { 
                         Label(state.L("Signature"), systemImage: "signature") 
                     }
@@ -401,7 +399,21 @@ struct MacToolbarModifier: ViewModifier {
                         SignaturePopoverView(state: state, uiState: uiState)
                     }
                 }
-                .customizationBehavior(.disabled) // [极其关键的修复] macOS SwiftUI Bug: 带有 .popover 的 ToolbarItem 放入自定义面板时会引发 AppKit Layout 瀑布流死循环崩溃。
+                
+                ToolbarItem(placement: .primaryAction) {
+                    Button(action: { uiState.isSlideshowActive.toggle() }) { Label(uiState.isSlideshowActive ? state.L("Exit Slideshow") : state.L("Enter Slideshow"), systemImage: uiState.isSlideshowActive ? "pause.circle.fill" : "play.circle") }
+                    .disabled(state.fileURL == nil)
+                }
+                
+                ToolbarItem(placement: .primaryAction) {
+                    Button(action: { uiState.toggleRightSidebar(state: state) }) {
+                        Label(state.L("Right Column"), systemImage: "sidebar.right")
+                            .symbolVariant(uiState.showRightSidebar ? .fill : .none)
+                    }
+                    .disabled(state.fileURL == nil)
+                }
+            }
+            .toolbar(id: "MainToolbar") {
                 ToolbarItem(id: "RotateLeft", placement: .primaryAction) {
                     Button(action: { state.rotateCurrentPageLeft() }) { Label(state.L("Rotate Left"), systemImage: "rotate.left") }
                     .disabled(state.fileURL == nil)
@@ -414,23 +426,10 @@ struct MacToolbarModifier: ViewModifier {
                     Button(action: { state.openInBrowser() }) { Label(state.L("Browser"), systemImage: "safari") }
                         .disabled(state.fileURL == nil)
                 }
-                ToolbarItem(id: "Slideshow", placement: .primaryAction) {
-                    Button(action: { uiState.isSlideshowActive.toggle() }) { Label(uiState.isSlideshowActive ? state.L("Exit Slideshow") : state.L("Enter Slideshow"), systemImage: uiState.isSlideshowActive ? "pause.circle.fill" : "play.circle") }
-                    .disabled(state.fileURL == nil)
-                }
                 ToolbarItem(id: "Finder", placement: .primaryAction) {
                     Button(action: { state.revealInFinder() }) { Label(state.L("Finder"), systemImage: "folder") }
                     .disabled(state.fileURL == nil)
                 }
-                
-                ToolbarItem(id: "RightSidebar", placement: .primaryAction) {
-                    Button(action: { uiState.toggleRightSidebar(state: state) }) {
-                        Label(state.L("Right Column"), systemImage: "sidebar.right")
-                            .symbolVariant(uiState.showRightSidebar ? .fill : .none)
-                    }
-                    .disabled(state.fileURL == nil)
-                }
-                .customizationBehavior(.disabled)
             }
             .toolbarRole(.editor)
             // [极其关键的修复] 将 ToolbarItem 中的快捷键提取到后台层，避免在 Customize Toolbar 面板中克隆带有 Shortcut 的按钮引发布局死循环崩溃
