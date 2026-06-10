@@ -365,9 +365,8 @@ struct MacToolbarModifier: ViewModifier {
     
     func body(content: Content) -> some View {
         content
-            // [极其关键的修复] 将复杂的、容易引发排版崩溃的组件从带 ID 的 customization 池子中彻底独立出来！
-            .toolbar {
-                ToolbarItem(placement: .navigation) {
+            .toolbar(id: "MainToolbar") {
+                ToolbarItem(id: "Navigation", placement: .navigation) {
                     HStack(spacing: 4) {
                         Button(action: { state.goBack() }) { Image(systemName: "chevron.left.circle") }
                         .disabled(state.navigationHistory.isEmpty)
@@ -375,7 +374,7 @@ struct MacToolbarModifier: ViewModifier {
                     }
                 }
                 
-                ToolbarItem(placement: .principal) {
+                ToolbarItem(id: "AnnotationTools", placement: .principal) {
                     HStack(spacing: 8) {
                         Picker(state.L("Annotation Tools"), selection: $state.activeType) {
                             Label(state.L("none"), systemImage: "cursorarrow").tag(AnnotationType.none)
@@ -390,44 +389,43 @@ struct MacToolbarModifier: ViewModifier {
                     .disabled(state.fileURL == nil)
                 }
                 
-                ToolbarItem(placement: .primaryAction) {
+                ToolbarItem(id: "Markup", placement: .primaryAction) {
                     Button(action: { uiState.isShowingSignaturePopover.toggle() }) { 
                         Label(state.L("Signature"), systemImage: "signature") 
                     }
                     .disabled(state.fileURL == nil)
-                    .popover(isPresented: $uiState.isShowingSignaturePopover, arrowEdge: .bottom) {
-                        SignaturePopoverView(state: state, uiState: uiState)
-                    }
                 }
                 
-                ToolbarItem(placement: .primaryAction) {
-                    Button(action: { uiState.isSlideshowActive.toggle() }) { Label(uiState.isSlideshowActive ? state.L("Exit Slideshow") : state.L("Enter Slideshow"), systemImage: uiState.isSlideshowActive ? "pause.circle.fill" : "play.circle") }
-                    .disabled(state.fileURL == nil)
-                }
-                
-                ToolbarItem(placement: .primaryAction) {
-                    Button(action: { uiState.toggleRightSidebar(state: state) }) {
-                        Label(state.L("Right Column"), systemImage: "sidebar.right")
-                            .symbolVariant(uiState.showRightSidebar ? .fill : .none)
-                    }
-                    .disabled(state.fileURL == nil)
-                }
-            }
-            .toolbar(id: "MainToolbar") {
                 ToolbarItem(id: "RotateLeft", placement: .primaryAction) {
                     Button(action: { state.rotateCurrentPageLeft() }) { Label(state.L("Rotate Left"), systemImage: "rotate.left") }
                     .disabled(state.fileURL == nil)
                 }
+                
                 ToolbarItem(id: "Compare", placement: .primaryAction) {
                     Button(action: { state.openCompareWindow() }) { Label(state.L("Comparison"), systemImage: "document.on.document") }
                     .disabled(state.fileURL == nil)
                 }
+                
                 ToolbarItem(id: "Browser", placement: .primaryAction) {
                     Button(action: { state.openInBrowser() }) { Label(state.L("Browser"), systemImage: "safari") }
-                        .disabled(state.fileURL == nil)
+                    .disabled(state.fileURL == nil)
                 }
+                
+                ToolbarItem(id: "Slideshow", placement: .primaryAction) {
+                    Button(action: { uiState.isSlideshowActive.toggle() }) { Label(uiState.isSlideshowActive ? state.L("Exit Slideshow") : state.L("Enter Slideshow"), systemImage: uiState.isSlideshowActive ? "pause.circle.fill" : "play.circle") }
+                    .disabled(state.fileURL == nil)
+                }
+                
                 ToolbarItem(id: "Finder", placement: .primaryAction) {
                     Button(action: { state.revealInFinder() }) { Label(state.L("Finder"), systemImage: "folder") }
+                    .disabled(state.fileURL == nil)
+                }
+                
+                ToolbarItem(id: "RightSidebar", placement: .primaryAction) {
+                    Button(action: { uiState.toggleRightSidebar(state: state) }) {
+                        Label(state.L("Right Column"), systemImage: "sidebar.right")
+                            .symbolVariant(uiState.showRightSidebar ? .fill : .none)
+                    }
                     .disabled(state.fileURL == nil)
                 }
             }
@@ -439,6 +437,11 @@ struct MacToolbarModifier: ViewModifier {
                     .disabled(state.fileURL == nil)
                     .opacity(0)
             )
+            // [终极修复方案] 将原本挂载在 ToolbarItem 上的 popover 抽离到主视图 content 上！
+            // 这样 NSToolbarConfigPanel 克隆定制菜单时，就完全看不到这个 popover，绝对不会再引发布局崩溃，同时所有的按钮都恢复了完整的自定义拖拽功能！
+            .popover(isPresented: $uiState.isShowingSignaturePopover) {
+                SignaturePopoverView(state: state, uiState: uiState)
+            }
     }
 }
 
