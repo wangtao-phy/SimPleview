@@ -178,10 +178,14 @@ extension AppState {
         blendFilter.maskImage = maskImage
         guard let finalCIImage = blendFilter.outputImage else { return nil }
         
-        let rep = NSCIImageRep(ciImage: finalCIImage)
-        let nsImage = NSImage(size: rep.size)
-        nsImage.addRepresentation(rep)
-        return nsImage
+        // 【核心修复】: 必须使用 CIContext 将 CIImage 显式渲染为高分辨率的 CGImage！
+        // 如果直接用 NSCIImageRep 包装，在 macOS Sequoia/Xcode 16 中，
+        // 延迟渲染的滤镜图在被 PDFKit 或者 SwiftUI 绘制时，会使用极低的分辨率上下文，导致提取结果极其模糊。
+        let context = CIContext(options: nil)
+        guard let cgImage = context.createCGImage(finalCIImage, from: finalCIImage.extent) else { return nil }
+        
+        // 重新包装回 NSImage，并保持原有 inputImage 的 points 尺寸，从而保证高分屏下的锐度
+        return NSImage(cgImage: cgImage, size: inputImage.size)
     }
 
     func processAndInsertSignature(imageURL: URL) {
