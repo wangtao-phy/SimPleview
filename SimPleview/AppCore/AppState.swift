@@ -1,5 +1,5 @@
 @preconcurrency import Combine
-@preconcurrency import PDFKit
+import PDFKit
 import SwiftUI
 import UniformTypeIdentifiers
 
@@ -273,14 +273,6 @@ final class AppState: NSObject, ObservableObject, PDFViewDelegate {
         }
         searchManager.performSearch(in: nil, pdfView: nil)
         
-        // 【切断引信】：无论当前 AppState 是否被某些系统底层闭包隐性持有，
-        // 在窗口关闭的这一刻，彻底斩断它所有的内部事件流监听，杜绝僵尸对象响应事件！
-        cancellables.forEach { $0.cancel() }
-    }
-    
-    // [生命周期：对象死亡]
-    deinit {
-        cleanup()
         
         // 当这个 State 马上要被清理出内存时，抓紧最后机会保存阅读时长和打卡标签
         if let url = fileURL {
@@ -298,7 +290,8 @@ final class AppState: NSObject, ObservableObject, PDFViewDelegate {
             #endif
         }
         
-        // [内存保护] 将所有的事件监听器彻底掐断
+        // 【切断引信】：无论当前 AppState 是否被某些系统底层闭包隐性持有，
+        // 在窗口关闭的这一刻，彻底斩断它所有的内部事件流监听，杜绝僵尸对象响应事件！
         cancellables.forEach { $0.cancel() }
         cancellables.removeAll()
     }
