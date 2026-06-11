@@ -203,16 +203,10 @@ struct AuthorDetailEditor: View {
     // 所以我们用“草稿纸”模式，你在键盘敲的字都在草稿里，按回车的那一瞬间，才“提交 (submit)”给大内总管。
     @State private var draftFirstName: String = ""
     @State private var draftLastName: String = ""
+    @State private var draftBio: String = ""
     
-    // 优雅的 SwiftUI 原生绑定：直接桥接底层数据，0延迟，无需防抖
-    private var bioBinding: Binding<String> {
-        Binding(
-            get: { author.bio },
-            set: { newValue in
-                globalManager.updateAuthor(oldName: author.name, newFirstName: author.firstName, newLastName: author.lastName, newBio: newValue)
-            }
-        )
-    }
+    // 监听焦点状态，只有失去焦点时才保存，确保原生输入丝滑无阻
+    @FocusState private var isBioFocused: Bool
     
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -246,16 +240,20 @@ struct AuthorDetailEditor: View {
             VStack(alignment: .leading, spacing: 4) {
                 // 如果翻译词典里没有 Bio 的翻译，默认会返回原文，这里我们可以用 "Bio"
                 Text(LS("Bio")).font(.caption).foregroundColor(.secondary)
-                // 优雅的原生 TextEditor，直接绑定计算属性，零副作用
+                // 失去焦点时保存
                 if #available(macOS 12.0, iOS 15.0, *) {
-                    TextEditor(text: bioBinding)
+                    TextEditor(text: $draftBio)
+                        .focused($isBioFocused)
                         .font(.body)
                         .overlay(
                             RoundedRectangle(cornerRadius: 6)
                                 .stroke(Color.secondary.opacity(0.2), lineWidth: 1)
                         )
+                        .onChange(of: isBioFocused) { focused in
+                            if !focused { update() }
+                        }
                 } else {
-                    TextEditor(text: bioBinding)
+                    TextEditor(text: $draftBio)
                         .font(.body)
                         .border(Color.secondary.opacity(0.2), width: 1)
                 }
@@ -274,6 +272,10 @@ struct AuthorDetailEditor: View {
         .onAppear {
             syncDrafts()
         }
+        .onDisappear {
+            // 兜底保存，防止直接关掉窗口
+            update()
+        }
     }
     
     // [大内核心：发令改名]
@@ -282,11 +284,14 @@ struct AuthorDetailEditor: View {
         let newFirst = draftFirstName.trimmingCharacters(in: .whitespacesAndNewlines)
         let newLast = draftLastName.trimmingCharacters(in: .whitespacesAndNewlines)
         // 命令全局大脑发动神威：全库检索并替换这个人的数据。
-        globalManager.updateAuthor(oldName: author.name, newFirstName: newFirst, newLastName: newLast, newBio: author.bio)
+        globalManager.updateAuthor(oldName: author.name, newFirstName: newFirst, newLastName: newLast, newBio: draftBio)
     }
     
     private func syncDrafts() {
         draftFirstName = author.firstName
         draftLastName = author.lastName
+        if draftBio != author.bio {
+            draftBio = author.bio
+        }
     }
 }
