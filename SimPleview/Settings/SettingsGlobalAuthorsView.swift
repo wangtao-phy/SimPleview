@@ -1,4 +1,5 @@
 import SwiftUI
+import Combine
 
 /// [教程注释：全局作者管理面板]
 /// 这是一个复杂的两列经典 Mac 风格面板。
@@ -205,8 +206,8 @@ struct AuthorDetailEditor: View {
     @State private var draftLastName: String = ""
     @State private var draftBio: String = ""
     
-    // 监听焦点状态，只有失去焦点时才保存，确保原生输入丝滑无阻
-    @FocusState private var isBioFocused: Bool
+    // [回音消除器] 用于过滤我们自己手打触发的全局界面刷新，彻底消灭光标跳动，无需 FocusState
+    @State private var recentSubmissions = Set<String>()
     
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -240,21 +241,14 @@ struct AuthorDetailEditor: View {
             VStack(alignment: .leading, spacing: 4) {
                 // 如果翻译词典里没有 Bio 的翻译，默认会返回原文，这里我们可以用 "Bio"
                 Text(LS("Bio")).font(.caption).foregroundColor(.secondary)
-                // 失去焦点时保存
+                // 0延迟即时保存 + 回音消除机制
                 if #available(macOS 12.0, iOS 15.0, *) {
                     TextEditor(text: $draftBio)
-                        .focused($isBioFocused)
                         .font(.body)
                         .overlay(
                             RoundedRectangle(cornerRadius: 6)
                                 .stroke(Color.secondary.opacity(0.2), lineWidth: 1)
                         )
-                        .onChange(of: draftBio) { _ in
-                            // macOS的TextEditor极难失去焦点。
-                            // 既然如此，只要我们在手打，就每一击立刻保存！彻底消灭“需要失去焦点”的反直觉体验。
-                            // 凭借下方的焦点隔离，这绝对不会导致光标乱跳。
-                            if isBioFocused { update() }
-                        }
                 } else {
                     TextEditor(text: $draftBio)
                         .font(.body)
@@ -269,17 +263,39 @@ struct AuthorDetailEditor: View {
             
             Spacer()
         }
-        // [UI布局] 详情编辑器内部页边距。字不贴在边上全靠这一句。
         .padding()
         // [生命周期钩子] 这个界面“一睁眼出现(appear)”的时候，立刻照着传进来的大牛抄一份数据进草稿本。
         .onAppear {
-            syncDrafts()
+            draftFirstName = author.firstName
+            draftLastName = author.lastName
+            draftBio = author.bio
         }
-        .onChange(of: author) { _ in
-            // 核心防御：如果你正在手打简介，绝对不准外部数据覆盖你的草稿，防止光标跳动！
-            // 只有当你的光标不在这里（比如在侧边栏修改），才允许全局数据涌入。
-            if !isBioFocused {
-                syncDrafts()
+        // 兼容所有 macOS 版本的无警告数据流监听
+        .onReceive(Just(draftBio)) { newValue in
+            // 如果草稿跟当前全局的一样，说明我们没改，忽略
+            if newValue == author.bio { return }
+            
+            // 记录下我们发出去的文本
+            recentSubmissions.insert(newValue)
+            update()
+        }
+        .onReceive(Just(author)) { newAuthor in
+            // 外部（例如侧边栏）发生更新时，收到了新的 author 对象
+            
+            // 只有当名字有外部变动时才同步名字
+            if draftFirstName != newAuthor.firstName { draftFirstName = newAuthor.firstName }
+            if draftLastName != newAuthor.lastName { draftLastName = newAuthor.lastName }
+            
+            // 【核心防跳器】如果这个 bio 恰好是我们不久前自己发出去的“回音”，就忽略它！
+            if recentSubmissions.contains(newAuthor.bio) {
+                recentSubmissions.remove(newAuthor.bio)
+                return
+            }
+            
+            // 如果不是我们的回音，说明侧边栏真真切切被别人改了！乖乖同步并抹除跳动。
+            if draftBio != newAuthor.bio {
+                draftBio = newAuthor.bio
+                recentSubmissions.removeAll()
             }
         }
         .onDisappear {
@@ -290,18 +306,8 @@ struct AuthorDetailEditor: View {
     
     // [大内核心：发令改名]
     private func update() {
-        // 先把名字前后手误多打出的“空格”或者“换行符”用剪刀修剪掉 (trimmingCharacters)
         let newFirst = draftFirstName.trimmingCharacters(in: .whitespacesAndNewlines)
         let newLast = draftLastName.trimmingCharacters(in: .whitespacesAndNewlines)
-        // 命令全局大脑发动神威：全库检索并替换这个人的数据。
         globalManager.updateAuthor(oldName: author.name, newFirstName: newFirst, newLastName: newLast, newBio: draftBio)
-    }
-    
-    private func syncDrafts() {
-        draftFirstName = author.firstName
-        draftLastName = author.lastName
-        if draftBio != author.bio {
-            draftBio = author.bio
-        }
     }
 }
