@@ -206,8 +206,21 @@ struct AuthorDetailEditor: View {
     @State private var draftLastName: String = ""
     @State private var draftBio: String = ""
     
-    // [回音消除器] 用于过滤我们自己手打触发的全局界面刷新，彻底消灭光标跳动，无需 FocusState
+    // [回音消除器] 用于过滤我们自己手打触发的全局界面刷新，彻底消灭光标跳动
     @State private var recentSubmissions = Set<String>()
+    
+    // 原生拦截器 Binding：专门捕捉你的键盘输入，绝不在视图初始化时乱触发
+    private var bioBinding: Binding<String> {
+        Binding(
+            get: { draftBio },
+            set: { newValue in
+                draftBio = newValue
+                if newValue == author.bio { return }
+                recentSubmissions.insert(newValue)
+                update()
+            }
+        )
+    }
     
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -243,14 +256,14 @@ struct AuthorDetailEditor: View {
                 Text(LS("Bio")).font(.caption).foregroundColor(.secondary)
                 // 0延迟即时保存 + 回音消除机制
                 if #available(macOS 12.0, iOS 15.0, *) {
-                    TextEditor(text: $draftBio)
+                    TextEditor(text: bioBinding)
                         .font(.body)
                         .overlay(
                             RoundedRectangle(cornerRadius: 6)
                                 .stroke(Color.secondary.opacity(0.2), lineWidth: 1)
                         )
                 } else {
-                    TextEditor(text: $draftBio)
+                    TextEditor(text: bioBinding)
                         .font(.body)
                         .border(Color.secondary.opacity(0.2), width: 1)
                 }
@@ -264,36 +277,27 @@ struct AuthorDetailEditor: View {
             Spacer()
         }
         .padding()
-        // [生命周期钩子] 这个界面“一睁眼出现(appear)”的时候，立刻照着传进来的大牛抄一份数据进草稿本。
+        // [生命周期钩子] 依然保留，防止极端情况
         .onAppear {
             draftFirstName = author.firstName
             draftLastName = author.lastName
             draftBio = author.bio
         }
-        // 监听本地打字
-        .onChange(of: draftBio) { newValue in
-            // 如果草稿跟当前全局的一样，说明我们没改，忽略
-            if newValue == author.bio { return }
+        // 监听底层大数据库广播（合法规范无警告，且自带当前正确数据的初次推送）
+        .onReceive(globalManager.$authors) { allAuthors in
+            guard let newAuthor = allAuthors[author.name] else { return }
             
-            // 记录下我们发出去的文本
-            recentSubmissions.insert(newValue)
-            update()
-        }
-        // 监听外部更新
-        .onChange(of: author) { newAuthor in
-            // 外部（例如侧边栏）发生更新时，收到了新的 author 对象
-            
-            // 只有当名字有外部变动时才同步名字
+            // 同步名字
             if draftFirstName != newAuthor.firstName { draftFirstName = newAuthor.firstName }
             if draftLastName != newAuthor.lastName { draftLastName = newAuthor.lastName }
             
-            // 【核心防跳器】如果这个 bio 恰好是我们不久前自己发出去的“回音”，就忽略它！
+            // 【核心防跳器】如果这个 bio 是我们刚刚用 bioBinding 敲进去的，就无视它！
             if recentSubmissions.contains(newAuthor.bio) {
                 recentSubmissions.remove(newAuthor.bio)
                 return
             }
             
-            // 如果不是我们的回音，说明侧边栏真真切切被别人改了！乖乖同步并抹除跳动。
+            // 否则乖乖同步外部改动（比如侧边栏）
             if draftBio != newAuthor.bio {
                 draftBio = newAuthor.bio
                 recentSubmissions.removeAll()
