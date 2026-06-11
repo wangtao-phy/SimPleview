@@ -249,8 +249,11 @@ struct AuthorDetailEditor: View {
                             RoundedRectangle(cornerRadius: 6)
                                 .stroke(Color.secondary.opacity(0.2), lineWidth: 1)
                         )
-                        .onChange(of: isBioFocused) { focused in
-                            if !focused { update() }
+                        .onChange(of: draftBio) { _ in
+                            // macOS的TextEditor极难失去焦点。
+                            // 既然如此，只要我们在手打，就每一击立刻保存！彻底消灭“需要失去焦点”的反直觉体验。
+                            // 凭借下方的焦点隔离，这绝对不会导致光标乱跳。
+                            if isBioFocused { update() }
                         }
                 } else {
                     TextEditor(text: $draftBio)
@@ -273,9 +276,11 @@ struct AuthorDetailEditor: View {
             syncDrafts()
         }
         .onChange(of: author) { _ in
-            // 如果你在侧边栏修改了数据，全局大管家会派发最新的 author 到这里。
-            // 此时必须把最新的数据抄到草稿纸上，否则界面还是显示老数据！
-            syncDrafts()
+            // 核心防御：如果你正在手打简介，绝对不准外部数据覆盖你的草稿，防止光标跳动！
+            // 只有当你的光标不在这里（比如在侧边栏修改），才允许全局数据涌入。
+            if !isBioFocused {
+                syncDrafts()
+            }
         }
         .onDisappear {
             // 兜底保存，防止直接关掉窗口
