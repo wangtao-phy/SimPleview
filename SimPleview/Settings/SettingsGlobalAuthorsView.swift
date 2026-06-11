@@ -272,6 +272,11 @@ struct AuthorDetailEditor: View {
         .onAppear {
             syncDrafts()
         }
+        .onChange(of: author) { _ in
+            // 如果你在侧边栏修改了数据，全局大管家会派发最新的 author 到这里。
+            // 此时必须把最新的数据抄到草稿纸上，否则界面还是显示老数据！
+            syncDrafts()
+        }
         .onDisappear {
             // 兜底保存，防止直接关掉窗口
             update()
