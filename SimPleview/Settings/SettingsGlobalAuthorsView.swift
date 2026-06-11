@@ -270,8 +270,8 @@ struct AuthorDetailEditor: View {
             draftLastName = author.lastName
             draftBio = author.bio
         }
-        // 兼容所有 macOS 版本的无警告数据流监听
-        .onReceive(Just(draftBio)) { newValue in
+        // 监听本地打字
+        .onChange(of: draftBio) { newValue in
             // 如果草稿跟当前全局的一样，说明我们没改，忽略
             if newValue == author.bio { return }
             
@@ -279,7 +279,8 @@ struct AuthorDetailEditor: View {
             recentSubmissions.insert(newValue)
             update()
         }
-        .onReceive(Just(author)) { newAuthor in
+        // 监听外部更新
+        .onChange(of: author) { newAuthor in
             // 外部（例如侧边栏）发生更新时，收到了新的 author 对象
             
             // 只有当名字有外部变动时才同步名字
