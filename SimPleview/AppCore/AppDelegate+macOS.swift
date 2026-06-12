@@ -59,6 +59,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     
     // App 完全启动后的回调
     func applicationDidFinishLaunching(_ notification: Notification) {
+        // [静态挂载 Method Swizzling]
+        let _ = PDFAnnotation.swizzleDrawMethod
+        
         // [逻辑流程]
         // 由于我们没有默认窗口，启动后如果发现没有任何可见的文档窗口，就自动弹出一个文件选择器（NSOpenPanel）。
         // 使用 DispatchQueue.main.async 确保是在下一个事件循环弹出，不阻塞系统绘制。
