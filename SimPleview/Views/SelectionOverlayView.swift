@@ -11,6 +11,10 @@ class SelectionOverlayView: NSView {
     
     weak var pdfView: CustomPDFView?
     
+    // 必须返回 true，因为 PDFView.documentView 是 flipped 的（原点在左上角，Y轴向下）。
+    // 只有这样，在这个 View 中用 NSBezierPath 绘制的坐标才能完美匹配 documentView 的坐标系。
+    override var isFlipped: Bool { return true }
+    
     // 穿透所有鼠标事件，让底层的 PDFView 正常响应
     override func hitTest(_ point: NSPoint) -> NSView? {
         return nil
@@ -35,18 +39,19 @@ class SelectionOverlayView: NSView {
         let tintColor = accentColor.withAlphaComponent(0.85)
         
         var lowestAnnotation: PDFAnnotation? = nil
-        var minMinY: CGFloat = .greatestFiniteMagnitude
+        // 因为坐标系是 flipped（Y轴向下），物理位置最靠下（最贴近屏幕底部）的批注会有最大的 maxY！
+        var maxMaxY: CGFloat = -.greatestFiniteMagnitude
         var pageForLowest: PDFPage? = nil
         
-        // 第一次遍历：找到物理位置最靠下（Y坐标最小）的批注，用于挂载便签图标
+        // 第一次遍历：找到物理位置最靠下的批注，用于挂载便签图标
         for page in pdfView.visiblePages {
             for a in page.annotations where a.userName == batchID {
                 let rectInPage = a.bounds
                 let rectInView = pdfView.convert(rectInPage, from: page)
                 let rectInDoc = pdfView.documentView?.convert(rectInView, from: pdfView) ?? rectInView
                 
-                if rectInDoc.minY < minMinY {
-                    minMinY = rectInDoc.minY
+                if rectInDoc.maxY > maxMaxY {
+                    maxMaxY = rectInDoc.maxY
                     lowestAnnotation = a
                     pageForLowest = page
                 }
@@ -83,9 +88,11 @@ class SelectionOverlayView: NSView {
                     if a === lowestAnnotation {
                         if let finalIcon = noteIcon {
                             let iconSize: CGFloat = 20
+                            // Flipped 坐标系中，rectInDoc.maxY 是盒子的下边缘。
+                            // 图标 y 设为 maxY - 6，这样图标的顶部在盒子内侧 6pt 处，其余部分垂在盒子下方，符合原本的视觉设计。
                             let iconRect = NSRect(
                                 x: rectInDoc.maxX - 6,
-                                y: rectInDoc.minY - iconSize + 6,
+                                y: rectInDoc.maxY - 6,
                                 width: iconSize,
                                 height: iconSize
                             )

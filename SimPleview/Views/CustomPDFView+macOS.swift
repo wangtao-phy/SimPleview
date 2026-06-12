@@ -37,6 +37,9 @@ extension CustomPDFView {
             overlay.pdfView = self
             // 让遮罩层随 documentView 自动缩放和改变大小
             overlay.autoresizingMask = [.width, .height]
+            // 确保它作为一个独立的 Core Animation Layer，并处于最顶层！
+            overlay.wantsLayer = true
+            overlay.layer?.zPosition = 999
             docView.addSubview(overlay)
             self.selectionOverlay = overlay
         } else {
