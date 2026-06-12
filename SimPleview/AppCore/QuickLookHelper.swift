@@ -1,3 +1,4 @@
+#if os(macOS)
 import AppKit
 import Quartz
 
@@ -64,3 +65,4 @@ class QuickLookHelper: NSObject, NSSharingServiceDelegate {
         }
     }
 }
+#endif

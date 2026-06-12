@@ -74,8 +74,7 @@ class CustomPDFView: PDFView {
         // 【极简优化】：用户点击批注时，批注所在的页必然在屏幕可视范围内。
         // 所以我们只需要遍历 self.visiblePages 即可，彻底避免 O(N) 遍历整个几百页文档引发的卡顿！
         for page in self.visiblePages {
-            let annots = page.annotations.filter { $0.userName == batchID }
-            for annot in annots {
+            for annot in page.annotations where annot.userName == batchID {
                 let generousBounds = annot.bounds.insetBy(dx: -4, dy: -4)
                 let borderAnnot = PDFAnnotation(bounds: generousBounds, forType: .square, withProperties: nil)
                 borderAnnot.color = UIColor.systemBlue.withAlphaComponent(0.8)
@@ -139,7 +138,9 @@ class CustomPDFView: PDFView {
             
             for i in start..<end {
                 if let page = doc.page(at: i) {
-                    page.annotations.filter { $0.userName == batchID && $0 != annot }.forEach { $0.color = color }
+                    for a in page.annotations where a.userName == batchID && a != annot {
+                        a.color = color
+                    }
                 }
             }
         }

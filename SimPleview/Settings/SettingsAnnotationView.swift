@@ -1,5 +1,11 @@
 import SwiftUI
 
+#if os(macOS)
+import AppKit
+#else
+import UIKit
+#endif
+
 // [原生化重构] 移除了繁杂的 ColorImageCache, ColorPickerRow 和 ColorPanelManager。
 // 现在的 macOS/iOS 均原生支持 ColorPicker，性能更好，体验更系统化。
 
@@ -104,8 +110,6 @@ struct AnnotationSettingsView: View {
 
 // MARK: - macOS 颜色处理黑科技扩展
 #if os(macOS)
-import AppKit
-
 /// [教程注释：十六进制颜色(Hex)与苹果原生颜色(NSColor)相互转化的炼金术]
 extension NSColor {
     // [解析器] 将 "#FF0000" 变为纯正的系统红色

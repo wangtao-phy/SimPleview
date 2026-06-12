@@ -1,10 +1,12 @@
 import SwiftUI
-import AppKit
 import PDFKit
 import UniformTypeIdentifiers
 import QuickLook
+
 #if os(macOS)
 import AppKit
+#else
+import UIKit
 #endif
 
 /// [教程注释：主舞台与根视图]

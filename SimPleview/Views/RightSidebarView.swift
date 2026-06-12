@@ -1,5 +1,11 @@
 import SwiftUI
 
+#if os(macOS)
+import AppKit
+#else
+import UIKit
+#endif
+
 /// [教程注释：右侧边栏总入口]
 /// 右侧边栏负责一切和“当前正文阅读状态”无关的附加功能：
 /// 包括了查看大纲标注(Annotations)、全局搜索(Search)、以及阅读时长统计(Record)。
@@ -262,8 +268,6 @@ struct SearchResultItem: View {
 }
 
 #if os(macOS)
-import AppKit
-
 struct ArrowKeyMonitorView: NSViewRepresentable {
     var onUp: () -> Void
     var onDown: () -> Void

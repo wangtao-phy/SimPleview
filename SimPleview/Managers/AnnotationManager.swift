@@ -260,14 +260,15 @@ final class AnnotationManager: ObservableObject {
             var deletedAnnots = Set<PDFAnnotation>()
             for i in pageIndices {
                 if i < doc.pageCount, let page = doc.page(at: i) {
-                    let toRemove = page.annotations.filter { $0.userName == batchID }
-                    if !toRemove.isEmpty {
-                        toRemove.forEach { 
-                            // 触发 PDFKit 原生 KVO 机制：状态变更会精准通知底层 CoreAnimation 废弃脏图块，实现 O(1) 局部刷新
-                            $0.shouldDisplay = false
-                            page.removeAnnotation($0) 
-                            deletedAnnots.insert($0)
-                        }
+                    var hasRemoved = false
+                    for a in page.annotations where a.userName == batchID {
+                        // 触发 PDFKit 原生 KVO 机制：状态变更会精准通知底层 CoreAnimation 废弃脏图块，实现 O(1) 局部刷新
+                        a.shouldDisplay = false
+                        page.removeAnnotation(a) 
+                        deletedAnnots.insert(a)
+                        hasRemoved = true
+                    }
+                    if hasRemoved {
                         affectedPageIndices.insert(i)
                     }
                 }
@@ -391,14 +392,15 @@ final class AnnotationManager: ObservableObject {
                 
                 for i in start..<end {
                     if let page = doc.page(at: i) {
-                        let toRemove = page.annotations.filter { $0.userName == batchID }
-                        if !toRemove.isEmpty {
-                            toRemove.forEach {
-                                $0.shouldDisplay = false
-                                deletedAnnots.append($0)
-                                pageIndices.append(i)
-                                page.removeAnnotation($0)
-                            }
+                        var hasRemoved = false
+                        for a in page.annotations where a.userName == batchID {
+                            a.shouldDisplay = false
+                            deletedAnnots.append(a)
+                            pageIndices.append(i)
+                            page.removeAnnotation(a)
+                            hasRemoved = true
+                        }
+                        if hasRemoved {
                             affectedPageIndices.insert(i)
                         }
                     }
@@ -432,9 +434,16 @@ final class AnnotationManager: ObservableObject {
         }
         
         // 增量删除
-        DispatchQueue.main.async { [weak self] in
+        Task { @MainActor [weak self] in
+            guard let self = self else { return }
             let deletedSet = Set(deletedAnnots)
-            self?.allAnnotations.removeAll(where: { deletedSet.contains($0) })
+            var newAll = [PDFAnnotation]()
+            for a in self.allAnnotations {
+                if !deletedSet.contains(a) {
+                    newAll.append(a)
+                }
+            }
+            self.allAnnotations = newAll
         }
         pdfView?.setPlatformNeedsDisplay()
         PlatformUtils.updateWindows()
@@ -455,9 +464,8 @@ final class AnnotationManager: ObservableObject {
             
             for i in start..<end {
                 if let page = doc.page(at: i) {
-                    let toUpdate = page.annotations.filter { $0.userName == batchID && $0 != annot && $0.color != color }
-                    if !toUpdate.isEmpty {
-                        toUpdate.forEach { $0.color = color }
+                    for a in page.annotations where a.userName == batchID && a != annot && a.color != color {
+                        a.color = color
                         changed = true
                     }
                 }
