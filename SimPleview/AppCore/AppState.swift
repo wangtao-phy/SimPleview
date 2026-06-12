@@ -14,11 +14,16 @@ struct WeakAppState {
     weak var value: AppState?
 }
 
-/// [教程注释：业务状态的核心引擎]
-/// AppState 扮演了整个 App 的“大脑”角色。
-/// 它必须是 `class` (引用类型) 并继承自 `ObservableObject`，这样它就能在内存中保持独立唯一，
-/// 并且允许 SwiftUI 的各种视图去“订阅”它的状态变化。
-/// 继承 `NSObject` 并且遵循 `PDFViewDelegate`，是因为底层依然用的是传统的 Objective-C 框架 PDFKit，必须使用老办法去接管它的代理回调。
+// MARK: - Core Application State
+
+/// 应用程序全局状态的中央大脑 (Central Engine)。
+///
+/// `AppState` 是整个应用的单一真相源 (Single Source of Truth)，采用了 Manager 模式将各子系统高度解耦。
+/// 它实现了以下核心功能：
+/// - PDFKit 视图的生命周期托管与重建。
+/// - 高级内存管理与深度休眠机制 (Deep Hibernation)。
+/// - 全局撤销/重做栈的调度。
+/// - 多窗口并发环境下的状态同步。
 final class AppState: NSObject, ObservableObject, PDFViewDelegate {
     
     // [核心概念：响应式视图容器]
@@ -29,20 +34,32 @@ final class AppState: NSObject, ObservableObject, PDFViewDelegate {
     @Published var draggedIndices: Set<Int>? = nil
     
     // MARK: - Sub-Managers
-    // [架构思想：Manager 模式解耦]
-    // 最早的时候，缩略图、搜索、历史记录的代码全部堆在 AppState 里面，导致文件长达数千行，这是典型的“上帝类 (God Class)”反模式。
-    // 现在，我们将特定的功能领域抽离到专门的 Manager (管理器) 中。AppState 只是持有它们。
+    
+    /// 缩略图生成器与缓存管理器，处理高并发的页面快照请求。
     let thumbnailManager = ThumbnailManager()
+    
+    /// 全局文档搜索引擎，支持正则表达式及多线程异步匹配。
     let searchManager = SearchManager()
+    
+    /// 内部页面跳转历史堆栈，支持前进与后退。
     let navigationManager = NavigationManager()
+    
+    /// 矢量批注引擎，接管系统原生的批注流并实现高性能的 O(1) 修改。
     let annotationManager = AnnotationManager()
+    
+    /// 文档级元数据管理器。
     let documentManager = DocumentManager()
+    
+    /// 阅读行为分析器，用于沉淀用户的阅读时长及热力图数据。
     let readingTracker = ReadingTracker.shared
     
     // MARK: - Hibernation System
-    // [高级功能：内存休眠系统]
-    // macOS 上，PDFKit 有一个臭名昭著的机制：当你翻页时，它会不断缓存渲染好的图片，最终吃掉几个 G 的内存。
-    // 我们自己实现了一个休眠机制：当应用失焦几分钟后，把 PDFView 彻底干掉释放内存，等用户点回来时再重新加载。
+    
+    /// 指示应用是否已进入深度内存休眠模式。
+    /// 
+    /// **深度休眠 (Deep Hibernation)**: 
+    /// macOS 上 `PDFKit` 会在阅读大文档时持续吃满缓存。此机制会在应用退至后台且长时间无交互时，
+    /// 精确剥离底层 `PDFDocument` 并释放大量堆内存，而在用户重新激活应用时无缝重建。
     @Published var isHibernating: Bool = false
     var hibernationWorkItem: DispatchWorkItem? // 用来取消延时执行的闭包任务
     // [O(1)级极速恢复] 用于保存休眠前的物理状态，使用基础数据类型避免强引用泄漏

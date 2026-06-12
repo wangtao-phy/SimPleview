@@ -2,42 +2,25 @@ import SwiftUI
 import PDFKit
 import Combine
 
-extension PDFAnnotation {
-    /// 用于替代原生的 `contents` 属性。
-    /// 因为只要 `contents` 有值，PDFKit 就会强制绘制一个原生的黄色便签小标记。
-    /// 为了彻底隐藏该标记，我们将备注数据存在原生的 subject 字段中（通常不触发标记）。
-    var simPleNote: String {
-        get {
-            if let subj = self.value(forAnnotationKey: PDFAnnotationKey(rawValue: "/Subj")) as? String, !subj.isEmpty {
-                return subj
-            }
-            return self.contents ?? ""
-        }
-        set {
-            if newValue.isEmpty {
-                self.removeValue(forAnnotationKey: PDFAnnotationKey(rawValue: "/Subj"))
-            } else {
-                self.setValue(newValue, forAnnotationKey: PDFAnnotationKey(rawValue: "/Subj"))
-            }
-            // 关键：必须赋值 nil，彻底从 PDF 字典中抹去 contents 键
-            self.contents = nil 
-        }
-    }
-}
+// MARK: - Annotation Manager Engine
 
-/// [教程注释：批注管理器 (AnnotationManager)]
-/// 它的责任是：
-/// 1. 负责 PDF 中的高亮、下划线、删除线、手写笔迹的颜色设置和实时绘制
-/// 2. 把 PDFKit 里那些难以管理的散装 Annotation 收集起来，做成 SwiftUI 可以绑定的数组 `@Published var allAnnotations`
-/// 3. 管理“撤销(Undo)堆栈”，让用户的每一次绘制都可以安全退回
+/// 核心批注调度引擎。
+///
+/// `AnnotationManager` 负责接管 PDFKit 原生的批注流。
+/// 它实现了以下核心能力：
+/// 1. 颜色与画笔状态管理，并将状态响应式暴露给 SwiftUI (`@Published`)。
+/// 2. PDF 批注收集器：将离散分布在数百页中的原生批注对象集中收集为一维数组。
+/// 3. 全局事务与回滚 (Undo/Redo)：实现无损级别的撤销引擎，支持跨页动作的原子级撤销。
 final class AnnotationManager: ObservableObject {
     
-    // [核心数据：被侦测到的所有批注]
-    // 左侧边栏的“大纲”视图就是直接用 ForEach 循环渲染这个数组的
+    // MARK: - Data Source & Undo Stack
+    
+    /// 已经被引擎收集的所有合法批注数组。
+    /// UI 层的左侧边栏 (Sidebar) 通过订阅该数组进行 `ForEach` 实时大纲渲染。
     @Published var allAnnotations: [PDFAnnotation] = []
     
-    // [核心数据：撤销堆栈]
-    // 这是一个栈 (Stack)，里面存了用户的历史动作 (UndoAction)。如果用户按 Cmd+Z，我们就把最后一个弹出来恢复。
+    /// 撤销动作栈 (Undo Stack)。
+    /// 采用自定义的 `UndoAction` 枚举封装每一次原子绘制动作，通过堆栈机制实现 Cmd+Z 无损回滚。
     @Published var batchStack: [UndoAction] = []
     
     // [颜色管理]

@@ -1,6 +1,7 @@
 #if os(macOS)
 import SwiftUI
 import PDFKit
+import Combine
 
 extension CustomPDFView {
 
@@ -8,6 +9,29 @@ extension CustomPDFView {
 
         // [关键修复：焦点抢占] 当从侧边栏或悬浮窗点击进来时，PDFView 必须夺回 FirstResponder 身份，否则后续的 Backspace 键盘事件(keyDown) 会被系统丢弃！
         self.window?.makeFirstResponder(self)
+        
+        // --- 拦截手绘模式 ---
+        if self.activeType == .ink {
+            let point = self.convert(event.locationInWindow, from: nil)
+            if let page = self.page(for: point, nearest: true) {
+                let pagePoint = self.convert(point, to: page)
+                let path = NSBezierPath()
+                path.move(to: pagePoint)
+                
+                let batchID = "B-\(Int(Date().timeIntervalSince1970))-\(UUID().uuidString.prefix(4))"
+                
+                self.currentDrawingPath = path
+                self.currentDrawingPage = page
+                self.currentDrawingBatchID = batchID
+                
+                self._threadSafeDrawingPath = path.copy() as? NSBezierPath
+                self._threadSafeDrawingPage = page
+                
+                self.needsDisplay = true
+                return
+            }
+        }
+        // --- 手绘模式拦截结束 ---
         
         guard event.type == .leftMouseDown else {
             super.mouseDown(with: event)
@@ -25,7 +49,85 @@ extension CustomPDFView {
     }
     
 
+    override func mouseDragged(with event: NSEvent) {
+        if self.activeType == .ink,
+           let path = self.currentDrawingPath,
+           let page = self.currentDrawingPage {
+            
+            let point = self.convert(event.locationInWindow, from: nil)
+            let pagePoint = self.convert(point, to: page)
+            
+            path.line(to: pagePoint)
+            self._threadSafeDrawingPath = path.copy() as? NSBezierPath
+            self.needsDisplay = true
+            return
+        }
+        super.mouseDragged(with: event)
+    }
+
     override func mouseUp(with event: NSEvent) { 
+        // --- 手绘模式抬起处理 ---
+        if self.activeType == .ink,
+           let path = self.currentDrawingPath,
+           let page = self.currentDrawingPage,
+           let batchID = self.currentDrawingBatchID {
+            
+            let point = self.convert(event.locationInWindow, from: nil)
+            let pagePoint = self.convert(point, to: page)
+            path.line(to: pagePoint)
+            
+            // [核心修复] macOS PDFKit 存在严重的系统级 Bug：直接调用 `annot.add(NSBezierPath)` 创建 `.ink` 标注
+            // 会在底层触发 `Cannot save value for annotation key: /InkList. Invalid type.` 错误，导致画笔路径无法保存且立刻消失！
+            // 为了完美解决此问题，我们绕过原生路径添加，将坐标数据以字符串形式序列化，存入自定义的 PDF 属性中！
+            let expandedBounds = path.bounds.insetBy(dx: -2, dy: -2)
+            let annot = PDFAnnotation(bounds: expandedBounds, forType: .ink, withProperties: nil)
+            annot.color = self.manager?.pendingColorOverride ?? self.inkColor
+            annot.userName = batchID
+            
+            let border = PDFBorder()
+            border.lineWidth = 3.0
+            annot.border = border
+            
+            // 将真实坐标序列化（保持在 page 坐标系下，无需使用 transform，防止后续缩放错位）
+            var pointsStr = ""
+            for i in 0..<path.elementCount {
+                var pts = [NSPoint](repeating: .zero, count: 3)
+                let type = path.element(at: i, associatedPoints: &pts)
+                if type == .moveTo || type == .lineTo {
+                    pointsStr += "\(pts[0].x),\(pts[0].y);"
+                }
+            }
+            
+            // 利用 PDFKit 原生字典机制，植入我们的自定义键值！这个字段会随着 PDF 被永久保存！
+            annot.setValue(pointsStr, forAnnotationKey: PDFAnnotationKey(rawValue: "/SimPlePath"))
+            
+            page.addAnnotation(annot)
+            
+            self.currentDrawingPath = nil
+            self.currentDrawingPage = nil
+            self.currentDrawingBatchID = nil
+            self._threadSafeDrawingPath = nil
+            self._threadSafeDrawingPage = nil
+            
+            if let doc = page.document {
+                let index = doc.index(for: page)
+                self.manager?.batchStack.append(.annotation(batchID: batchID, pageIndices: [index]))
+                
+                annot.modificationDate = Date()
+                self.manager?.pendingColorOverride = nil
+                
+                self.onSaveRequired?() // 触发脏标记
+                
+                // [核心修复] 既然下面发了 PDFRefreshAnnotations 广播让全局重新扫描页面，
+                // 这里就不能再做 allAnnotations.append()，否则会出现 O(1) 增量与 O(N) 扫描的竞态重复！
+                NotificationCenter.default.post(name: NSNotification.Name("PDFRefreshAnnotations"), object: nil)
+            }
+            
+            self.needsDisplay = true
+            self.onMouseUp?()
+            return
+        }
+        // --- 手绘模式拦截结束 ---
 
         guard event.type == .leftMouseUp else {
             super.mouseUp(with: event)

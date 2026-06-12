@@ -26,10 +26,14 @@ extension CustomPDFView {
         }
     }
     
-    // --- 签名交互控制引擎 ---
-    // [Swift 6 关键修复] PDFKit 从后台瓦片渲染线程 (PDFTilePool.workQueue) 调用此方法。
-    // 由于 PDFView.draw(_:to:) 是 ObjC 方法，在 Swift 6 + DefaultActorIsolation=MainActor 下
-    // 需要显式标记 nonisolated 以避免 dispatch_assert_queue_fail 崩溃。
+    // MARK: - Native Rendering Engine (macOS)
+    
+    /// macOS 专属的底层绘制管线接管方法。
+    ///
+    /// [Swift 6 并发模型关键修复]
+    /// PDFKit 的瓦片渲染引擎 (`PDFTilePool.workQueue`) 会在非主线程的后台队列中调用此方法。
+    /// 由于 `PDFView.draw(_:to:)` 是 ObjC API，Swift 6 在 `DefaultActorIsolation=MainActor` 模式下
+    /// 会隐式检查主线程，若不加 `nonisolated` 标记，将在真机上触发 `dispatch_assert_queue_fail` 致命崩溃。
     nonisolated override func draw(_ page: PDFPage, to context: CGContext) {
         // 由于我们在 nonisolated 上下文中，直接调用 super.draw 可能会报 Actor 警告
         // 苹果官方针对此类底层框架调用的推荐做法是使用 MainActor.assumeIsolated 
@@ -54,10 +58,12 @@ extension CustomPDFView {
         
         // 1. 如果当前有被选中的批次 ID，我们就在这页上把属于它的批注框出来
         if let batchID = self._threadSafeBatchID {
-            // [极致渲染优化：零内存分配 (Zero Allocation) 算法]
-            // draw 方法在滚动时以 60fps 极高频率调用。
-            // 之前的 .filter 会每帧产生一个新数组，.min 会再产生一个临时闭包，这会导致 GC (垃圾回收)
-            // 频繁介入，造成电量消耗和微小掉帧。现在改用单遍 for 循环，直接找出最低点并立即绘制。
+            // MARK: Zero Allocation Rendering Algorithm
+            // [极致渲染优化：零内存分配 (Zero Allocation)]
+            // 该 draw 方法在用户缩放、滚动时，会以 60FPS 的极高频率被核心渲染线程调用。
+            // 传统的 `.filter { }` 或 `.min { }` 高阶函数会在每一帧动态申请堆内存来存储临时闭包和中间数组，
+            // 进而导致系统垃圾回收 (GC) 频繁介入，造成可感知的掉帧和电量消耗。
+            // 此处采用最底层的单次 for 循环 (O(N) 甚至提早 break 的变种)，直接计算外接矩形最低点并立即绘制。
             var lowestAnnotation: PDFAnnotation? = nil
             var minMinY: CGFloat = .greatestFiniteMagnitude
             
@@ -107,6 +113,51 @@ extension CustomPDFView {
                 }
             }
         }
+        
+        // 2. 实时渲染当前正在绘制的手绘线条（无任何延迟）
+        if self._threadSafeActiveType == .ink,
+           let path = self._threadSafeDrawingPath,
+           let drawingPage = self._threadSafeDrawingPage,
+           drawingPage == page {
+            NSGraphicsContext.saveGraphicsState()
+            NSGraphicsContext.current = NSGraphicsContext(cgContext: context, flipped: false)
+            
+            self._threadSafeInkColor.setStroke()
+            path.lineWidth = 3.0
+            path.lineCapStyle = .round
+            path.lineJoinStyle = .round
+            path.stroke()
+            
+            NSGraphicsContext.restoreGraphicsState()
+        }
+
+        // 3. [核心黑科技] 渲染那些由于 macOS PDFKit Bug 无法写入 /InkList 的自定义笔迹！
+        for annot in page.annotations where (annot.type ?? "") == "Ink" {
+            // 读取我们植入的隐秘字段
+            if let pathStr = annot.value(forAnnotationKey: PDFAnnotationKey(rawValue: "/SimPlePath")) as? String {
+                let pairs = pathStr.split(separator: ";")
+                guard !pairs.isEmpty else { continue }
+                
+                let bPath = NSBezierPath()
+                for (i, pair) in pairs.enumerated() {
+                    let coords = pair.split(separator: ",")
+                    if coords.count == 2, let x = Double(coords[0]), let y = Double(coords[1]) {
+                        let point = NSPoint(x: x, y: y)
+                        if i == 0 { bPath.move(to: point) }
+                        else { bPath.line(to: point) }
+                    }
+                }
+                
+                NSGraphicsContext.saveGraphicsState()
+                NSGraphicsContext.current = NSGraphicsContext(cgContext: context, flipped: false)
+                (annot.color ?? self._threadSafeInkColor).setStroke()
+                bPath.lineWidth = annot.border?.lineWidth ?? 3.0
+                bPath.lineCapStyle = .round
+                bPath.lineJoinStyle = .round
+                bPath.stroke()
+                NSGraphicsContext.restoreGraphicsState()
+            }
+        }
 
         NSGraphicsContext.restoreGraphicsState()
     }
@@ -153,13 +204,15 @@ extension CustomPDFView {
     func popoverDidClose(_ notification: Notification) {
         // 不需要做任何额外清理，回归纯粹的原生管理
     }
-
+    
 }
 
 extension CustomPDFView: NSPopoverDelegate {}
 
 struct PDFKitRepresentable: NSViewRepresentable {
     let pdfView: CustomPDFView
+    @Binding var activeType: AnnotationType
+    var inkColor: PlatformColor
     var selectedBatchID: String?
     
     func makeNSView(context: Context) -> CustomPDFView {
@@ -179,6 +232,8 @@ struct PDFKitRepresentable: NSViewRepresentable {
     }
     
     func updateNSView(_ nsView: CustomPDFView, context: Context) {
+        nsView.activeType = activeType
+        nsView.inkColor = inkColor
         nsView.currentSelectedBatchID = selectedBatchID
     }
     

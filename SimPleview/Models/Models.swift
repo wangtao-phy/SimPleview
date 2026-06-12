@@ -111,6 +111,7 @@ struct L {
             "underline": [.zh: "下划线", .en: "Underline"],
             "strikeout": [.zh: "删除线", .en: "Strikeout"],
             "ink": [.zh: "手写", .en: "Ink"],
+            "Draw": [.zh: "手绘", .en: "Draw"],
             "Insert Blank Page After": [.zh: "在后插入空白页", .en: "Insert Blank Page After"],
             "Insert PDF Before...": [.zh: "在此前插入 PDF...", .en: "Insert PDF Before..."],
             "Insert PDF After...": [.zh: "在此后插入 PDF...", .en: "Insert PDF After..."],

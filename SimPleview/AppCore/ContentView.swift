@@ -257,7 +257,7 @@ struct ContentView: View {
                         .focusEffectDisabled()
                         .id(state.pdfViewId) // 绑定唯一ID强制系统刷新
                     #else
-                    PDFKitRepresentable(pdfView: state.pdfView, selectedBatchID: state.selectedAnnotation?.userName)
+                    PDFKitRepresentable(pdfView: state.pdfView, activeType: $state.activeType, inkColor: state.inkColor, selectedBatchID: state.selectedAnnotation?.userName)
                         .focusable()
                         .focusEffectDisabled()
                         .id(state.pdfViewId)
@@ -383,78 +383,7 @@ struct MacToolbarModifier: ViewModifier {
     
     func body(content: Content) -> some View {
         content
-            .toolbar(id: "MainToolbar") {
-                ToolbarItem(id: "Navigation", placement: .navigation) {
-                    HStack(spacing: 4) {
-                        Button(action: { state.goBack() }) { Image(systemName: "chevron.left.circle") }
-                        .disabled(state.navigationHistory.isEmpty)
-                        pageNumberInput.disabled(state.fileURL == nil)
-                    }
-                }
-                
-                ToolbarItem(id: "AnnotationTools", placement: .principal) {
-                    HStack(spacing: 8) {
-                        Picker(state.L("Annotation Tools"), selection: $state.activeType) {
-                            Label(state.L("none"), systemImage: "cursorarrow").tag(AnnotationType.none)
-                            Label(state.L("highlight"), systemImage: "highlighter").tag(AnnotationType.highlight)
-                            Label(state.L("underline"), systemImage: "underline").tag(AnnotationType.underline)
-                            Label(state.L("strikeout"), systemImage: "strikethrough").tag(AnnotationType.strikeout)
-                        }
-                        .pickerStyle(.segmented)
-                        .frame(width: 150)
-                        ColorPickerMenu(state: state)
-                    }
-                    .disabled(state.fileURL == nil)
-                }
-                
-
-                ToolbarItem(id: "Ink", placement: .primaryAction) {
-                    Button(action: {
-                        if let url = state.fileURL {
-                            QuickLookHelper.shared.openMarkupService(for: url, document: state.pdfView.document)
-                        }
-                    }) {
-                        Label(state.L("Ink"), systemImage: "pencil.tip")
-                    }
-                    .disabled(state.fileURL == nil)
-                }
-                
-                ToolbarItem(id: "RotateLeft", placement: .primaryAction) {
-                    Button(action: { state.rotateCurrentPageLeft() }) { Label(state.L("Rotate Left"), systemImage: "rotate.left") }
-                    .disabled(state.fileURL == nil)
-                }
-                
-                ToolbarItem(id: "Compare", placement: .primaryAction) {
-                    Button(action: { state.openCompareWindow() }) { Label(state.L("Comparison"), systemImage: "document.on.document") }
-                    .disabled(state.fileURL == nil)
-                }
-                
-                ToolbarItem(id: "Browser", placement: .primaryAction) {
-                    Button(action: { state.openInBrowser() }) { Label(state.L("Browser"), systemImage: "safari") }
-                    .disabled(state.fileURL == nil)
-                }
-                
-                ToolbarItem(id: "Slideshow", placement: .primaryAction) {
-                    Button(action: { uiState.isSlideshowActive.toggle() }) { Label(uiState.isSlideshowActive ? state.L("Exit Slideshow") : state.L("Enter Slideshow"), systemImage: uiState.isSlideshowActive ? "pause.circle.fill" : "play.circle") }
-                    .disabled(state.fileURL == nil)
-                }
-                
-                ToolbarItem(id: "Finder", placement: .primaryAction) {
-                    Button(action: { state.revealInFinder() }) { Label(state.L("Finder"), systemImage: "folder") }
-                    .disabled(state.fileURL == nil)
-                }
-                
-
-                
-                ToolbarItem(id: "RightSidebar", placement: .primaryAction) {
-                    Button(action: { uiState.toggleRightSidebar(state: state) }) {
-                        Label(state.L("Right Column"), systemImage: "sidebar.right")
-                            .symbolVariant(uiState.showRightSidebar ? .fill : .none)
-                    }
-                    .disabled(state.fileURL == nil)
-                }
-            }
-            .toolbarRole(.editor)
+            .mainToolbar(state: state, uiState: uiState, pageNumberInput: pageNumberInput)
             // [极其关键的修复] 将 ToolbarItem 中的快捷键提取到后台层，避免在 Customize Toolbar 面板中克隆带有 Shortcut 的按钮引发布局死循环崩溃
             .background(
                 Button("") { state.openInBrowser() }

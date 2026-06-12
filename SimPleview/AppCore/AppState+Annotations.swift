@@ -64,7 +64,8 @@ extension AppState {
     // 所以我们做了一个定时器：用户激活标注工具后，如果15秒不操作，自动变回默认的滑动状态 (.none)。
     func resetAnnotationTimer() {
         stopAnnotationTimer()
-        guard activeType != AnnotationType.none else { return }
+        // 如果是手写模式 (.ink)，按照用户要求：保持该模式，不要自动切回滑动状态。
+        guard activeType != AnnotationType.none && activeType != .ink else { return }
         
         // 从偏好设置 UserDefaults 里读取设定的秒数
         let timeoutStr = UserDefaults.standard.string(forKey: "annotationRevertTimeoutStr") ?? "15"

@@ -10,16 +10,28 @@ import AppKit
 import UIKit
 #endif
 
-/// [教程注释：定制版核心 PDF 视图 (CustomPDFView)]
-/// PDFKit 原生的 PDFView 有很多限制，比如不能手写、右键菜单里混杂了很多没用的系统选项。
-/// 所以我们必须继承它，然后通过各种底层 Hook 技术来“黑”进系统流程，实现我们需要的高级功能。
+// MARK: - Custom PDF View Subclass
+
+/// 核心定制版 PDF 视图。
+///
+/// 继承自原生的 `PDFView`。由于原生组件缺乏完善的笔迹交互控制和精细的右键选单拦截能力，
+/// 本类通过桥接原生生命周期和钩子方法，实现了以下核心能力：
+/// - macOS 平台的高性能非阻塞原生路径实时绘制。
+/// - iOS 平台的 `PKCanvasView` 桥接与触控拦截。
+/// - "替身批注法" (Ghost Annotation Method) 实现的 O(1) 性能选区边框。
 class CustomPDFView: PDFView {
     
-    // [通讯通道]
+    // MARK: - Dependencies & Communication
+    
+    /// 与 SwiftUI 数据流桥接的核心控制器，负责派发批注变更事件。
     weak var manager: AnnotationManager?
     
-    // 记住用户刚才右键点的是哪个批注，用来给弹出的菜单传参数
+    // MARK: - State Tracking
+    
+    /// 记录用户最后一次右键交互所选中的批注，用于构建关联菜单。
     var lastClickedAnnotation: PDFAnnotation?
+    
+    /// 记录进入编辑状态前的批注颜色，用于在放弃编辑时执行状态回滚。
     var initialAnnotationColor: PlatformColor?
     
     #if os(iOS)
@@ -34,10 +46,18 @@ class CustomPDFView: PDFView {
     var colorObserver: NSKeyValueObservation?
     var currentPopover: NSPopover?
     
-
+    // macOS 原生手绘的实时状态缓存
+    var currentDrawingPath: NSBezierPath?
+    var currentDrawingPage: PDFPage?
+    var currentDrawingBatchID: String?
+    nonisolated(unsafe) var _threadSafeDrawingPath: NSBezierPath?
+    nonisolated(unsafe) var _threadSafeDrawingPage: PDFPage?
     #endif
     
-    // 【新增】：用于判断哪个批注正在被选中，以决定画框或弹窗
+    // MARK: - Cross-Platform Properties
+    
+    /// 当前选中的批注的全局批次标识符。
+    /// 当设值发生变更时，自动触发跨平台的重绘逻辑（如 macOS 的 `needsDisplay` 或 iOS 的替身边框刷新）。
     var currentSelectedBatchID: String? {
         didSet {
             _threadSafeBatchID = currentSelectedBatchID
@@ -50,6 +70,8 @@ class CustomPDFView: PDFView {
             }
         }
     }
+    
+    /// 用于后台线程（如缩略图生成器）安全读取的批次标识符快照。
     nonisolated(unsafe) var _threadSafeBatchID: String?
     
     #if os(iOS)
@@ -57,8 +79,13 @@ class CustomPDFView: PDFView {
     var currentSelectionBorderAnnotations: [PDFAnnotation] = []
     var editMenuInteraction: UIEditMenuInteraction?
     
-    // 【核心重构：替身批注法】
-    // 在原地生成纯净的 `.square` 批注作为边框，完美贴合任何翻页缩放。
+    // MARK: - Core Graphics / Rendering Mechanics
+    
+    /// 刷新当前活跃的选取边框。
+    ///
+    /// **底层原理：替身批注法**
+    /// 在原地生成纯净的 `.square` 批注作为边框，完美贴合任何翻页缩放。
+    /// 这种方法完全规避了传统基于 `UIView/NSView` 叠层渲染时因 PDF 缩放引起的坐标系撕裂问题。
     func updateSelectionBorder() {
         // 先清理旧的边框替身
         for annot in currentSelectionBorderAnnotations {
@@ -98,7 +125,12 @@ class CustomPDFView: PDFView {
     var onSaveRequired: (() -> Void)?
     var onAnnotationContentsChanged: ((PDFAnnotation, String) -> Void)?
     
-    var inkColor: PlatformColor = .systemBlue
+    var inkColor: PlatformColor = .systemBlue {
+        didSet {
+            _threadSafeInkColor = inkColor
+        }
+    }
+    nonisolated(unsafe) var _threadSafeInkColor: PlatformColor = .systemBlue
     
     #if os(macOS)
     // [P1优化] 缓存 SF Symbol 图标，避免在高频 draw 方法中每帧重建
@@ -115,11 +147,13 @@ class CustomPDFView: PDFView {
             #endif
         }
         didSet {
+            _threadSafeActiveType = activeType
             #if os(iOS)
             updateHandwritingState()
             #endif
         }
     }
+    nonisolated(unsafe) var _threadSafeActiveType: AnnotationType = .none
 
 
     
