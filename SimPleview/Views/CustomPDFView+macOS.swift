@@ -43,8 +43,10 @@ extension CustomPDFView {
             docView.addSubview(overlay)
             self.selectionOverlay = overlay
         } else {
-            // 确保其大小始终紧贴 docView
-            self.selectionOverlay?.frame = docView.bounds
+            // 确保其大小始终紧贴 docView，只有在发生实质性变化时才赋值，防止触发无限 Layout 循环卡死捏合缩放！
+            if self.selectionOverlay?.frame != docView.bounds {
+                self.selectionOverlay?.frame = docView.bounds
+            }
             if self.selectionOverlay?.superview != docView {
                 docView.addSubview(self.selectionOverlay!)
             }
