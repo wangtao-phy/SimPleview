@@ -207,6 +207,17 @@ extension AppState {
             .sink { [weak self] _ in self?.refreshAnnotations() }
             .store(in: &cancellables)
             
+        // 监听原生标注完成事件，重新加载已被修改的文档
+        nc.publisher(for: NSNotification.Name("MarkupDidComplete"))
+            .sink { [weak self] _ in
+                guard let self = self, let url = self.fileURL else { return }
+                if let newDoc = PDFDocument(url: url) {
+                    self.setupDocument(newDoc, url: url)
+                    self.refreshAnnotations()
+                }
+            }
+            .store(in: &cancellables)
+            
         // 监听内存模式动态切换，实时更新 PDFView 的渲染策略
         nc.publisher(for: UserDefaults.didChangeNotification)
             .sink { [weak self] _ in

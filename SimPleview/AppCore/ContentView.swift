@@ -1,6 +1,8 @@
 import SwiftUI
+import AppKit
 import PDFKit
 import UniformTypeIdentifiers
+import QuickLook
 #if os(macOS)
 import AppKit
 #endif
@@ -373,6 +375,8 @@ struct MacToolbarModifier: ViewModifier {
     @ObservedObject var shortcutManager: ShortcutManager
     let pageNumberInput: AnyView
     
+    @State private var quickLookURL: URL?
+    
     func body(content: Content) -> some View {
         content
             .toolbar(id: "MainToolbar") {
@@ -400,8 +404,8 @@ struct MacToolbarModifier: ViewModifier {
                 }
                 
                 ToolbarItem(id: "Markup", placement: .primaryAction) {
-                    Button(action: { uiState.isShowingSignaturePopover.toggle() }) { 
-                        Label(state.L("Signature"), systemImage: "signature") 
+                    Button(action: { uiState.isShowingMarkupPopover.toggle() }) { 
+                        Label(state.L("Markup"), systemImage: "scribble.variable") 
                     }
                     .disabled(state.fileURL == nil)
                 }
@@ -431,6 +435,17 @@ struct MacToolbarModifier: ViewModifier {
                     .disabled(state.fileURL == nil)
                 }
                 
+                ToolbarItem(id: "Ink", placement: .primaryAction) {
+                    Button(action: {
+                        if let url = state.fileURL {
+                            QuickLookHelper.shared.openMarkupService(for: url, document: state.pdfView.document)
+                        }
+                    }) {
+                        Label(state.L("Ink"), systemImage: "pencil.tip")
+                    }
+                    .disabled(state.fileURL == nil)
+                }
+                
                 ToolbarItem(id: "RightSidebar", placement: .primaryAction) {
                     Button(action: { uiState.toggleRightSidebar(state: state) }) {
                         Label(state.L("Right Column"), systemImage: "sidebar.right")
@@ -447,10 +462,9 @@ struct MacToolbarModifier: ViewModifier {
                     .disabled(state.fileURL == nil)
                     .opacity(0)
             )
-            // [终极修复方案] 将原本挂载在 ToolbarItem 上的 popover 抽离到主视图 content 上！
-            // 这样 NSToolbarConfigPanel 克隆定制菜单时，就完全看不到这个 popover，绝对不会再引发布局崩溃，同时所有的按钮都恢复了完整的自定义拖拽功能！
-            .popover(isPresented: $uiState.isShowingSignaturePopover) {
-                SignaturePopoverView(state: state, uiState: uiState)
+            .popover(isPresented: $uiState.isShowingMarkupPopover) {
+                MarkupToolbarRepresentable()
+                    .frame(width: 300, height: 50)
             }
     }
 }

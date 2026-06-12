@@ -34,7 +34,7 @@ class UIState: ObservableObject {
     /// 控制是否显示 iPad 样式的手写工具栏面板 / 自定义工具栏
     @Published var isShowingToolbarCustomizer = false
     @Published var isShowingAnnotationEditor = false
-    @Published var isShowingSignaturePopover = false
+    @Published var isShowingMarkupPopover = false
     
     // MARK: - Tools Customization (工具栏自定义)
     

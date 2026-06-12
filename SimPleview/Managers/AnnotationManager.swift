@@ -143,7 +143,16 @@ final class AnnotationManager: ObservableObject {
                     // 直接转小写并通过 Hash Set 进行 O(1) 查找，单次循环从几十毫秒骤降至纳秒级！
                     if lowercasedTargets.contains(type.lowercased()) {
                         let id = annot.userName ?? ""
-                        if !id.isEmpty && seenIDs.insert(id).inserted {
+                        // [深度漏洞修复] 兼容外部软件 (如系统 Preview.app) 的标注：
+                        // 我们自己的批量标注 userName 必定以 "B-" 开头 (如 B-HIGHLIGHT-xxx)
+                        // 外部软件的 userName 通常是真实用户名 (如 "wangtao")
+                        // 如果一味按照 userName 去重，会导致从 Preview 标注的一万个笔画全被当成同一个而惨遭过滤！
+                        if id.starts(with: "B-") {
+                            if !id.isEmpty && seenIDs.insert(id).inserted {
+                                collectedAnnots.append(annot)
+                            }
+                        } else {
+                            // 外部批注（或老旧未分组批注）：直接全量收录
                             collectedAnnots.append(annot)
                         }
                     }
@@ -260,33 +269,7 @@ final class AnnotationManager: ObservableObject {
         return true
     }
     
-    // [统一架构：签名插入与标注逻辑保持一致]
-    // 为了支持安全且原生的撤销 (Undo)，签名不能直接强塞给 PDFPage，必须经过 AnnotationManager 的调度和缓存！
-    @discardableResult
-    func applySignature(cgImage: CGImage, bounds: CGRect, to page: PDFPage, pdfView: PDFView?, onThumbnailUpdate: (Int) -> Void) -> Bool {
-        guard let doc = page.document else { return false }
-        let pageIndex = doc.index(for: page)
-        
-        let batchID = "S-\(Int(Date().timeIntervalSince1970))-\(UUID().uuidString.prefix(4))"
-        let annotation = SignatureAnnotation(cgImage: cgImage, bounds: bounds)
-        annotation.userName = batchID
-        annotation.modificationDate = Date()
-        
-        page.addAnnotation(annotation)
-        
-        // 压入撤销栈，以便 Cmd+Z 时能和普通标注一样被正常拔除
-        batchStack.append(.annotation(batchID: batchID, pageIndices: [pageIndex]))
-        
-        DispatchQueue.main.async { [weak self] in
-            self?.allAnnotations.append(annotation)
-        }
-        
-        onThumbnailUpdate(pageIndex)
-        pdfView?.setPlatformNeedsDisplay()
-        PlatformUtils.updateWindows()
-        
-        return true
-    }
+
     
     // [核心架构：撤销 (Undo) 解析器]
     // 当按 Cmd+Z 时，系统会掉进这个巨大的 switch 里，根据上一次是什么动作，反向回滚！

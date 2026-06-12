@@ -3,24 +3,7 @@ import SwiftUI
 import PDFKit
 
 extension CustomPDFView {
-    private func hitTestSignature(pagePoint: NSPoint, annotationBounds: NSRect) -> DragMode {
-        let handleSize: CGFloat = 16.0 // 容错范围扩大，方便点击
-        let handleRadius = handleSize / 2.0
-        
-        let bottomLeft = NSRect(x: annotationBounds.minX - handleRadius, y: annotationBounds.minY - handleRadius, width: handleSize, height: handleSize)
-        let bottomRight = NSRect(x: annotationBounds.maxX - handleRadius, y: annotationBounds.minY - handleRadius, width: handleSize, height: handleSize)
-        let topLeft = NSRect(x: annotationBounds.minX - handleRadius, y: annotationBounds.maxY - handleRadius, width: handleSize, height: handleSize)
-        let topRight = NSRect(x: annotationBounds.maxX - handleRadius, y: annotationBounds.maxY - handleRadius, width: handleSize, height: handleSize)
-        
-        if bottomLeft.contains(pagePoint) { return .resizingBottomLeft }
-        if bottomRight.contains(pagePoint) { return .resizingBottomRight }
-        if topLeft.contains(pagePoint) { return .resizingTopLeft }
-        if topRight.contains(pagePoint) { return .resizingTopRight }
-        
-        if annotationBounds.contains(pagePoint) { return .moving }
-        return .none
-    }
-    
+
     override func mouseDown(with event: NSEvent) {
         // [关键修复：焦点抢占] 当从侧边栏或悬浮窗点击进来时，PDFView 必须夺回 FirstResponder 身份，否则后续的 Backspace 键盘事件(keyDown) 会被系统丢弃！
         self.window?.makeFirstResponder(self)
@@ -31,114 +14,16 @@ extension CustomPDFView {
         }
         
         let viewPoint = convert(event.locationInWindow, from: nil)
-        guard let page = page(for: viewPoint, nearest: false) else {
+        guard page(for: viewPoint, nearest: false) != nil else {
             super.mouseDown(with: event)
             return
         }
-        let pagePoint = convert(viewPoint, to: page)
-        
-        // 1. 检查是否点中已激活的 Signature
-        if let sig = activeSignature, sig.page == page {
-            let mode = hitTestSignature(pagePoint: pagePoint, annotationBounds: sig.bounds)
-            if mode != .none {
-                dragMode = mode
-                dragStartPoint = pagePoint
-                dragStartBounds = sig.bounds
-                return // 消费事件
-            } else {
-                activeSignature = nil
-                self.setPlatformNeedsDisplay()
-            }
-        }
-        
-        // 2. 看看有没有点中任何一个 SignatureAnnotation
-        let annotations = page.annotations.reversed()
-        if let target = annotations.first(where: { $0.type == "Stamp" && hitTestSignature(pagePoint: pagePoint, annotationBounds: $0.bounds) != .none }) {
-            activeSignature = target
-            dragMode = hitTestSignature(pagePoint: pagePoint, annotationBounds: target.bounds)
-            dragStartPoint = pagePoint
-            dragStartBounds = target.bounds
-            
-            // 同步高亮右侧边栏
-            onAnnotationSelected?(target)
-            
-            self.setPlatformNeedsDisplay()
-            return // 消费事件
-        }
-        
-        super.mouseDown(with: event)
-    }
-    
-    override func mouseDragged(with event: NSEvent) {
-        guard let sig = activeSignature, dragMode != .none else {
-            super.mouseDragged(with: event)
-            return
-        }
-        let viewPoint = convert(event.locationInWindow, from: nil)
-        guard let page = sig.page else { return }
-        let pagePoint = convert(viewPoint, to: page)
-        
-        let dx = pagePoint.x - dragStartPoint.x
-        let dy = pagePoint.y - dragStartPoint.y
-        
-        var newBounds = dragStartBounds
-        let aspectRatio = dragStartBounds.width / dragStartBounds.height
-        
-        switch dragMode {
-        case .moving:
-            newBounds.origin.x += dx
-            newBounds.origin.y += dy
-        case .resizingTopRight:
-            var newWidth = max(20, dragStartBounds.width + dx)
-            var newHeight = newWidth / aspectRatio
-            if dragStartBounds.height + dy > newHeight {
-                newHeight = max(20, dragStartBounds.height + dy)
-                newWidth = newHeight * aspectRatio
-            }
-            newBounds.size = NSSize(width: newWidth, height: newHeight)
-        case .resizingTopLeft:
-            var newWidth = max(20, dragStartBounds.width - dx)
-            var newHeight = newWidth / aspectRatio
-            if dragStartBounds.height + dy > newHeight {
-                newHeight = max(20, dragStartBounds.height + dy)
-                newWidth = newHeight * aspectRatio
-            }
-            newBounds.origin.x = dragStartBounds.maxX - newWidth
-            newBounds.size = NSSize(width: newWidth, height: newHeight)
-        case .resizingBottomRight:
-            var newWidth = max(20, dragStartBounds.width + dx)
-            var newHeight = newWidth / aspectRatio
-            if dragStartBounds.height - dy > newHeight {
-                newHeight = max(20, dragStartBounds.height - dy)
-                newWidth = newHeight * aspectRatio
-            }
-            newBounds.origin.y = dragStartBounds.maxY - newHeight
-            newBounds.size = NSSize(width: newWidth, height: newHeight)
-        case .resizingBottomLeft:
-            var newWidth = max(20, dragStartBounds.width - dx)
-            var newHeight = newWidth / aspectRatio
-            if dragStartBounds.height - dy > newHeight {
-                newHeight = max(20, dragStartBounds.height - dy)
-                newWidth = newHeight * aspectRatio
-            }
-            newBounds.origin.x = dragStartBounds.maxX - newWidth
-            newBounds.origin.y = dragStartBounds.maxY - newHeight
-            newBounds.size = NSSize(width: newWidth, height: newHeight)
-        default: break
-        }
-        
-        sig.bounds = newBounds
-        self.setPlatformNeedsDisplay()
-    }
-    
-    override func mouseUp(with event: NSEvent) { 
-        if dragMode != .none {
-            dragMode = .none
-            onMouseUp?()
-            return
-        }
 
-        // 右键或其它点击，直接走原生
+    }
+    
+
+    override func mouseUp(with event: NSEvent) { 
+
         guard event.type == .leftMouseUp else {
             super.mouseUp(with: event)
             onMouseUp?()
@@ -226,14 +111,7 @@ extension CustomPDFView {
         // [用户体验优化：键盘快捷键删除标注]
         // 51 是 Backspace (退格键)，117 是 Forward Delete (删除键)
         if event.keyCode == 51 || event.keyCode == 117 {
-            // 新增：拦截 SignatureAnnotation 的删除
-            if let sig = self.activeSignature {
-                onAnnotationDeleted?(sig)
-                self.activeSignature = nil
-                self.setPlatformNeedsDisplay()
-                return
-            }
-            
+
             // 如果当前有被选中的标注框 (选中的时候会记录它的 batchID)
             if let batchID = currentSelectedBatchID, self.document != nil {
                 var targetAnnot: PDFAnnotation? = nil

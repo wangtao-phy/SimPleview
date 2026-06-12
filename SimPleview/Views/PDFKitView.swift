@@ -34,26 +34,7 @@ class CustomPDFView: PDFView {
     var colorObserver: NSKeyValueObservation?
     var currentPopover: NSPopover?
     
-    // --- 签名拖拽与缩放引擎状态 ---
-    enum DragMode {
-        case none
-        case moving
-        case resizingTopLeft
-        case resizingTopRight
-        case resizingBottomLeft
-        case resizingBottomRight
-    }
-    
-    var activeSignature: PDFAnnotation? {
-        didSet {
-            _threadSafeActiveSignature = activeSignature
-        }
-    }
-    nonisolated(unsafe) var _threadSafeActiveSignature: PDFAnnotation?
-    
-    var dragMode: DragMode = .none
-    var dragStartPoint: CGPoint = .zero
-    var dragStartBounds: CGRect = .zero
+
     #endif
     
     // 【新增】：用于判断哪个批注正在被选中，以决定画框或弹窗

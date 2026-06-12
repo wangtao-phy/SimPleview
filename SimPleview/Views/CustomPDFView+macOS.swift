@@ -97,38 +97,7 @@ extension CustomPDFView {
         
             }
         }
-        
-        // 2. 渲染被选中的 SignatureAnnotation
-        if let sig = self._threadSafeActiveSignature, sig.page == page {
-            let generousBounds = sig.bounds.insetBy(dx: -4, dy: -4)
-            
-            // 系统默认颜色的圆角实线边框
-            let path = NSBezierPath(roundedRect: generousBounds, xRadius: 4, yRadius: 4)
-            path.lineWidth = 1.5
-            strokeColor.setStroke()
-            path.stroke()
-            
-            // 四个角落的蓝色拖拽圆点
-            let handleSize: CGFloat = 8.0
-            let handleRadius = handleSize / 2.0
-            let corners = [
-                NSPoint(x: generousBounds.minX, y: generousBounds.minY),
-                NSPoint(x: generousBounds.maxX, y: generousBounds.minY),
-                NSPoint(x: generousBounds.minX, y: generousBounds.maxY),
-                NSPoint(x: generousBounds.maxX, y: generousBounds.maxY)
-            ]
-            
-            NSColor.white.setFill()
-            for corner in corners {
-                let rect = NSRect(x: corner.x - handleRadius, y: corner.y - handleRadius, width: handleSize, height: handleSize)
-                let circle = NSBezierPath(ovalIn: rect)
-                circle.fill()
-                strokeColor.setStroke()
-                circle.lineWidth = 1.0
-                circle.stroke()
-            }
-        }
-        
+
         NSGraphicsContext.restoreGraphicsState()
     }
     
