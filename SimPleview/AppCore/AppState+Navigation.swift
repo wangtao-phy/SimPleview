@@ -115,6 +115,13 @@ extension AppState {
     
     // MARK: - Undo (撤销机制)
     func undo() {
+        // [新逻辑：如果是绘图过程中，优先单笔撤销]
+        #if os(macOS)
+        if pdfView.undoDraftInk() {
+            return
+        }
+        #endif
+        
         recordHistoryAction() 
         // 向管理器发送撤销请求。它会返回是否成功。
         if annotationManager.undo(in: pdfView.document, pdfView: pdfView, onThumbnailUpdate: { [weak self] index in

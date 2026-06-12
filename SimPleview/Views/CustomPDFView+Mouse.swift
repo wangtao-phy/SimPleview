@@ -14,15 +14,22 @@ extension CustomPDFView {
         if self.activeType == .ink {
             let point = self.convert(event.locationInWindow, from: nil)
             if let page = self.page(for: point, nearest: true) {
+                
+                // 如果之前有草稿且和当前落笔页面不同，立刻结账
+                if let draftPage = self.draftInkPage, draftPage != page {
+                    self.commitDraftInk()
+                }
+                
                 let pagePoint = self.convert(point, to: page)
                 let path = NSBezierPath()
                 path.move(to: pagePoint)
                 
-                let batchID = "B-\(Int(Date().timeIntervalSince1970))-\(UUID().uuidString.prefix(4))"
+                if self.currentDrawingBatchID == nil {
+                    self.currentDrawingBatchID = "B-\(Int(Date().timeIntervalSince1970))-\(UUID().uuidString.prefix(4))"
+                }
                 
                 self.currentDrawingPath = path
                 self.currentDrawingPage = page
-                self.currentDrawingBatchID = batchID
                 
                 self._threadSafeDrawingPath = path.copy() as? NSBezierPath
                 self._threadSafeDrawingPage = page
@@ -69,59 +76,23 @@ extension CustomPDFView {
         // --- 手绘模式抬起处理 ---
         if self.activeType == .ink,
            let path = self.currentDrawingPath,
-           let page = self.currentDrawingPage,
-           let batchID = self.currentDrawingBatchID {
+           let page = self.currentDrawingPage {
             
             let point = self.convert(event.locationInWindow, from: nil)
             let pagePoint = self.convert(point, to: page)
             path.line(to: pagePoint)
             
-            // [核心修复] macOS PDFKit 存在严重的系统级 Bug：直接调用 `annot.add(NSBezierPath)` 创建 `.ink` 标注
-            // 会在底层触发 `Cannot save value for annotation key: /InkList. Invalid type.` 错误，导致画笔路径无法保存且立刻消失！
-            // 为了完美解决此问题，我们绕过原生路径添加，将坐标数据以字符串形式序列化，存入自定义的 PDF 属性中！
-            let expandedBounds = path.bounds.insetBy(dx: -2, dy: -2)
-            let annot = PDFAnnotation(bounds: expandedBounds, forType: .ink, withProperties: nil)
-            annot.color = self.manager?.pendingColorOverride ?? self.inkColor
-            annot.userName = batchID
-            
-            let border = PDFBorder()
-            border.lineWidth = self._threadSafeLineWidth
-            annot.border = border
-            
-            // 将真实坐标序列化（保持在 page 坐标系下，无需使用 transform，防止后续缩放错位）
-            var pointsStr = ""
-            for i in 0..<path.elementCount {
-                var pts = [NSPoint](repeating: .zero, count: 3)
-                let type = path.element(at: i, associatedPoints: &pts)
-                if type == .moveTo || type == .lineTo {
-                    pointsStr += "\(pts[0].x),\(pts[0].y);"
-                }
+            // 误触检测：如果整个线条极短（点了一下没拖动），直接丢弃
+            if path.bounds.width > 2 || path.bounds.height > 2 || path.elementCount > 3 {
+                self.draftInkPaths.append(path)
+                self.draftInkPage = page
+                self._threadSafeDraftInkPaths = self.draftInkPaths
             }
-            
-            // 利用 PDFKit 原生字典机制，植入我们的自定义键值！这个字段会随着 PDF 被永久保存！
-            annot.setValue(pointsStr, forAnnotationKey: PDFAnnotationKey(rawValue: "/SimPlePath"))
-            
-            page.addAnnotation(annot)
             
             self.currentDrawingPath = nil
             self.currentDrawingPage = nil
-            self.currentDrawingBatchID = nil
             self._threadSafeDrawingPath = nil
             self._threadSafeDrawingPage = nil
-            
-            if let doc = page.document {
-                let index = doc.index(for: page)
-                self.manager?.batchStack.append(.annotation(batchID: batchID, pageIndices: [index]))
-                
-                annot.modificationDate = Date()
-                self.manager?.pendingColorOverride = nil
-                
-                self.onSaveRequired?() // 触发脏标记
-                
-                // [核心修复] 既然下面发了 PDFRefreshAnnotations 广播让全局重新扫描页面，
-                // 这里就不能再做 allAnnotations.append()，否则会出现 O(1) 增量与 O(N) 扫描的竞态重复！
-                NotificationCenter.default.post(name: NSNotification.Name("PDFRefreshAnnotations"), object: nil)
-            }
             
             self.needsDisplay = true
             self.onMouseUp?()
@@ -210,6 +181,68 @@ extension CustomPDFView {
         
         // 外圈扩展 4 像素，内圈缩小 2 像素
         return box.insetBy(dx: -4, dy: -4).contains(clickPoint) && !box.insetBy(dx: 2, dy: 2).contains(clickPoint)
+    }
+    
+    override func resignFirstResponder() -> Bool {
+        self.commitDraftInk()
+        return super.resignFirstResponder()
+    }
+    
+    // MARK: - 墨迹多笔划成组结账逻辑
+    func commitDraftInk() {
+        guard !self.draftInkPaths.isEmpty, let page = self.draftInkPage, let batchID = self.currentDrawingBatchID else {
+            return
+        }
+        
+        var combinedBounds = self.draftInkPaths[0].bounds
+        for p in self.draftInkPaths.dropFirst() {
+            combinedBounds = combinedBounds.union(p.bounds)
+        }
+        
+        let expandedBounds = combinedBounds.insetBy(dx: -2, dy: -2)
+        let annot = PDFAnnotation(bounds: expandedBounds, forType: .ink, withProperties: nil)
+        annot.color = self.manager?.pendingColorOverride ?? self.inkColor
+        annot.userName = batchID
+        
+        let border = PDFBorder()
+        border.lineWidth = self._threadSafeLineWidth
+        annot.border = border
+        
+        // 将真实坐标序列化（保持在 page 坐标系下，无视缩放）
+        // 格式升级: M,x,y;L,x,y;
+        var pointsStr = ""
+        for p in self.draftInkPaths {
+            for i in 0..<p.elementCount {
+                var pts = [NSPoint](repeating: .zero, count: 3)
+                let type = p.element(at: i, associatedPoints: &pts)
+                if type == .moveTo {
+                    pointsStr += "M,\(pts[0].x),\(pts[0].y);"
+                } else if type == .lineTo {
+                    pointsStr += "L,\(pts[0].x),\(pts[0].y);"
+                }
+            }
+        }
+        
+        annot.setValue(pointsStr, forAnnotationKey: PDFAnnotationKey(rawValue: "/SimPlePath"))
+        page.addAnnotation(annot)
+        
+        if let doc = page.document {
+            let index = doc.index(for: page)
+            self.manager?.batchStack.append(.annotation(batchID: batchID, pageIndices: [index]))
+            
+            annot.modificationDate = Date()
+            self.manager?.pendingColorOverride = nil
+            
+            self.onSaveRequired?() // 触发脏标记
+            NotificationCenter.default.post(name: NSNotification.Name("PDFRefreshAnnotations"), object: nil)
+        }
+        
+        // 清理草稿
+        self.draftInkPaths = []
+        self.draftInkPage = nil
+        self._threadSafeDraftInkPaths = []
+        self.currentDrawingBatchID = nil
+        self.needsDisplay = true
     }
     
     override func keyDown(with event: NSEvent) {

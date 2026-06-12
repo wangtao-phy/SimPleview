@@ -52,6 +52,24 @@ class CustomPDFView: PDFView {
     var currentDrawingBatchID: String?
     nonisolated(unsafe) var _threadSafeDrawingPath: NSBezierPath?
     nonisolated(unsafe) var _threadSafeDrawingPage: PDFPage?
+    
+    // 手绘：缓存连续多笔划，在 commit 时才一次性写入 PDFAnnotation
+    var draftInkPaths: [NSBezierPath] = [] {
+        didSet { _threadSafeDraftInkPaths = draftInkPaths }
+    }
+    nonisolated(unsafe) var _threadSafeDraftInkPaths: [NSBezierPath] = []
+    var draftInkPage: PDFPage?
+    
+    // 支持在草稿阶段（还没 commit）的单笔撤销
+    func undoDraftInk() -> Bool {
+        guard !draftInkPaths.isEmpty else { return false }
+        draftInkPaths.removeLast()
+        if draftInkPaths.isEmpty {
+            draftInkPage = nil
+        }
+        self.setPlatformNeedsDisplay()
+        return true
+    }
     #endif
     
     // MARK: - Cross-Platform Properties
@@ -144,6 +162,8 @@ class CustomPDFView: PDFView {
             // [核心黑科技：手写烘焙 (Baking)]
             // 如果你退出了手写模式，赶紧把画布上的墨水“烘焙”成 PDF 原生的批注格式！
             if activeType == .ink && newValue != .ink { bakeDrawingToPDF() }
+            #elseif os(macOS)
+            if activeType == .ink && newValue != .ink { commitDraftInk() }
             #endif
         }
         didSet {

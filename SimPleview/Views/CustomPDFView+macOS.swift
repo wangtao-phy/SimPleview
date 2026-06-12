@@ -114,7 +114,7 @@ extension CustomPDFView {
             }
         }
         
-        // 2. 实时渲染当前正在绘制的手绘线条（无任何延迟）
+        // 2. 实时渲染当前正在绘制的单笔手绘线条
         if self._threadSafeActiveType == .ink,
            let path = self._threadSafeDrawingPath,
            let drawingPage = self._threadSafeDrawingPage,
@@ -130,6 +130,25 @@ extension CustomPDFView {
             
             NSGraphicsContext.restoreGraphicsState()
         }
+        
+        // 2.5 实时渲染尚未成组的草稿线条集合
+        if self._threadSafeActiveType == .ink,
+           !self._threadSafeDraftInkPaths.isEmpty,
+           let draftPage = self.draftInkPage, // 此处直接读取即可
+           draftPage == page {
+            NSGraphicsContext.saveGraphicsState()
+            NSGraphicsContext.current = NSGraphicsContext(cgContext: context, flipped: false)
+            
+            self._threadSafeInkColor.setStroke()
+            for draftPath in self._threadSafeDraftInkPaths {
+                draftPath.lineWidth = self._threadSafeLineWidth
+                draftPath.lineCapStyle = .round
+                draftPath.lineJoinStyle = .round
+                draftPath.stroke()
+            }
+            
+            NSGraphicsContext.restoreGraphicsState()
+        }
 
         // 3. [核心黑科技] 渲染那些由于 macOS PDFKit Bug 无法写入 /InkList 的自定义笔迹！
         for annot in page.annotations where (annot.type ?? "") == "Ink" {
@@ -141,10 +160,21 @@ extension CustomPDFView {
                 let bPath = NSBezierPath()
                 for (i, pair) in pairs.enumerated() {
                     let coords = pair.split(separator: ",")
-                    if coords.count == 2, let x = Double(coords[0]), let y = Double(coords[1]) {
-                        let point = NSPoint(x: x, y: y)
-                        if i == 0 { bPath.move(to: point) }
-                        else { bPath.line(to: point) }
+                    if coords.count == 3 {
+                        // 新格式: M,x,y 或 L,x,y
+                        let type = coords[0]
+                        if let x = Double(coords[1]), let y = Double(coords[2]) {
+                            let point = NSPoint(x: x, y: y)
+                            if type == "M" { bPath.move(to: point) }
+                            else if type == "L" { bPath.line(to: point) }
+                        }
+                    } else if coords.count == 2 {
+                        // 兼容老格式: x,y
+                        if let x = Double(coords[0]), let y = Double(coords[1]) {
+                            let point = NSPoint(x: x, y: y)
+                            if i == 0 { bPath.move(to: point) }
+                            else { bPath.line(to: point) }
+                        }
                     }
                 }
                 
