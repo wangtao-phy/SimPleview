@@ -34,24 +34,29 @@ class CustomPDFView: PDFView {
     var colorObserver: NSKeyValueObservation?
     var currentPopover: NSPopover?
     
-
+    // macOS 专属的选中状态玻璃遮罩层
+    var selectionOverlay: SelectionOverlayView?
     #endif
-    
-    var currentSelectionBorderAnnotations: [PDFAnnotation] = []
     
     // 【新增】：用于判断哪个批注正在被选中，以决定画框或弹窗
     var currentSelectedBatchID: String? {
         didSet {
+            _threadSafeBatchID = currentSelectedBatchID
             if currentSelectedBatchID != oldValue {
+                #if os(macOS)
+                self.selectionOverlay?.needsDisplay = true
+                #else
                 self.updateSelectionBorder()
+                #endif
             }
         }
     }
+    nonisolated(unsafe) var _threadSafeBatchID: String?
     
     #if os(iOS)
     var allowMenuForCurrentSelection = false
+    var currentSelectionBorderAnnotations: [PDFAnnotation] = []
     var editMenuInteraction: UIEditMenuInteraction?
-    #endif
     
     // 【核心重构：替身批注法】
     // 在原地生成纯净的 `.square` 批注作为边框，完美贴合任何翻页缩放。
@@ -68,28 +73,23 @@ class CustomPDFView: PDFView {
         // 【极简优化】：用户点击批注时，批注所在的页必然在屏幕可视范围内。
         // 所以我们只需要遍历 self.visiblePages 即可，彻底避免 O(N) 遍历整个几百页文档引发的卡顿！
         for page in self.visiblePages {
-            var lowestAnnotation: PDFAnnotation? = nil
-            var minMinY: CGFloat = .greatestFiniteMagnitude
-            
-            // 第一次遍历：找出最低点（用于 macOS 端便签图标锚定，iOS 虽然暂不使用但也一并找出无妨）
-            for annot in page.annotations where annot.userName == batchID {
-                let y = annot.bounds.minY
-                if y < minMinY {
-                    minMinY = y
-                    lowestAnnotation = annot
-                }
-            }
-            
             for annot in page.annotations where annot.userName == batchID {
                 let generousBounds = annot.bounds.insetBy(dx: -4, dy: -4)
-                let borderAnnot = SelectionBorderAnnotation(bounds: generousBounds, forType: .square, withProperties: nil)
-                borderAnnot.isLowest = (annot === lowestAnnotation)
+                let borderAnnot = PDFAnnotation(bounds: generousBounds, forType: .square, withProperties: nil)
+                borderAnnot.color = UIColor.systemBlue.withAlphaComponent(0.8)
+                // 仅设置边框色
+                borderAnnot.interiorColor = .clear
+                // 给替身打上绝对不可变、不可存的标签
+                borderAnnot.shouldPrint = false
+                borderAnnot.isReadOnly = true
+                borderAnnot.userName = "SYSTEM_BORDER"
                 
                 page.addAnnotation(borderAnnot)
                 currentSelectionBorderAnnotations.append(borderAnnot)
             }
         }
     }
+    #endif
     
     // 给 SwiftUI 外层调用的闭包钩子
     var onAnnotationSelected: ((PDFAnnotation?) -> Void)?
@@ -100,6 +100,11 @@ class CustomPDFView: PDFView {
     var onAnnotationContentsChanged: ((PDFAnnotation, String) -> Void)?
     
     var inkColor: PlatformColor = .systemBlue
+    
+    #if os(macOS)
+    // [P1优化] 缓存 SF Symbol 图标，避免在高频 draw 方法中每帧重建
+    nonisolated(unsafe) var _cachedNoteIcon: NSImage?
+    #endif
     
     // 当前状态（是在看书、划线、还是手写？）
     var activeType: AnnotationType = AnnotationType.none {

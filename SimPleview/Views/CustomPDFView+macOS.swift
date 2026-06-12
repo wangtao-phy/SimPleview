@@ -26,7 +26,27 @@ extension CustomPDFView {
         }
     }
     
-
+    // 监听 PDFKit 内部视图重排（如缩放、滚动页面改变等），此时我们需要确保遮罩层覆盖整个 documentView
+    override func layoutDocumentView() {
+        super.layoutDocumentView()
+        
+        guard let docView = self.documentView else { return }
+        
+        if self.selectionOverlay == nil {
+            let overlay = SelectionOverlayView(frame: docView.bounds)
+            overlay.pdfView = self
+            // 让遮罩层随 documentView 自动缩放和改变大小
+            overlay.autoresizingMask = [.width, .height]
+            docView.addSubview(overlay)
+            self.selectionOverlay = overlay
+        } else {
+            // 确保其大小始终紧贴 docView
+            self.selectionOverlay?.frame = docView.bounds
+            if self.selectionOverlay?.superview != docView {
+                docView.addSubview(self.selectionOverlay!)
+            }
+        }
+    }
     
     // 【核心碰撞算法】：判断鼠标是否精准点击了边框的边缘地带或右下角图标
     func showAnnotationPopover(for annotation: PDFAnnotation, at viewPoint: NSPoint, in view: NSView) {
