@@ -18,7 +18,9 @@ extension CustomPDFView {
             super.mouseDown(with: event)
             return
         }
-
+        
+        // 【关键修复】必须将事件传递给父类 PDFView，否则用户将完全无法选中文本或拖拽！
+        super.mouseDown(with: event)
     }
     
 

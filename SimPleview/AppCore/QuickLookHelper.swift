@@ -27,7 +27,7 @@ class QuickLookHelper: NSObject, NSSharingServiceDelegate {
     func sharingService(_ sharingService: NSSharingService, sourceFrameOnScreenForShareItem item: Any) -> NSRect {
         // 从屏幕正中央弹出
         if let screen = NSScreen.main {
-            let width: CGFloat = 800
+            let width: CGFloat = 1200
             let height: CGFloat = 800
             return NSRect(x: screen.frame.midX - width / 2, 
                           y: screen.frame.midY - height / 2, 
@@ -56,8 +56,8 @@ class QuickLookHelper: NSObject, NSSharingServiceDelegate {
                             try? modifiedData.write(to: targetURL, options: .atomic)
                             // 此时 FileMonitor 会自动监听到硬盘文件变化并触发热重载
                         }
-                    } else if let error = error {
-                        print("Failed to load data from NSItemProvider: \\(error)")
+                    } else if let err = error {
+                        print("Failed to load data from NSItemProvider: \(err.localizedDescription)")
                     }
                 }
             }

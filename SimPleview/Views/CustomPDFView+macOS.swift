@@ -54,46 +54,57 @@ extension CustomPDFView {
         
         // 1. 如果当前有被选中的批次 ID，我们就在这页上把属于它的批注框出来
         if let batchID = self._threadSafeBatchID {
-            let annots = page.annotations.filter { $0.userName == batchID }
-            if !annots.isEmpty {
-        
-                // 找到该批注组中最靠下（在 PDF 坐标系中 minY 最小）的块，用于挂载悬浮窗便签图标
-                let lowestAnnotation = annots.min { $0.bounds.minY < $1.bounds.minY }
-        
-        // [P1优化] 使用缓存的 SF Symbol 图标，避免在高频 draw 方法中每帧重新创建
-        if _cachedNoteIcon == nil {
-            if #available(macOS 11.0, *), let image = NSImage(systemSymbolName: "note.text", accessibilityDescription: nil) {
-                if #available(macOS 12.0, *) {
-                    let config = NSImage.SymbolConfiguration(hierarchicalColor: tintColor)
-                    _cachedNoteIcon = image.withSymbolConfiguration(config) ?? image
-                } else {
-                    _cachedNoteIcon = image
+            // [极致渲染优化：零内存分配 (Zero Allocation) 算法]
+            // draw 方法在滚动时以 60fps 极高频率调用。
+            // 之前的 .filter 会每帧产生一个新数组，.min 会再产生一个临时闭包，这会导致 GC (垃圾回收)
+            // 频繁介入，造成电量消耗和微小掉帧。现在改用单遍 for 循环，直接找出最低点并立即绘制。
+            var lowestAnnotation: PDFAnnotation? = nil
+            var minMinY: CGFloat = .greatestFiniteMagnitude
+            
+            // 第一次遍历：找到最低点（用于挂载便签图标）
+            for a in page.annotations where a.userName == batchID {
+                let y = a.bounds.minY
+                if y < minMinY {
+                    minMinY = y
+                    lowestAnnotation = a
                 }
             }
-        }
-        let noteIcon = _cachedNoteIcon
-        
-        for a in annots {
-            // 按照用户要求：选区范围稍微扩大，线框本身不需太粗，不带填充
-            let generousBounds = a.bounds.insetBy(dx: -4, dy: -4)
-            let path = NSBezierPath(roundedRect: generousBounds, xRadius: 4, yRadius: 4)
-            path.lineWidth = 1.5 // 恢复优雅的细线
             
-            // 绘制边框
-            strokeColor.setStroke()
-            path.stroke()
-            
-            // 只要一个是属于最底部的块，我们就在它的右下角绘制唯一的便签图标
-            if a === lowestAnnotation {
-                if let finalIcon = noteIcon {
-                    let iconSize: CGFloat = 20
-                    // 锚定在右下角，稍微向外扩展一点
-                    let iconRect = NSRect(x: generousBounds.maxX - 6, y: generousBounds.minY - iconSize + 6, width: iconSize, height: iconSize)
-                    finalIcon.draw(in: iconRect)
+            if lowestAnnotation != nil {
+                // [P1优化] 使用缓存的 SF Symbol 图标，避免在高频 draw 方法中每帧重新创建
+                if _cachedNoteIcon == nil {
+                    if #available(macOS 11.0, *), let image = NSImage(systemSymbolName: "note.text", accessibilityDescription: nil) {
+                        if #available(macOS 12.0, *) {
+                            let config = NSImage.SymbolConfiguration(hierarchicalColor: tintColor)
+                            _cachedNoteIcon = image.withSymbolConfiguration(config) ?? image
+                        } else {
+                            _cachedNoteIcon = image
+                        }
+                    }
                 }
-            }
-        }
-        
+                let noteIcon = _cachedNoteIcon
+                
+                // 第二次遍历：绘制所有线框
+                for a in page.annotations where a.userName == batchID {
+                    // 按照用户要求：选区范围稍微扩大，线框本身不需太粗，不带填充
+                    let generousBounds = a.bounds.insetBy(dx: -4, dy: -4)
+                    let path = NSBezierPath(roundedRect: generousBounds, xRadius: 4, yRadius: 4)
+                    path.lineWidth = 1.5 // 恢复优雅的细线
+                    
+                    // 绘制边框
+                    strokeColor.setStroke()
+                    path.stroke()
+                    
+                    // 只要一个是属于最底部的块，我们就在它的右下角绘制唯一的便签图标
+                    if a === lowestAnnotation {
+                        if let finalIcon = noteIcon {
+                            let iconSize: CGFloat = 20
+                            // 锚定在右下角，稍微向外扩展一点
+                            let iconRect = NSRect(x: generousBounds.maxX - 6, y: generousBounds.minY - iconSize + 6, width: iconSize, height: iconSize)
+                            finalIcon.draw(in: iconRect)
+                        }
+                    }
+                }
             }
         }
 

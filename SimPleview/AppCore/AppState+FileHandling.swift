@@ -14,7 +14,7 @@ extension AppState {
     
     /// [核心概念：加载 PDF]
     /// 这是 App 启动后最重要的函数，负责将硬盘里的 PDF 文件塞入内存。
-    func loadPDF(url: URL) {
+    func loadPDF(url: URL, isHotReloading: Bool = false) {
         #if os(iOS)
         // iOS 模式下：如果在多标签页中发现这个文件已经打开了，直接切换到它，不再重复加载。
         if let existingIndex = documents.firstIndex(where: { $0.url == url }) {
@@ -71,7 +71,7 @@ extension AppState {
                 self.documentManager.removeFromOpenedRecent(url: self.fileURL)
                 #endif
                 
-                self.setupDocument(doc, url: url)
+                self.setupDocument(doc, url: url, isHotReloading: isHotReloading)
                 
                 #if os(iOS)
                 // 存进UserDefaults持久化标签状态
@@ -83,7 +83,7 @@ extension AppState {
     
 
     // [教程注释：文件加载完毕后的基建配置]
-    func setupDocument(_ doc: PDFDocument, url: URL) {
+    func setupDocument(_ doc: PDFDocument, url: URL, isHotReloading: Bool = false) {
         self.fileURL = url
         self.pdfView.document = doc
         
@@ -121,12 +121,19 @@ extension AppState {
         let monitor = FileMonitor(url: url)
         monitor.onDidChange = { [weak self] in
             DispatchQueue.main.async {
-                self?.loadPDF(url: url)
+                guard let self = self else { return }
+                // 对于文件被外部修改（如 Markup popover 点击 Done），我们发起热重载
+                // 并提前记录当前的物理坐标，伪装成一次“休眠唤醒”来避开全量重置
+                let pageIndex = self.currentPageIndex
+                let zoom = self.pdfView.scaleFactor
+                let pt = self.pdfView.currentDestination?.point ?? .zero
+                self.hibernatedPosition = (pageIndex: pageIndex, point: pt, zoom: zoom)
+                self.loadPDF(url: url, isHotReloading: true)
             }
         }
         self.documentManager.fileMonitor = monitor
         
-        // [核心 O(1) 状态恢复]：判断是否是从节约模式休眠唤醒
+        // [核心 O(1) 状态恢复]：判断是否是从节约模式休眠唤醒 或 热重载
         if let pos = self.hibernatedPosition {
             // 这是唤醒：瞬间用 O(1) 算法挂靠精准物理坐标，且跳过清空缓存和庞大的 UI 重绘
             if let page = doc.page(at: pos.pageIndex) {
@@ -137,12 +144,26 @@ extension AppState {
             // 恢复完毕，清空位置缓存
             self.hibernatedPosition = nil
             
-            // 唤醒依然需要刷新左侧批注列表
+            // 唤醒或热重载依然需要刷新左侧批注列表
             self.refreshAnnotations()
+            
+            if isHotReloading {
+                // [热重载缩略图无缝刷新]
+                // 绝不能调用 clearCache() 和改变 documentVersion 导致整个侧边栏闪白！
+                // 我们只需精准移除刚刚被编辑的这一页的旧缓存，并通知其重新渲染。
+                self.thumbnailManager.removeThumbnail(for: pos.pageIndex)
+                self.generateThumbnail(for: pos.pageIndex)
+                
+                // [防内存泄漏与崩溃] 热重载时底层 PDFDocument 实例已换新，必须清空撤销栈，
+                // 否则旧的 PDFPage/PDFAnnotation 被强引用会导致内存泄漏，且 Undo 会崩溃。
+                self.annotationManager.batchStack.removeAll()
+            }
             
         } else {
             // 这是全新打开文件：重置历史、清空缓存、强迫 UI 重绘
             self.navigationHistory.removeAll()
+            self.annotationManager.batchStack.removeAll() // 换了新文件，肯定要清空上个文件的撤销栈
+            
             let savedPage = UserDefaults.standard.integer(forKey: "PDFLastPage_" + url.lastPathComponent)
             self.goToPage(max(0, min(savedPage, max(0, doc.pageCount - 1))))
             self.thumbnailManager.clearCache()
