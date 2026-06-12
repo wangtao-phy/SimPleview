@@ -166,6 +166,7 @@ struct ContentView: View {
         .popover(isPresented: $uiState.isShowingAnnotationEditor) {
             AnnotationEditorView(state: state, uiState: uiState)
         }
+
         #if os(macOS)
         // [高级黑科技：窗口状态桥接]
         // WindowAccessor 是一段我们自己封装的原生视图，它可以神不知鬼不觉地爬到树的顶端，
@@ -237,6 +238,7 @@ struct ContentView: View {
     @ViewBuilder
     private var PDFContainerView: some View {
         VStack(spacing: 0) {
+
             #if os(iOS)
             if !state.documents.isEmpty {
                 DocumentTabsView(state: state)
@@ -403,13 +405,7 @@ struct MacToolbarModifier: ViewModifier {
                     .disabled(state.fileURL == nil)
                 }
                 
-                ToolbarItem(id: "Markup", placement: .primaryAction) {
-                    Button(action: { uiState.isShowingMarkupPopover.toggle() }) { 
-                        Label(state.L("Markup"), systemImage: "scribble.variable") 
-                    }
-                    .disabled(state.fileURL == nil)
-                }
-                
+
                 ToolbarItem(id: "Ink", placement: .primaryAction) {
                     Button(action: {
                         if let url = state.fileURL {
@@ -464,10 +460,6 @@ struct MacToolbarModifier: ViewModifier {
                     .disabled(state.fileURL == nil)
                     .opacity(0)
             )
-            .popover(isPresented: $uiState.isShowingMarkupPopover) {
-                MarkupToolbarRepresentable()
-                    .frame(width: 300, height: 50)
-            }
     }
 }
 

@@ -164,6 +164,8 @@ extension AppState {
             self.navigationHistory.removeAll()
             self.annotationManager.batchStack.removeAll() // 换了新文件，肯定要清空上个文件的撤销栈
             
+
+            
             let savedPage = UserDefaults.standard.integer(forKey: "PDFLastPage_" + url.lastPathComponent)
             self.goToPage(max(0, min(savedPage, max(0, doc.pageCount - 1))))
             self.thumbnailManager.clearCache()

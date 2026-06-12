@@ -53,6 +53,7 @@ class CustomPDFView: PDFView {
     }
     nonisolated(unsafe) var _threadSafeBatchID: String?
     
+
     #if os(iOS)
     var allowMenuForCurrentSelection = false
     var currentSelectionBorderAnnotations: [PDFAnnotation] = []
