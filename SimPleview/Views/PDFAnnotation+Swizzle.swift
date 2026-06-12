@@ -20,7 +20,7 @@ extension PDFAnnotation {
         method_exchangeImplementations(originalMethod, swizzledMethod)
     }()
     
-    @objc dynamic func hd_draw(with box: PDFDisplayBox, in context: CGContext) {
+    @objc dynamic nonisolated func hd_draw(with box: PDFDisplayBox, in context: CGContext) {
         // 如果不是手绘批注，原样放行（此时 hd_draw 已经被替换为原始的 draw 实现）
         guard self.type == "Ink" else {
             self.hd_draw(with: box, in: context)
