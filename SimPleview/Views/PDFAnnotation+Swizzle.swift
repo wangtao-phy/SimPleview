@@ -37,35 +37,35 @@ extension PDFAnnotation {
         }
         
         // 既然我们自己接管了绘制，绝对不再调用系统的 hd_draw，彻底消灭模糊位图！
-        NSGraphicsContext.saveGraphicsState()
-        let nsContext = NSGraphicsContext(cgContext: context, flipped: false)
-        NSGraphicsContext.current = nsContext
+        // [线程安全修复]：PDFKit 会在后台线程 (NSOperationQueue) 异步生成缩略图并调用此绘制方法！
+        // 绝对不能使用 NSGraphicsContext、NSBezierPath 或 NSColor.setStroke()，否则会触发 _dispatch_assert_queue_fail。
+        // 必须全程使用 100% 线程安全的底层 CoreGraphics (CGContext)！
+        context.saveGState()
         
-        self.color.setStroke()
+        context.setStrokeColor(self.color.cgColor)
         let lineWidth = max(1.0, self.border?.lineWidth ?? 3.0)
+        context.setLineWidth(lineWidth)
+        context.setLineCap(.round)
+        context.setLineJoin(.round)
         
         for item in inkList {
             guard let stroke = item as? NSArray, stroke.count >= 2 else { continue }
-            let path = NSBezierPath()
-            path.lineWidth = lineWidth
-            path.lineCapStyle = .round
-            path.lineJoinStyle = .round
             
             // InkList 里面是平铺的坐标：[x1, y1, x2, y2, x3, y3...]
             if let startX = stroke[0] as? NSNumber, let startY = stroke[1] as? NSNumber {
-                path.move(to: NSPoint(x: CGFloat(startX.doubleValue), y: CGFloat(startY.doubleValue)))
+                context.move(to: CGPoint(x: CGFloat(startX.doubleValue), y: CGFloat(startY.doubleValue)))
                 
                 for i in stride(from: 2, to: stroke.count - 1, by: 2) {
                     if let x = stroke[i] as? NSNumber, let y = stroke[i+1] as? NSNumber {
-                        path.line(to: NSPoint(x: CGFloat(x.doubleValue), y: CGFloat(y.doubleValue)))
+                        context.addLine(to: CGPoint(x: CGFloat(x.doubleValue), y: CGFloat(y.doubleValue)))
                     }
                 }
             }
             
-            path.stroke()
+            context.strokePath()
         }
         
-        NSGraphicsContext.restoreGraphicsState()
+        context.restoreGState()
     }
 }
 #endif
