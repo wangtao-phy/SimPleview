@@ -116,15 +116,26 @@ final class AnnotationManager: ObservableObject {
         let token = UUID()
         self.currentRefreshUUID = token
         
-        // 我们只关心这五种类型的批注
-        // [极速 O(1) 优化] 将目标预先转换为小写 Set，彻底消灭下方的 O(N^2) 多语言字符串全量扫描
-        let lowercasedTargets: Set<String> = ["highlight", "underline", "strikeout", "ink", "stamp"]
+        // 我们关心这些类型的批注（包括系统 Markup 可能产生的签名 stamp、形状 square/circle 等）
+        let lowercasedTargets: Set<String> = ["highlight", "underline", "strikeout", "ink", "stamp", "freetext", "square", "circle", "line", "polygon", "polyline"]
 
         // [P1-3修复] 在主线程预提取所有页面的批注快照，避免后台线程调用 PDFDocument.page(at:) 导致死锁
+        // [关键修复] 同时在主线程为外部标注分配唯一 EXT- 前缀的 userName，
+        // 避免后台线程修改 userName 导致与 draw/mouseUp 之间的竞态条件
         var pageAnnotations: [[PDFAnnotation]] = []
         pageAnnotations.reserveCapacity(document.pageCount)
         for i in 0..<document.pageCount {
-            pageAnnotations.append(document.page(at: i)?.annotations ?? [])
+            let annots = document.page(at: i)?.annotations ?? []
+            for annot in annots {
+                guard let type = annot.type else { continue }
+                if lowercasedTargets.contains(type.lowercased()) {
+                    let id = annot.userName ?? ""
+                    if !id.starts(with: "B-") && !id.starts(with: "EXT-") {
+                        annot.userName = "EXT-\(UUID().uuidString.prefix(8))"
+                    }
+                }
+            }
+            pageAnnotations.append(annots)
         }
         
         // 后台仅做过滤和排序，不再访问 PDFDocument
@@ -152,7 +163,7 @@ final class AnnotationManager: ObservableObject {
                                 collectedAnnots.append(annot)
                             }
                         } else {
-                            // 外部批注（或老旧未分组批注）：直接全量收录
+                            // 外部批注：EXT- 前缀已在主线程提前设置好，直接收录
                             collectedAnnots.append(annot)
                         }
                     }
@@ -398,34 +409,46 @@ final class AnnotationManager: ObservableObject {
     // 手动删除某条批注
     @discardableResult
     func deleteAnnotation(_ annotation: PDFAnnotation, in document: PDFDocument?, pdfView: PDFView?, onThumbnailUpdate: (Int) -> Void) -> Bool {
-        guard let batchID = annotation.userName, let doc = document else { return false }
+        guard let doc = document else { return false }
+        
+        let batchID = annotation.userName ?? ""
+        let isInternalBatch = batchID.starts(with: "B-")
         
         var deletedAnnots: [PDFAnnotation] = []
         var pageIndices: [Int] = []
         var affectedPageIndices = Set<Int>()
         
-        // 【极致 O(1) 优化】因为我们拥有当前的 annotation，我们能知道它的中心页码。
-        // 同一笔画出来的标注最多跨越上下两页，所以只需搜索 [pageIndex - 2 ... pageIndex + 2] 即可！
-        if let basePage = annotation.page {
-            let baseIndex = doc.index(for: basePage)
-            let start = max(0, baseIndex - 2)
-            let end = min(doc.pageCount, baseIndex + 3)
-            
-            for i in start..<end {
-                if let page = doc.page(at: i) {
-                    // 批注如果是跨页画的，会被我们存成多条。我们通过统一的 batchID 把它们全找出来删掉。
-                    let toRemove = page.annotations.filter { $0.userName == batchID }
-                    if !toRemove.isEmpty {
-                        toRemove.forEach {
-                            // 触发 PDFKit 原生 KVO 机制以实现 O(1) 局部重绘
-                            $0.shouldDisplay = false
-                            deletedAnnots.append($0)
-                            pageIndices.append(i)
-                            page.removeAnnotation($0)
+        if isInternalBatch {
+            // 内部批注：通过 batchID 批量删除同一笔画出的所有分段
+            if let basePage = annotation.page {
+                let baseIndex = doc.index(for: basePage)
+                let start = max(0, baseIndex - 2)
+                let end = min(doc.pageCount, baseIndex + 3)
+                
+                for i in start..<end {
+                    if let page = doc.page(at: i) {
+                        let toRemove = page.annotations.filter { $0.userName == batchID }
+                        if !toRemove.isEmpty {
+                            toRemove.forEach {
+                                $0.shouldDisplay = false
+                                deletedAnnots.append($0)
+                                pageIndices.append(i)
+                                page.removeAnnotation($0)
+                            }
+                            affectedPageIndices.insert(i)
                         }
-                        affectedPageIndices.insert(i)
                     }
                 }
+            }
+        } else {
+            // 外部批注（来自系统 Markup 等）：精确删除单个标注对象
+            if let page = annotation.page {
+                let pageIndex = doc.index(for: page)
+                annotation.shouldDisplay = false
+                page.removeAnnotation(annotation)
+                deletedAnnots.append(annotation)
+                pageIndices.append(pageIndex)
+                affectedPageIndices.insert(pageIndex)
             }
         }
         

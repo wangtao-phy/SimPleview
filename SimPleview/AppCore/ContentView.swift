@@ -410,6 +410,17 @@ struct MacToolbarModifier: ViewModifier {
                     .disabled(state.fileURL == nil)
                 }
                 
+                ToolbarItem(id: "Ink", placement: .primaryAction) {
+                    Button(action: {
+                        if let url = state.fileURL {
+                            QuickLookHelper.shared.openMarkupService(for: url, document: state.pdfView.document)
+                        }
+                    }) {
+                        Label(state.L("Ink"), systemImage: "pencil.tip")
+                    }
+                    .disabled(state.fileURL == nil)
+                }
+                
                 ToolbarItem(id: "RotateLeft", placement: .primaryAction) {
                     Button(action: { state.rotateCurrentPageLeft() }) { Label(state.L("Rotate Left"), systemImage: "rotate.left") }
                     .disabled(state.fileURL == nil)
@@ -435,16 +446,7 @@ struct MacToolbarModifier: ViewModifier {
                     .disabled(state.fileURL == nil)
                 }
                 
-                ToolbarItem(id: "Ink", placement: .primaryAction) {
-                    Button(action: {
-                        if let url = state.fileURL {
-                            QuickLookHelper.shared.openMarkupService(for: url, document: state.pdfView.document)
-                        }
-                    }) {
-                        Label(state.L("Ink"), systemImage: "pencil.tip")
-                    }
-                    .disabled(state.fileURL == nil)
-                }
+
                 
                 ToolbarItem(id: "RightSidebar", placement: .primaryAction) {
                     Button(action: { uiState.toggleRightSidebar(state: state) }) {

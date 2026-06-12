@@ -45,8 +45,8 @@ extension CustomPDFView {
             return
         }
         
-        // 我们只关心我们需要处理的批注
-        let supportedTypes = ["Highlight", "Underline", "StrikeOut", "Ink"]
+        // 我们关心的批注类型（包括系统 Markup 产生的签名 Stamp）
+        let supportedTypes: Set<String> = ["highlight", "underline", "strikeout", "ink", "stamp", "freetext", "square", "circle", "line"]
         let clickRect = CGRect(x: pagePoint.x - 2, y: pagePoint.y - 2, width: 4, height: 4)
         
         // 获取当前页所有支持的批注（利用 reversed 惰性遍历，杜绝 filter 造成的数组内存分配开销）
@@ -56,7 +56,7 @@ extension CustomPDFView {
         // 图标的位置会向下凸出 bounds，全局惰性扫描保证图标不会被漏掉
         if let selectedBatchID = self.currentSelectedBatchID {
             if let borderHit = annotations.first(where: { 
-                supportedTypes.contains($0.type ?? "") && 
+                supportedTypes.contains(($0.type ?? "").lowercased()) && 
                 $0.userName == selectedBatchID && 
                 isClickOnBorder(clickPoint: pagePoint, annotationBounds: $0.bounds) 
             }) {
@@ -70,7 +70,7 @@ extension CustomPDFView {
         // 2. 如果没点中边框/图标，那就看看点中了哪个标注的【内部】
         // 这里加上 10 像素的容错，方便用户选中细小的下划线
         if let targetAnnotation = annotations.first(where: { 
-            supportedTypes.contains($0.type ?? "") && 
+            supportedTypes.contains(($0.type ?? "").lowercased()) && 
             $0.bounds.insetBy(dx: -10, dy: -10).intersects(clickRect) 
         }) {
             // 乐观更新本地选中状态

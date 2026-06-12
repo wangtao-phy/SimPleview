@@ -54,8 +54,7 @@ extension CustomPDFView {
         
         // 1. 如果当前有被选中的批次 ID，我们就在这页上把属于它的批注框出来
         if let batchID = self._threadSafeBatchID {
-            // 过滤掉 Stamp (签名)，因为签名有自己的专属拖拽边框渲染逻辑
-            let annots = page.annotations.filter { $0.userName == batchID && $0.type != "Stamp" }
+            let annots = page.annotations.filter { $0.userName == batchID }
             if !annots.isEmpty {
         
                 // 找到该批注组中最靠下（在 PDF 坐标系中 minY 最小）的块，用于挂载悬浮窗便签图标

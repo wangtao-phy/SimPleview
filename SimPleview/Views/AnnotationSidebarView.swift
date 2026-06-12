@@ -230,6 +230,7 @@ extension PDFAnnotation {
         if typeStr.contains("Highlight") { return "高亮" }
         if typeStr.contains("Underline") { return "下划线" }
         if typeStr.contains("StrikeOut") { return "删除线" }
+        if typeStr.contains("Ink") { return "手绘" }
         if typeStr.contains("Stamp") { return "签名" }
         return "标注"
     }
