@@ -34,8 +34,7 @@ class CustomPDFView: PDFView {
     var colorObserver: NSKeyValueObservation?
     var currentPopover: NSPopover?
     
-    // macOS 专属的选中状态玻璃遮罩层
-    var selectionOverlay: SelectionOverlayView?
+
     #endif
     
     // 【新增】：用于判断哪个批注正在被选中，以决定画框或弹窗
@@ -44,7 +43,7 @@ class CustomPDFView: PDFView {
             _threadSafeBatchID = currentSelectedBatchID
             if currentSelectedBatchID != oldValue {
                 #if os(macOS)
-                self.selectionOverlay?.needsDisplay = true
+                self.needsDisplay = true
                 #else
                 self.updateSelectionBorder()
                 #endif

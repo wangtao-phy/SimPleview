@@ -26,31 +26,89 @@ extension CustomPDFView {
         }
     }
     
-    // 监听 PDFKit 内部视图重排（如缩放、滚动页面改变等），此时我们需要确保遮罩层覆盖整个 documentView
-    override func layoutDocumentView() {
-        super.layoutDocumentView()
+    // --- 签名交互控制引擎 ---
+    // [Swift 6 关键修复] PDFKit 从后台瓦片渲染线程 (PDFTilePool.workQueue) 调用此方法。
+    // 由于 PDFView.draw(_:to:) 是 ObjC 方法，在 Swift 6 + DefaultActorIsolation=MainActor 下
+    // 需要显式标记 nonisolated 以避免 dispatch_assert_queue_fail 崩溃。
+    nonisolated override func draw(_ page: PDFPage, to context: CGContext) {
+        // 由于我们在 nonisolated 上下文中，直接调用 super.draw 可能会报 Actor 警告
+        // 苹果官方针对此类底层框架调用的推荐做法是使用 MainActor.assumeIsolated 
+        // 苹果官方文档指出 PDFView.draw(_:to:) 的默认实现为空。
+        // 但是实际上如果不调用，页面原文就会消失变成白屏！
+        // 因为在 Swift 6 下我们无法调用被 MainActor 隔离的 super.draw(page, to: context)，
+        // 我们可以直接调用 PDFPage 的底层非隔离绘图 API 来绘制原文。
+        page.draw(with: .cropBox, to: context)
         
-        guard let docView = self.documentView else { return }
-        
-        if self.selectionOverlay == nil {
-            let overlay = SelectionOverlayView(frame: docView.bounds)
-            overlay.pdfView = self
-            // 让遮罩层随 documentView 自动缩放和改变大小
-            overlay.autoresizingMask = [.width, .height]
-            // 确保它作为一个独立的 Core Animation Layer，并处于最顶层！
-            overlay.wantsLayer = true
-            overlay.layer?.zPosition = 999
-            docView.addSubview(overlay)
-            self.selectionOverlay = overlay
+        // 【性能优化】：将主题色获取提取到循环外
+        let accentColor: NSColor
+        if #available(macOS 10.14, *) {
+            accentColor = NSColor.controlAccentColor
         } else {
-            // 确保其大小始终紧贴 docView，只有在发生实质性变化时才赋值，防止触发无限 Layout 循环卡死捏合缩放！
-            if self.selectionOverlay?.frame != docView.bounds {
-                self.selectionOverlay?.frame = docView.bounds
+            accentColor = NSColor.systemBlue
+        }
+        let strokeColor = accentColor.withAlphaComponent(0.8)
+        let tintColor = accentColor.withAlphaComponent(0.85)
+        
+        NSGraphicsContext.saveGraphicsState()
+        NSGraphicsContext.current = NSGraphicsContext(cgContext: context, flipped: false)
+        
+        // 1. 如果当前有被选中的批次 ID，我们就在这页上把属于它的批注框出来
+        if let batchID = self._threadSafeBatchID {
+            // [极致渲染优化：零内存分配 (Zero Allocation) 算法]
+            // draw 方法在滚动时以 60fps 极高频率调用。
+            // 之前的 .filter 会每帧产生一个新数组，.min 会再产生一个临时闭包，这会导致 GC (垃圾回收)
+            // 频繁介入，造成电量消耗和微小掉帧。现在改用单遍 for 循环，直接找出最低点并立即绘制。
+            var lowestAnnotation: PDFAnnotation? = nil
+            var minMinY: CGFloat = .greatestFiniteMagnitude
+            
+            // 第一次遍历：找到最低点（用于挂载便签图标）
+            for a in page.annotations where a.userName == batchID {
+                let y = a.bounds.minY
+                if y < minMinY {
+                    minMinY = y
+                    lowestAnnotation = a
+                }
             }
-            if self.selectionOverlay?.superview != docView {
-                docView.addSubview(self.selectionOverlay!)
+            
+            if lowestAnnotation != nil {
+                // [P1优化] 使用缓存的 SF Symbol 图标，避免在高频 draw 方法中每帧重新创建
+                if _cachedNoteIcon == nil {
+                    if #available(macOS 11.0, *), let image = NSImage(systemSymbolName: "note.text", accessibilityDescription: nil) {
+                        if #available(macOS 12.0, *) {
+                            let config = NSImage.SymbolConfiguration(hierarchicalColor: tintColor)
+                            _cachedNoteIcon = image.withSymbolConfiguration(config) ?? image
+                        } else {
+                            _cachedNoteIcon = image
+                        }
+                    }
+                }
+                let noteIcon = _cachedNoteIcon
+                
+                // 第二次遍历：绘制所有线框
+                for a in page.annotations where a.userName == batchID {
+                    // 按照用户要求：选区范围稍微扩大，线框本身不需太粗，不带填充
+                    let generousBounds = a.bounds.insetBy(dx: -4, dy: -4)
+                    let path = NSBezierPath(roundedRect: generousBounds, xRadius: 4, yRadius: 4)
+                    path.lineWidth = 1.5 // 恢复优雅的细线
+                    
+                    // 绘制边框
+                    strokeColor.setStroke()
+                    path.stroke()
+                    
+                    // 只要一个是属于最底部的块，我们就在它的右下角绘制唯一的便签图标
+                    if a === lowestAnnotation {
+                        if let finalIcon = noteIcon {
+                            let iconSize: CGFloat = 20
+                            // 锚定在右下角，稍微向外扩展一点
+                            let iconRect = NSRect(x: generousBounds.maxX - 6, y: generousBounds.minY - iconSize + 6, width: iconSize, height: iconSize)
+                            finalIcon.draw(in: iconRect)
+                        }
+                    }
+                }
             }
         }
+
+        NSGraphicsContext.restoreGraphicsState()
     }
     
     // 【核心碰撞算法】：判断鼠标是否精准点击了边框的边缘地带或右下角图标
