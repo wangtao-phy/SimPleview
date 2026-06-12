@@ -85,7 +85,7 @@ extension CustomPDFView {
             annot.userName = batchID
             
             let border = PDFBorder()
-            border.lineWidth = 3.0
+            border.lineWidth = self._threadSafeLineWidth
             annot.border = border
             
             // 将真实坐标序列化（保持在 page 坐标系下，无需使用 transform，防止后续缩放错位）

@@ -154,6 +154,13 @@ class CustomPDFView: PDFView {
         }
     }
     nonisolated(unsafe) var _threadSafeActiveType: AnnotationType = .none
+    
+    var lineWidth: CGFloat = 3.0 {
+        didSet {
+            _threadSafeLineWidth = lineWidth
+        }
+    }
+    nonisolated(unsafe) var _threadSafeLineWidth: CGFloat = 3.0
 
 
     

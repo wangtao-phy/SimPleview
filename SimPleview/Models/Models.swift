@@ -178,6 +178,8 @@ struct L {
             "Underline Default Color": [.zh: "下划线默认颜色", .en: "Underline Default Color"],
             "Strikeout Default Color": [.zh: "删除线默认颜色", .en: "Strikeout Default Color"],
             "Ink Default Color": [.zh: "手绘默认颜色", .en: "Ink Default Color"],
+            "Line Weight": [.zh: "线条粗细", .en: "Line Weight"],
+            "Weight": [.zh: "粗细", .en: "Weight"],
             "General": [.zh: "通用", .en: "General"],
             "Shortcuts": [.zh: "快捷键", .en: "Shortcuts"],
             "File Operations": [.zh: "文件操作", .en: "File Operations"],

@@ -184,10 +184,13 @@ final class AnnotationManager: ObservableObject {
         selection.selectionsByLine().forEach { line in
             guard let page = line.pages.first else { return }
             
-            // 创建 PDFKit 原生批注对象
             let annot = PDFAnnotation(bounds: line.bounds(for: page), forType: subtype, withProperties: nil)
             annot.color = color
             annot.userName = batchID // 借用 userName 存我们的内部 ID
+            
+            let border = PDFBorder()
+            border.lineWidth = UserDefaults.standard.value(forKey: "defaultLineWidth") as? CGFloat ?? 3.0
+            annot.border = border
             
             // 真正将批注写入该页面
             page.addAnnotation(annot)

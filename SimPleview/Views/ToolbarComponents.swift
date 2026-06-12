@@ -178,6 +178,66 @@ struct ColorPickerMenu: View {
     }
 }
 
+// MARK: - 独立原生手绘按钮（带滑块下拉）
+struct DrawButtonView: View {
+    @ObservedObject var state: AppState
+    @State private var isShowingPopover = false
+    
+    var body: some View {
+        Button(action: {
+            if state.activeType == .ink {
+                // 如果已经是画笔状态，再次点击弹出粗细调节菜单
+                isShowingPopover.toggle()
+            } else {
+                // 如果不是画笔状态，切换到画笔
+                state.activeType = .ink
+            }
+        }) {
+            Label(state.L("Draw"), systemImage: "scribble.variable")
+                .foregroundColor(state.activeType == .ink ? .accentColor : .primary)
+        }
+        .popover(isPresented: $isShowingPopover) {
+            VStack {
+                Text(state.L("Line Weight") + ": \(String(format: "%.1f", state.currentLineWidth))")
+                    .font(.caption)
+                Slider(value: $state.currentLineWidth, in: 2...6, step: 0.5)
+                    .frame(width: 150)
+            }
+            .padding()
+            // 实时同步给选中的手绘标注
+            .onChange(of: state.currentLineWidth) { _, newValue in
+                if let annot = state.selectedAnnotation {
+                    let types: Set<String> = ["Ink"]
+                    if types.contains(annot.type ?? "") {
+                        let newBorder = annot.border?.copy() as? PDFBorder ?? PDFBorder()
+                        newBorder.lineWidth = newValue
+                        annot.border = newBorder
+                        
+                        // 顺带同步同一批次的笔画
+                        if let batchID = annot.userName, let doc = state.pdfView.document {
+                            if let basePage = annot.page {
+                                let baseIndex = doc.index(for: basePage)
+                                let start = max(0, baseIndex - 2)
+                                let end = min(doc.pageCount, baseIndex + 3)
+                                for i in start..<end {
+                                    if let page = doc.page(at: i) {
+                                        for a in page.annotations where a.userName == batchID && a != annot {
+                                            let batchBorder = a.border?.copy() as? PDFBorder ?? PDFBorder()
+                                            batchBorder.lineWidth = newValue
+                                            a.border = batchBorder
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        state.pdfView.setPlatformNeedsDisplay()
+                    }
+                }
+            }
+        }
+    }
+}
+
 // MARK: - iOS 专属：批注二次编辑面板
 /// 当你在 iOS 上点击了 PDF 里的某条高亮，屏幕底部会弹出一个浮窗。
 /// 这个浮窗就是这里定义的。它允许你修改高亮的颜色，或者一键删掉它。

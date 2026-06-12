@@ -123,7 +123,7 @@ extension CustomPDFView {
             NSGraphicsContext.current = NSGraphicsContext(cgContext: context, flipped: false)
             
             self._threadSafeInkColor.setStroke()
-            path.lineWidth = 3.0
+            path.lineWidth = self._threadSafeLineWidth
             path.lineCapStyle = .round
             path.lineJoinStyle = .round
             path.stroke()

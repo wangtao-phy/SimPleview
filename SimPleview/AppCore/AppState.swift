@@ -77,6 +77,14 @@ final class AppState: NSObject, ObservableObject, PDFViewDelegate {
     // 每次重新生成 PDFView 时，给它一个新 ID，强制 SwiftUI 把它当成全新视图重新渲染。
     @Published var pdfViewId = UUID()
     
+    // 当粗细改变时，通知到底层 PDFView，并更新偏好设置
+    @Published var currentLineWidth: CGFloat = 3.0 {
+        didSet {
+            UserDefaults.standard.set(currentLineWidth, forKey: "defaultLineWidth")
+            pdfView._threadSafeLineWidth = currentLineWidth
+        }
+    }
+    
     // [教程注释：带副作用的属性监听器]
     // `didSet` 魔法：每当 activeType 的值发生变化时，大括号里的代码就会自动执行。
     // 这里用来判断：如果用户选了任何批注工具，我们就重置计时器；如果选了 none，就彻底停掉。
@@ -230,6 +238,8 @@ final class AppState: NSObject, ObservableObject, PDFViewDelegate {
     
     // [生命周期：对象诞生]
     override init() {
+        let savedWidth = UserDefaults.standard.value(forKey: "defaultLineWidth") as? CGFloat ?? 3.0
+        self.currentLineWidth = savedWidth
         super.init()
         // 设置自己作为各个组件的事件代理人
         self.pdfView.manager = self.annotationManager

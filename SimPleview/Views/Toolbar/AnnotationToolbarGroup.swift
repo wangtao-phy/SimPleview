@@ -16,21 +16,15 @@ struct AnnotationToolbarGroup: CustomizableToolbarContent {
                 }
                 .pickerStyle(.segmented)
                 .frame(width: 150)
-                
                 ColorPickerMenu(state: state)
             }
             .disabled(state.fileURL == nil)
         }
         
-        // 独立原生手绘按钮
+        // 独立原生手绘按钮（带滑块下拉）
         ToolbarItem(id: "Draw", placement: .primaryAction) {
-            Button(action: {
-                state.activeType = (state.activeType == .ink ? .none : .ink)
-            }) {
-                Label(state.L("Draw"), systemImage: "scribble.variable")
-                    .foregroundColor(state.activeType == .ink ? .accentColor : .primary)
-            }
-            .disabled(state.fileURL == nil)
+            DrawButtonView(state: state)
+                .disabled(state.fileURL == nil)
         }
         
         // 旧版系统原生墨迹按钮（隐藏）
