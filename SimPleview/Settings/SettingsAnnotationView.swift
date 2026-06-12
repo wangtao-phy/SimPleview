@@ -18,6 +18,7 @@ struct AnnotationSettingsView: View {
     @AppStorage("defaultHighlightColor") var defaultHighlightColor: String = "Yellow"
     @AppStorage("defaultUnderlineColor") var defaultUnderlineColor: String = "Blue"
     @AppStorage("defaultStrikeoutColor") var defaultStrikeoutColor: String = "Red"
+    @AppStorage("defaultInkColor") var defaultInkColor: String = "Blue"
     
     // 基础颜色列表
     let colors = ["Blue", "Red", "Yellow", "Green", "Purple"]
@@ -89,6 +90,8 @@ struct AnnotationSettingsView: View {
                 .padding(.vertical, 4)
             ColorPicker(LS("Strikeout Default Color") + ":", selection: colorBinding(for: $defaultStrikeoutColor), supportsOpacity: false)
                 .padding(.vertical, 4)
+            ColorPicker(LS("Ink Default Color") + ":", selection: colorBinding(for: $defaultInkColor), supportsOpacity: false)
+                .padding(.vertical, 4)
         }
         #if os(macOS)
         .formStyle(.grouped)
@@ -100,6 +103,7 @@ struct AnnotationSettingsView: View {
         .onChange(of: defaultHighlightColor) { _, _ in postColorChangeNotification() }
         .onChange(of: defaultUnderlineColor) { _, _ in postColorChangeNotification() }
         .onChange(of: defaultStrikeoutColor) { _, _ in postColorChangeNotification() }
+        .onChange(of: defaultInkColor) { _, _ in postColorChangeNotification() }
     }
     
     private func postColorChangeNotification() {

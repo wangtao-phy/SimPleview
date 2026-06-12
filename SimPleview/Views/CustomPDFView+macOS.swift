@@ -150,7 +150,7 @@ extension CustomPDFView {
                 
                 NSGraphicsContext.saveGraphicsState()
                 NSGraphicsContext.current = NSGraphicsContext(cgContext: context, flipped: false)
-                (annot.color ?? self._threadSafeInkColor).setStroke()
+                annot.color.setStroke()
                 bPath.lineWidth = annot.border?.lineWidth ?? 3.0
                 bPath.lineCapStyle = .round
                 bPath.lineJoinStyle = .round

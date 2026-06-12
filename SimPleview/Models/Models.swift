@@ -177,6 +177,7 @@ struct L {
             "Highlight Default Color": [.zh: "高亮默认颜色", .en: "Highlight Default Color"],
             "Underline Default Color": [.zh: "下划线默认颜色", .en: "Underline Default Color"],
             "Strikeout Default Color": [.zh: "删除线默认颜色", .en: "Strikeout Default Color"],
+            "Ink Default Color": [.zh: "手绘默认颜色", .en: "Ink Default Color"],
             "General": [.zh: "通用", .en: "General"],
             "Shortcuts": [.zh: "快捷键", .en: "Shortcuts"],
             "File Operations": [.zh: "文件操作", .en: "File Operations"],
