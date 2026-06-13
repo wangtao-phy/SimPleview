@@ -231,12 +231,11 @@ final class AnnotationManager: ObservableObject {
     }
     
     // [功能点：应用签名标注]
-    func applySignature(cgImage: CGImage, bounds: CGRect, to page: PDFPage, pdfView: PDFView?, onThumbnailUpdate: (Int) -> Void) -> Bool {
+    func applySignature(annotation: PDFAnnotation, to page: PDFPage, pdfView: PDFView?, onThumbnailUpdate: (Int) -> Void) -> Bool {
         guard let doc = page.document else { return false }
         let pageIndex = doc.index(for: page)
         
         let batchID = "S-\(Int(Date().timeIntervalSince1970))-\(UUID().uuidString.prefix(4))"
-        let annotation = SignatureAnnotation(cgImage: cgImage, bounds: bounds)
         annotation.userName = batchID
         annotation.modificationDate = Date()
         

@@ -13,6 +13,7 @@ struct SignaturePopoverView: View {
     @ObservedObject var uiState: UIState
     
     @State private var signatureURLs: [URL] = []
+    @AppStorage("insertAsVector") var insertAsVector = true
     
     // 两列网格布局，展示得紧凑美观
     let columns = [
@@ -27,6 +28,15 @@ struct SignaturePopoverView: View {
                     .font(.headline)
                     .foregroundColor(.primary)
                 Spacer()
+                
+                // 矢量/位图切换按钮
+                Button(action: { insertAsVector.toggle() }) {
+                    Image(systemName: insertAsVector ? "waveform.path" : "photo")
+                        .font(.body.weight(.bold))
+                        .foregroundColor(insertAsVector ? .accentColor : .secondary)
+                }
+                .buttonStyle(.plain)
+                .help(state.L(insertAsVector ? "Vector Mode" : "Image Mode"))
                 
                 // 导入按钮
                 Button(action: importNewSignature) {
