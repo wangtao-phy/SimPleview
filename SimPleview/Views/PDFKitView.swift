@@ -63,6 +63,15 @@ class CustomPDFView: PDFView {
     }
     nonisolated(unsafe) var _threadSafeDraftInkPage: PDFPage?
     
+    // [防误触] 用户在画图时，如果不小心按了 Cmd+A，原生 PDFKit 会无视状态直接全选文本。
+    // 这会导致画面闪烁或者误触发其他逻辑，我们在这里直接拦截掉！
+    override func selectAll(_ sender: Any?) {
+        if self.activeType == .ink {
+            return // 画图模式下，禁止全选文本
+        }
+        super.selectAll(sender)
+    }
+    
     // 支持在草稿阶段（还没 commit）的单笔撤销
     func undoDraftInk() -> Bool {
         guard !draftInkPaths.isEmpty else { return false }

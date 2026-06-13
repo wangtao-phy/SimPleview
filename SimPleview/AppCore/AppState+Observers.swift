@@ -122,11 +122,17 @@ extension AppState {
             .debounce(for: .milliseconds(200), scheduler: RunLoop.main)
             #endif
             .sink { [weak self] _ in
-                guard let self = self, self.activeType != AnnotationType.none, !self.isApplyingAnnotation else { return }
+                guard let self = self else { return }
+                
+                // 只有处于文本高亮/下划线/删除线模式下，才去给选中的文字打标。手绘(.ink)模式下绝不触发文本打标。
+                guard self.activeType == .highlight || self.activeType == .underline || self.activeType == .strikeout else { return }
+                
+                guard !self.isApplyingAnnotation else { return }
+                
                 if let selection = self.pdfView.currentSelection, let str = selection.string, !str.isEmpty {
                     if str != self.lastProcessedSelectionString {
                         self.lastProcessedSelectionString = str
-                        // 如果选了文本，且当前开启了高亮工具，直接打上高亮！
+                        // 如果选了文本，且当前开启了文本标注工具，直接打上标注！
                         self.applyAnnotation()
                     }
                 }

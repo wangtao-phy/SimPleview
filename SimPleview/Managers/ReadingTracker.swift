@@ -207,7 +207,7 @@ class ReadingTracker: ObservableObject {
         }
         
         // 第二步：拿着数据的快照，跑去后台线程进行 CPU 密集型的 JSON 编码和硬盘读写操作
-        DispatchQueue.global(qos: .background).async { [weak self, recordsToSave] in
+        DispatchQueue.global(qos: .background).async { [recordsToSave] in
             let encoder = JSONEncoder()
             encoder.outputFormatting = .prettyPrinted
             
@@ -222,9 +222,8 @@ class ReadingTracker: ObservableObject {
                     do {
                         try data.write(to: url, options: .atomic)
                     } catch {
-                        // [P1修复] 写入失败时，将脏标记放回，下次重试
-                        DispatchQueue.main.async { [weak shared = ReadingTracker.shared] in
-                            shared?.dirtyRecords.insert(record.documentID)
+                        Task { @MainActor in
+                            ReadingTracker.shared.dirtyRecords.insert(record.documentID)
                         }
                     }
                 }
