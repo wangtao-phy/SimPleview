@@ -33,7 +33,7 @@ struct AnnotationToolbarGroup: CustomizableToolbarContent {
             Button(action: {
                 uiState.isShowingSignaturePopover.toggle()
             }) {
-                Image(systemName: "signature")
+                Label(state.L("Signature"), systemImage: "signature")
             }
             .help(state.L("Add Signature"))
             .disabled(state.fileURL == nil)

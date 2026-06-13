@@ -206,7 +206,8 @@ struct L {
             "Icon and Text": [.zh: "图标和文本", .en: "Icon and Text"],
             "Customize Toolbar...": [.zh: "自定义工具栏...", .en: "Customize Toolbar..."],
             "Bio": [.zh: "简介", .en: "Bio"],
-            "General Options": [.zh: "常规选项", .en: "General Options"]
+            "General Options": [.zh: "常规选项", .en: "General Options"],
+            "Burn-in Annotations...": [.zh: "烧录", .en: "Burn-in Annotations..."]
     ]
     static func s(_ key: String, _ lang: AppLanguage) -> String {
         return dict[key]?[lang] ?? key
