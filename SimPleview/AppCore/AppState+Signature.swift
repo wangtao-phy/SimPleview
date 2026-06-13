@@ -14,8 +14,6 @@ extension AppState {
     func processAndInsertSignature(imageURL: URL) {
         guard let transparentCGImage = createTransparentSignature(from: imageURL) else { return }
         
-        let insertAsVector = UserDefaults.standard.bool(forKey: "insertAsVector")
-        
         DispatchQueue.main.async { [weak self] in
             guard let self = self, let page = self.pdfView.currentPage else { return }
             
@@ -29,20 +27,9 @@ extension AppState {
             let y = pageBounds.midY - targetHeight / 2
             let bounds = NSRect(x: x, y: y, width: targetWidth, height: targetHeight)
             
-            let annotation: PDFAnnotation
-            if insertAsVector {
-                // [Vision 极客黑科技] 将位图提取为矢量路径
-                // 因为检测目标需要白底黑字，这里对 transparentCGImage 做个反相或用原始图片提取，
-                // 但这里我们可以直接对有透明度的图做提取吗？最好有个实体背景。
-                // 我们调用一个专门写好的方法，把 transparentCGImage 转为 CGPath
-                if let (path, avgColor) = self.extractVectorPathAndColor(from: transparentCGImage) {
-                    annotation = VectorSignatureAnnotation(path: path, color: avgColor, bounds: bounds)
-                } else {
-                    annotation = SignatureAnnotation(cgImage: transparentCGImage, bounds: bounds)
-                }
-            } else {
-                annotation = SignatureAnnotation(cgImage: transparentCGImage, bounds: bounds)
-            }
+            // [Vision 极客黑科技] 将位图提取为矢量路径
+            guard let (path, avgColor) = self.extractVectorPathAndColor(from: transparentCGImage) else { return }
+            let annotation = VectorSignatureAnnotation(path: path, color: avgColor, bounds: bounds)
             
             _ = self.annotationManager.applySignature(annotation: annotation, to: page, pdfView: self.pdfView) { index in
                 self.thumbnailManager.cancelThumbnail(for: index)
