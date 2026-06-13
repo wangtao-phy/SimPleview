@@ -50,6 +50,13 @@ class CustomPDFView: PDFView {
     var currentDrawingPath: NSBezierPath?
     var currentDrawingPage: PDFPage?
     var currentDrawingBatchID: String?
+    
+    // 签名缩放交互状态
+    var resizingAnnotation: PDFAnnotation?
+    var resizeHandleCorner: Int? // 0: TL, 1: TR, 2: BL, 3: BR
+    var resizeStartBounds: CGRect = .zero
+    var resizeStartMouse: NSPoint = .zero
+    
     nonisolated(unsafe) var _threadSafeDrawingPath: NSBezierPath?
     nonisolated(unsafe) var _threadSafeDrawingPage: PDFPage?
     

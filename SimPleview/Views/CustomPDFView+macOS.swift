@@ -90,24 +90,53 @@ extension CustomPDFView {
                 }
                 let noteIcon = _cachedNoteIcon
                 
+                let isSignature = batchID.hasPrefix("S-")
+                
                 // 第二次遍历：绘制所有线框
                 for a in page.annotations where a.userName == batchID {
-                    // 按照用户要求：选区范围稍微扩大，线框本身不需太粗，不带填充
                     let generousBounds = a.bounds.insetBy(dx: -4, dy: -4)
-                    let path = NSBezierPath(roundedRect: generousBounds, xRadius: 4, yRadius: 4)
-                    path.lineWidth = 1.5 // 恢复优雅的细线
                     
-                    // 绘制边框
-                    strokeColor.setStroke()
-                    path.stroke()
-                    
-                    // 只要一个是属于最底部的块，我们就在它的右下角绘制唯一的便签图标
-                    if a === lowestAnnotation {
-                        if let finalIcon = noteIcon {
-                            let iconSize: CGFloat = 20
-                            // 锚定在右下角，稍微向外扩展一点
-                            let iconRect = NSRect(x: generousBounds.maxX - 6, y: generousBounds.minY - iconSize + 6, width: iconSize, height: iconSize)
-                            finalIcon.draw(in: iconRect)
+                    if isSignature {
+                        // 画一个带角的边框，简单矩形
+                        let path = NSBezierPath(rect: generousBounds)
+                        path.lineWidth = 1.0
+                        strokeColor.setStroke()
+                        path.stroke()
+                        
+                        // 画四个控制点
+                        let handleSize: CGFloat = 6.0
+                        let handles = [
+                            NSRect(x: generousBounds.minX - handleSize/2, y: generousBounds.minY - handleSize/2, width: handleSize, height: handleSize),
+                            NSRect(x: generousBounds.maxX - handleSize/2, y: generousBounds.minY - handleSize/2, width: handleSize, height: handleSize),
+                            NSRect(x: generousBounds.minX - handleSize/2, y: generousBounds.maxY - handleSize/2, width: handleSize, height: handleSize),
+                            NSRect(x: generousBounds.maxX - handleSize/2, y: generousBounds.maxY - handleSize/2, width: handleSize, height: handleSize)
+                        ]
+                        
+                        NSColor.white.setFill()
+                        strokeColor.setStroke()
+                        for handle in handles {
+                            let handlePath = NSBezierPath(rect: handle)
+                            handlePath.lineWidth = 1.0
+                            handlePath.fill()
+                            handlePath.stroke()
+                        }
+                    } else {
+                        // 按照用户要求：选区范围稍微扩大，线框本身不需太粗，不带填充
+                        let path = NSBezierPath(roundedRect: generousBounds, xRadius: 4, yRadius: 4)
+                        path.lineWidth = 1.5 // 恢复优雅的细线
+                        
+                        // 绘制边框
+                        strokeColor.setStroke()
+                        path.stroke()
+                        
+                        // 只要一个是属于最底部的块，我们就在它的右下角绘制唯一的便签图标
+                        if a === lowestAnnotation {
+                            if let finalIcon = noteIcon {
+                                let iconSize: CGFloat = 20
+                                // 锚定在右下角，稍微向外扩展一点
+                                let iconRect = NSRect(x: generousBounds.maxX - 6, y: generousBounds.minY - iconSize + 6, width: iconSize, height: iconSize)
+                                finalIcon.draw(in: iconRect)
+                            }
                         }
                     }
                 }

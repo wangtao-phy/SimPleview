@@ -46,10 +46,38 @@ extension CustomPDFView {
         }
         
         let viewPoint = convert(event.locationInWindow, from: nil)
-        guard page(for: viewPoint, nearest: false) != nil else {
+        guard let page = page(for: viewPoint, nearest: false) else {
             super.mouseDown(with: event)
             return
         }
+        
+        let pagePoint = convert(viewPoint, to: page)
+        
+        // --- 拦截签名缩放 ---
+        if let selectedBatchID = self.currentSelectedBatchID, selectedBatchID.hasPrefix("S-") {
+            let handleSize: CGFloat = 12.0 // 点击热区稍微大一点
+            for annot in page.annotations where annot.userName == selectedBatchID {
+                let generousBounds = annot.bounds.insetBy(dx: -4, dy: -4)
+                let hitRects = [
+                    0: NSRect(x: generousBounds.minX - handleSize/2, y: generousBounds.minY - handleSize/2, width: handleSize, height: handleSize), // Bottom Left
+                    1: NSRect(x: generousBounds.maxX - handleSize/2, y: generousBounds.minY - handleSize/2, width: handleSize, height: handleSize), // Bottom Right
+                    2: NSRect(x: generousBounds.minX - handleSize/2, y: generousBounds.maxY - handleSize/2, width: handleSize, height: handleSize), // Top Left
+                    3: NSRect(x: generousBounds.maxX - handleSize/2, y: generousBounds.maxY - handleSize/2, width: handleSize, height: handleSize)  // Top Right
+                ]
+                
+                for (corner, rect) in hitRects {
+                    if rect.contains(pagePoint) {
+                        // 进入缩放模式
+                        self.resizingAnnotation = annot
+                        self.resizeHandleCorner = corner
+                        self.resizeStartBounds = annot.bounds
+                        self.resizeStartMouse = event.locationInWindow
+                        return // 彻底拦截，不传递给 super
+                    }
+                }
+            }
+        }
+        // --- 签名缩放拦截结束 ---
         
         // 【关键修复】必须将事件传递给父类 PDFView，否则用户将完全无法选中文本或拖拽！
         super.mouseDown(with: event)
@@ -72,10 +100,60 @@ extension CustomPDFView {
             self.setNeedsDisplay(dirtyRect)
             return
         }
+        // --- 签名缩放处理 ---
+        if let annot = self.resizingAnnotation, let corner = self.resizeHandleCorner, let page = annot.page {
+            let startPagePoint = self.convert(self.resizeStartMouse, to: page)
+            let currentPagePoint = self.convert(event.locationInWindow, to: page)
+            let dx = currentPagePoint.x - startPagePoint.x
+            
+            var newBounds = self.resizeStartBounds
+            let aspect = self.resizeStartBounds.width / self.resizeStartBounds.height
+            
+            // 以 dx 变化为主轴来决定缩放比例，保持长宽比
+            switch corner {
+            case 0: // Bottom Left (minX, minY)
+                let newWidth = max(20, self.resizeStartBounds.width - dx)
+                let newHeight = newWidth / aspect
+                newBounds.size = CGSize(width: newWidth, height: newHeight)
+                newBounds.origin.x = self.resizeStartBounds.maxX - newWidth
+                newBounds.origin.y = self.resizeStartBounds.maxY - newHeight
+            case 1: // Bottom Right (maxX, minY)
+                let newWidth = max(20, self.resizeStartBounds.width + dx)
+                let newHeight = newWidth / aspect
+                newBounds.size = CGSize(width: newWidth, height: newHeight)
+                newBounds.origin.y = self.resizeStartBounds.maxY - newHeight
+            case 2: // Top Left (minX, maxY)
+                let newWidth = max(20, self.resizeStartBounds.width - dx)
+                let newHeight = newWidth / aspect
+                newBounds.size = CGSize(width: newWidth, height: newHeight)
+                newBounds.origin.x = self.resizeStartBounds.maxX - newWidth
+            case 3: // Top Right (maxX, maxY)
+                let newWidth = max(20, self.resizeStartBounds.width + dx)
+                let newHeight = newWidth / aspect
+                newBounds.size = CGSize(width: newWidth, height: newHeight)
+            default: break
+            }
+            
+            annot.bounds = newBounds
+            self.setNeedsDisplay(self.bounds)
+            return
+        }
+        // --- 签名缩放处理结束 ---
+        
         super.mouseDragged(with: event)
     }
 
     override func mouseUp(with event: NSEvent) { 
+        // --- 签名缩放结束处理 ---
+        if let annot = self.resizingAnnotation {
+            self.resizingAnnotation = nil
+            self.resizeHandleCorner = nil
+            
+            // 触发可能的状态保存或刷新
+            self.onMouseUp?()
+            return
+        }
+        // --- 签名缩放结束处理完毕 --- 
         // --- 手绘模式抬起处理 ---
         if self.activeType == .ink,
            let path = self.currentDrawingPath,
