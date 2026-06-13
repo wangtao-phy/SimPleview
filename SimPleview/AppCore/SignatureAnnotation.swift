@@ -74,6 +74,10 @@ class VectorSignatureAnnotation: PDFAnnotation {
         
         context.saveGState()
         
+        // [核心修复]：强制使用高质量抗锯齿和插值采样，保证矢量图永远丝滑
+        context.interpolationQuality = .high
+        context.setShouldAntialias(true)
+        
         // 1. 移动到起始点
         context.translateBy(x: bounds.minX, y: bounds.minY)
         

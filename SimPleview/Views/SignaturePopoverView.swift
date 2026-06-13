@@ -29,14 +29,13 @@ struct SignaturePopoverView: View {
                     .foregroundColor(.primary)
                 Spacer()
                 
-                // 矢量/位图切换按钮
-                Button(action: { insertAsVector.toggle() }) {
-                    Image(systemName: insertAsVector ? "waveform.path" : "photo")
-                        .font(.body.weight(.bold))
-                        .foregroundColor(insertAsVector ? .accentColor : .secondary)
+                // 矢量/位图切换选择器
+                Picker("", selection: $insertAsVector) {
+                    Label(state.L("Image"), systemImage: "photo").tag(false)
+                    Label(state.L("Vector"), systemImage: "waveform.path").tag(true)
                 }
-                .buttonStyle(.plain)
-                .help(state.L(insertAsVector ? "Vector Mode" : "Image Mode"))
+                .pickerStyle(SegmentedPickerStyle())
+                .frame(width: 120)
                 
                 // 导入按钮
                 Button(action: importNewSignature) {
