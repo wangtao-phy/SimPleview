@@ -230,6 +230,10 @@ extension PDFAnnotation {
         if typeStr.contains("Highlight") { return "高亮" }
         if typeStr.contains("Underline") { return "下划线" }
         if typeStr.contains("StrikeOut") { return "删除线" }
+        // 签名有专门的类型展示
+        if let userName = self.userName, userName.hasPrefix("S-") {
+            return "签名"
+        }
         // 将手绘笔迹、签名（系统 Markup 通常使用 Stamp 存储手绘签名）、以及几何形状均映射为“手绘”
         if typeStr.contains("Ink") || typeStr.contains("Stamp") || typeStr.contains("Square") || typeStr.contains("Circle") || typeStr.contains("Line") || typeStr.contains("Polygon") {
             return "手绘"
