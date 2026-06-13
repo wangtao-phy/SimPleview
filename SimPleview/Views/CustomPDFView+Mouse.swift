@@ -223,7 +223,26 @@ extension CustomPDFView {
             }
         }
         
-        annot.setValue(pointsStr, forAnnotationKey: PDFAnnotationKey(rawValue: "/SimPlePath"))
+        // [严重恶性 Bug 修复：32KB 字符串极限截断导致的白屏毁坏 PDF]
+        // 由于我们将多笔画作合并为一个批注，导致其序列化后的字符串轻易突破 PDF 规范中对于 Dictionary String 的绝对物理极限 (32,767 bytes)。
+        // 苹果底层的 CoreGraphics 遇到超限字符串时，可能会强行截断，这在增量保存时会导致整个页面的 /Contents 流被破坏，从而导致页面不可逆转的白屏！
+        // 解法：按 30,000 个字符为一块进行物理切分，分别存入 /SimPlePath, /SimPlePath1, /SimPlePath2...
+        
+        let chunkSize = 30000
+        var chunkIndex = 0
+        var currentIndex = pointsStr.startIndex
+        
+        while currentIndex < pointsStr.endIndex {
+            let nextIndex = pointsStr.index(currentIndex, offsetBy: chunkSize, limitedBy: pointsStr.endIndex) ?? pointsStr.endIndex
+            let chunk = String(pointsStr[currentIndex..<nextIndex])
+            
+            let keyStr = chunkIndex == 0 ? "/SimPlePath" : "/SimPlePath\(chunkIndex)"
+            annot.setValue(chunk, forAnnotationKey: PDFAnnotationKey(rawValue: keyStr))
+            
+            currentIndex = nextIndex
+            chunkIndex += 1
+        }
+        
         page.addAnnotation(annot)
         
         if let doc = page.document {

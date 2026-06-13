@@ -152,8 +152,20 @@ extension CustomPDFView {
 
         // 3. [核心黑科技] 渲染那些由于 macOS PDFKit Bug 无法写入 /InkList 的自定义笔迹！
         for annot in page.annotations where (annot.type ?? "") == "Ink" {
-            // 读取我们植入的隐秘字段
-            if let pathStr = annot.value(forAnnotationKey: PDFAnnotationKey(rawValue: "/SimPlePath")) as? String {
+            // [严重恶性 Bug 修复：读取分块保存的路径字符串]
+            var pathStr = ""
+            var chunkIndex = 0
+            while true {
+                let keyStr = chunkIndex == 0 ? "/SimPlePath" : "/SimPlePath\(chunkIndex)"
+                if let chunk = annot.value(forAnnotationKey: PDFAnnotationKey(rawValue: keyStr)) as? String {
+                    pathStr += chunk
+                    chunkIndex += 1
+                } else {
+                    break
+                }
+            }
+            
+            if !pathStr.isEmpty {
                 let pairs = pathStr.split(separator: ";")
                 guard !pairs.isEmpty else { continue }
                 

@@ -96,13 +96,13 @@ final class DocumentManager: ObservableObject {
         saveWorkItem?.cancel()
 
         // 提取闭包：这是真正的存盘核心动作
-        // 【极其关键的修复：放弃 dataRepresentation 和原子写入】
-        // 苹果 PDFKit 存在臭名昭著的 LaTeX PDF 破坏 Bug。如果调用 dataRepresentation()，
-        // 系统会用 Quartz 2D 引擎将整个 PDF 完全重写一遍，这会直接丢失 LaTeX 文档中特殊的 Type 3 字体和排版流，
-        // 导致文件损坏、完全白屏！
-        // 唯一的解法是：直接调用 document.write(to: originalURL)。当目标 URL 和原 URL 强相同时，
-        // PDFKit 内部会自动触发『增量保存 (Incremental Save)』，仅仅把批注数据追加到文件末尾，
-        // 完美保护 LaTeX 原始内容！而且因为是增量追加，速度极快（毫秒级），完全可以直接在主线程执行而不会卡顿！
+        // 【重大恶性 Bug 修复：放弃直接原地覆盖，采用绝对安全的原子化替换保存】
+        // 以前的代码认为直接 write(to: originalURL) 可以触发增量保存从而保护 LaTeX。
+        // 但实际上，当 PDFKit 决定无法进行增量保存（例如删除了页面、重排了页面）时，它会强行进行全量重写 (Full Rewrite)。
+        // 此时由于目标 URL 是它当前正在 mmap(内存映射) 读取的原文件，这会导致原文件被 O_TRUNC 截断清空！
+        // 当渲染引擎试图从被清空的原文件中读取未缓存的页面内容流 (/Contents) 时，会读到 0 字节，从而将一个完全空白的页面写入新文件！
+        // 这就是为什么“重新打开pdf时某个页面全白了，但标注还在”的根本原因。
+        // 解法：先写入系统的临时文件夹，然后再原子化替换原文件。这 100% 杜绝了内存映射截断的问题！
         let workItem = DispatchWorkItem { [weak self] in
             // 在写入前请求系统的安全写入权限
             let accessing = url.startAccessingSecurityScopedResource()
@@ -111,10 +111,34 @@ final class DocumentManager: ObservableObject {
             // 通知主线程我们正在进行自我保存，避免文件监视器误报
             self?.fileMonitor?.isSelfSaving = true
             
-            // 触发 PDFKit 神奇的增量保存
-            let success = document.write(to: url)
+            let tempDir = FileManager.default.temporaryDirectory
+            let tempURL = tempDir.appendingPathComponent(UUID().uuidString + ".pdf")
             
-            if success {
+            // 安全写入到临时区，此时即使是全量重写，也不会截断当前正在读的原文件！
+            let writeSuccess = document.write(to: tempURL)
+            var finalSuccess = false
+            
+            if writeSuccess {
+                do {
+                    // 使用极其安全的 replaceItemAt 进行原子化替换
+                    _ = try FileManager.default.replaceItemAt(url, withItemAt: tempURL)
+                    finalSuccess = true
+                } catch {
+                    // 如果 replaceItemAt 失败（比如某些特殊沙盒环境），降级使用 Data 直接原子写入覆盖
+                    if let data = try? Data(contentsOf: tempURL) {
+                        do {
+                            try data.write(to: url, options: .atomic)
+                            finalSuccess = true
+                        } catch {
+                            print("PDF Save Fallback Failed: \(error)")
+                        }
+                    }
+                }
+                // 扫地僧：清理遗留的临时文件
+                try? FileManager.default.removeItem(at: tempURL)
+            }
+            
+            if finalSuccess {
                 self?.fileMonitor?.updateLastKnownModDate()
                 self?.isDirty = false
                 self?.saveWorkItem = nil

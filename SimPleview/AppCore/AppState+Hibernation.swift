@@ -93,7 +93,7 @@ extension AppState {
     
     // [逻辑流程：唤醒复活]
     func wakeUp() {
-        guard isHibernating, let url = fileURL else { return }
+        guard isHibernating, fileURL != nil else { return }
         isHibernating = false
         
         #if os(macOS)
