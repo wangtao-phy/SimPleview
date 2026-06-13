@@ -179,7 +179,7 @@ extension CustomPDFView {
 
     override func mouseUp(with event: NSEvent) { 
         // --- 签名缩放结束处理 ---
-        if let annot = self.resizingAnnotation {
+        if self.resizingAnnotation != nil {
             self.resizingAnnotation = nil
             self.resizeHandleCorner = nil
             

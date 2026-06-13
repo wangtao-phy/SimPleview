@@ -277,6 +277,10 @@ struct ThumbnailItem: View, Equatable {
         .padding(.horizontal, 10).contentShape(Rectangle())
         // 接收来自画图线程通过 Combine 发回来的“画好了”信号！
         .onReceive(state.thumbnailUpdateSubject) { if $0 == index { thumbnail = state.getThumbnail(for: index) } }
+        // 接收热重载的“唤醒”信号！仅当前可见的 ThumbnailItem 会收到此信号，触发自身的精准重绘
+        .onReceive(state.thumbnailManager.hotReloadSubject) { _ in
+            state.generateThumbnail(for: index)
+        }
         // 修复灰白问题的关键：滚出屏幕时，仅仅取消排队任务即可，坚决不要把 thumbnail 设为 nil！
         // 因为 NSCache 和强引用池会自动管理底层内存的抛弃与保留，SwiftUI 这里自然持有即可。
         .onDisappear {

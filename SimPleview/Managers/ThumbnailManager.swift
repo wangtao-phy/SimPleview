@@ -53,6 +53,9 @@ final class ThumbnailManager: ObservableObject {
     // 用来通知 UI 某张图画好了的信号发射器
     let thumbnailUpdateSubject = PassthroughSubject<Int, Never>()
     
+    // 用来通知所有存活（可见）的缩略图重新发起渲染请求（热重载唤醒机制）
+    let hotReloadSubject = PassthroughSubject<Void, Never>()
+    
     private var currentMemoryMode: MemoryMode
     nonisolated(unsafe) private var observer: NSObjectProtocol?
     

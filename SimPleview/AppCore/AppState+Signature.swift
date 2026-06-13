@@ -28,7 +28,7 @@ extension AppState {
             let y = pageBounds.midY - targetHeight / 2
             let bounds = NSRect(x: x, y: y, width: targetWidth, height: targetHeight)
             
-            self.annotationManager.applySignature(cgImage: transparentCGImage, bounds: bounds, to: page, pdfView: self.pdfView) { index in
+            _ = self.annotationManager.applySignature(cgImage: transparentCGImage, bounds: bounds, to: page, pdfView: self.pdfView) { index in
                 self.thumbnailManager.cancelThumbnail(for: index)
                 self.thumbnailManager.removeThumbnail(for: index)
                 self.generateThumbnail(for: index)
