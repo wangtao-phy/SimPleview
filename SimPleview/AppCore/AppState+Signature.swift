@@ -80,10 +80,12 @@ extension AppState {
         contrastFilter.contrast = 3.0
         guard let maskImage = contrastFilter.outputImage else { return nil }
         
-        // 4. 将提取出的亮度转为 Alpha 通道
-        let alphaFilter = CIFilter.maskToAlpha()
-        alphaFilter.inputImage = maskImage
-        guard let finalCIImage = alphaFilter.outputImage else { return nil }
+        // 4. 使用提取出的 mask 作为 Alpha 遮罩，将原图抠出来（保留原色）
+        let blendFilter = CIFilter.blendWithMask()
+        blendFilter.inputImage = ciImage
+        blendFilter.backgroundImage = CIImage(color: CIColor.clear).cropped(to: ciImage.extent)
+        blendFilter.maskImage = maskImage
+        guard let finalCIImage = blendFilter.outputImage else { return nil }
         
         let context = CIContext(options: nil)
         return context.createCGImage(finalCIImage, from: finalCIImage.extent)
