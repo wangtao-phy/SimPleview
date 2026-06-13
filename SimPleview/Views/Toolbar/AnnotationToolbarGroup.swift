@@ -4,6 +4,7 @@ import PDFKit
 /// 专门负责标注工具的工具栏组件（包括高亮、下划线、手绘、颜色选择等）
 struct AnnotationToolbarGroup: CustomizableToolbarContent {
     @ObservedObject var state: AppState
+    @ObservedObject var uiState: UIState
     
     var body: some CustomizableToolbarContent {
         ToolbarItem(id: "AnnotationTools", placement: .principal) {
@@ -27,6 +28,18 @@ struct AnnotationToolbarGroup: CustomizableToolbarContent {
                 .disabled(state.fileURL == nil)
         }
         
-
+        // 签名按钮
+        ToolbarItem(id: "Signature", placement: .primaryAction) {
+            Button(action: {
+                uiState.isShowingSignaturePopover.toggle()
+            }) {
+                Image(systemName: "signature")
+            }
+            .help(state.L("Add Signature"))
+            .disabled(state.fileURL == nil)
+            .popover(isPresented: $uiState.isShowingSignaturePopover, arrowEdge: .bottom) {
+                SignaturePopoverView(state: state, uiState: uiState)
+            }
+        }
     }
 }

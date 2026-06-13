@@ -230,6 +230,31 @@ final class AnnotationManager: ObservableObject {
         return true
     }
     
+    // [功能点：应用签名标注]
+    func applySignature(cgImage: CGImage, bounds: CGRect, to page: PDFPage, pdfView: PDFView?, onThumbnailUpdate: (Int) -> Void) -> Bool {
+        guard let doc = page.document else { return false }
+        let pageIndex = doc.index(for: page)
+        
+        let batchID = "S-\(Int(Date().timeIntervalSince1970))-\(UUID().uuidString.prefix(4))"
+        let annotation = SignatureAnnotation(cgImage: cgImage, bounds: bounds)
+        annotation.userName = batchID
+        annotation.modificationDate = Date()
+        
+        page.addAnnotation(annotation)
+        
+        // 压入撤销栈，以便 Cmd+Z 时能和普通标注一样被正常拔除
+        batchStack.append(.annotation(batchID: batchID, pageIndices: [pageIndex]))
+        
+        DispatchQueue.main.async { [weak self] in
+            self?.allAnnotations.append(annotation)
+        }
+        
+        onThumbnailUpdate(pageIndex)
+        pdfView?.setPlatformNeedsDisplay()
+        PlatformUtils.updateWindows()
+        return true
+    }
+    
 
     
     // [核心架构：撤销 (Undo) 解析器]

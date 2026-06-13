@@ -25,6 +25,9 @@ class UIState: ObservableObject {
     /// 是否处于全屏演示模式（幻灯片模式）
     @Published var isSlideshowActive: Bool = false
     
+    /// 控制签名浮窗的显示
+    @Published var isShowingSignaturePopover: Bool = false
+    
     // [教程注释：焦点触发器模式]
     // 在纯 SwiftUI 中控制键盘焦点的转移是一个痛点。
     // 我们用一个永远独一无二的 UUID 变量作为 Trigger。每次你想让搜索框激活，就换一个新 UUID。
