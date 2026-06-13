@@ -114,6 +114,7 @@ struct SimpleViewApp: App {
             Button(LS("Save")) { focusedState?.save(immediate: true) }
                 .keyboardShortcut(shortcutManager.save.keyEquivalent, modifiers: shortcutManager.save.modifiers)
             #if os(macOS)
+            Button(LS("Burn-in Annotations...")) { NotificationCenter.default.post(name: NSNotification.Name("TriggerBurnIn"), object: nil) }
             Button(LS("Close Window")) { NSApp.keyWindow?.performClose(nil) }
                 .keyboardShortcut(shortcutManager.closeWindow.keyEquivalent, modifiers: shortcutManager.closeWindow.modifiers)
             #endif

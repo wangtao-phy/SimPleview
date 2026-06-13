@@ -227,6 +227,13 @@ struct ContentView: View {
             }
             #endif
         }
+        .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("TriggerBurnIn"))) { _ in
+            #if os(macOS)
+            if hostingWindow?.isKeyWindow == true {
+                state.documentManager.burnInAnnotations(pdfView: state.pdfView)
+            }
+            #endif
+        }
         .onDisappear {
             state.cleanup()
         }
