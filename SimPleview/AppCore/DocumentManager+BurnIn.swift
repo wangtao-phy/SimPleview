@@ -44,7 +44,7 @@ extension DocumentManager {
             
             for i in 0..<safeDoc.pageCount {
                 guard let page = safeDoc.page(at: i) else { continue }
-                var mediaBox = page.bounds(for: .mediaBox)
+                let mediaBox = page.bounds(for: .mediaBox)
                 
                 // 开启新的一页
                 context.beginPDFPage([kCGPDFContextMediaBox as String: NSValue(rect: mediaBox)] as CFDictionary)
