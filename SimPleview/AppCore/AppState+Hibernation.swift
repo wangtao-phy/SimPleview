@@ -60,25 +60,22 @@ extension AppState {
         save(immediate: true)
         
         if MemoryMode.current.policy.allowsHibernation {
-            // [极致 O(1) 状态保存] 提取精确的物理位置数据，完全避免持有 PDFDestination 导致的对象泄漏
+            // [极致 O(1) 状态保存]
             if let dest = pdfView.currentDestination, let page = dest.page, let doc = pdfView.document {
                 let index = doc.index(for: page)
                 self.hibernatedPosition = (index, dest.point, dest.zoom)
             }
             
-            // [节约模式]：毫不留情，彻底粉碎底层视图，释放几百兆的图形缓存以换取极致内存！
-            pdfView.document = nil
-            pdfView.removeFromSuperview()
-            pdfView = CustomPDFView()
+            // 【稳定性修复】：以前激进地销毁 pdfView 和 document 会触发 PDFKit 底层的 CoreGraphics 字体子集(CGFont)缓存断裂，
+            // 导致唤醒后重新加载时 LaTeX 公式中 delta 等符号全部丢失，甚至整个页面白屏。
+            // 为了保证绝对的稳定性，我们现在绝对不销毁 PDFDocument 和 PDFView 本身，
+            // 而是主动清理所有的外围占用缓存，将 PDFKit 本身的图块回收交还给操作系统的内存压缩器。
             
-            // 由于是新对象，需要重新绑好两根关键的代理线
-            pdfView.manager = self.annotationManager
-            pdfView.delegate = self
-            // [P0修复] 重建所有核心回调，否则唤醒后标注点击/删除/保存等功能全部失效
-            setupCallbacks()
+            MemoryManager.shared.clearCaches()
+            thumbnailManager.clearCache()
             
-            // 强制 SwiftUI 扔掉旧壳子
-            pdfViewId = UUID()
+            // 可以通过隐式触发一些机制让 PDFKit 释放一些 Tile，但不重新 new 实例
+            pdfView.clearSelection()
         }
         // [性能模式]：什么都不做！保留原有的 pdfView 和所有的内存状态，主打用空间换时间！
         
@@ -108,9 +105,18 @@ extension AppState {
         #endif
         
         if !MemoryMode.isPerformance {
-            // [节约模式]：由于休眠时已经把视图砸了，现在必须重新读盘加载。
-            //底层 loadPDF 会自动检测到 hibernatedPosition 进行 O(1) 级的完美状态恢复
-            loadPDF(url: url)
+            // [节约模式]：因为休眠时我们不再销毁底层 PDFDocument 实例，所以完全不需要重新 loadPDF。
+            // 只要把蒙版去掉，PDFKit 就会自动请求由于内存压力而被系统清理的渲染图块，这是极其稳健的！
+            
+            // 为了确切跳回离开时的位置，防止因为清理了缓存导致缩放或者位置偏移，我们可以用 hibernatedPosition
+            if let pos = self.hibernatedPosition {
+                if let doc = pdfView.document, let page = doc.page(at: pos.pageIndex) {
+                    let dest = PDFDestination(page: page, at: pos.point)
+                    dest.zoom = pos.zoom
+                    self.pdfView.go(to: dest)
+                }
+                self.hibernatedPosition = nil
+            }
         }
         // [性能模式]：底层视图和缩略图在此期间毫发无损，仅仅是撤掉了黑屏蒙版，瞬间回归，没有任何复杂的重新挂载逻辑，极其稳健！
         

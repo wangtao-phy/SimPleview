@@ -56,4 +56,15 @@ final class MemoryManager {
         
         logger.warning("✅ [MemoryManager] Aggressively purged all background caches to survive.")
     }
+    
+    /// 手动清理系统所有全局可用内存缓存
+    func clearCaches() {
+        for weakState in AppState.allInstances {
+            if let state = weakState.value {
+                state.thumbnailManager.clearCache()
+                // 可以加更多全局缓存清理逻辑
+            }
+        }
+        logger.info("♻️ [MemoryManager] Manually cleared caches.")
+    }
 }
