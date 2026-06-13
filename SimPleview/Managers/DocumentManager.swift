@@ -111,32 +111,13 @@ final class DocumentManager: ObservableObject {
             // 通知主线程我们正在进行自我保存，避免文件监视器误报
             self?.fileMonitor?.isSelfSaving = true
             
-            let tempDir = FileManager.default.temporaryDirectory
-            let tempURL = tempDir.appendingPathComponent(UUID().uuidString + ".pdf")
-            
-            // 安全写入到临时区，此时即使是全量重写，也不会截断当前正在读的原文件！
-            let writeSuccess = document.write(to: tempURL)
-            var finalSuccess = false
-            
-            if writeSuccess {
-                do {
-                    // 使用极其安全的 replaceItemAt 进行原子化替换
-                    _ = try FileManager.default.replaceItemAt(url, withItemAt: tempURL)
-                    finalSuccess = true
-                } catch {
-                    // 如果 replaceItemAt 失败（比如某些特殊沙盒环境），降级使用 Data 直接原子写入覆盖
-                    if let data = try? Data(contentsOf: tempURL) {
-                        do {
-                            try data.write(to: url, options: .atomic)
-                            finalSuccess = true
-                        } catch {
-                            print("PDF Save Fallback Failed: \(error)")
-                        }
-                    }
-                }
-                // 扫地僧：清理遗留的临时文件
-                try? FileManager.default.removeItem(at: tempURL)
-            }
+            // [重大修复]：绝对不能使用 tempURL 进行间接替换！
+            // PDFKit 一旦发现 targetURL != originalURL，就会强行进行 Full Rewrite（全量重构）。
+            // 苹果的 Full Rewrite 引擎存在极大的缺陷，会直接剥离和破坏 LaTeX 等复杂文档中的 Type 3 和 subset 字体，导致公式字母全灭。
+            // 必须直接 write(to: url) 才能触发苹果底层的 Incremental Save（增量保存），这样 100% 保护原文档不被破坏。
+            // 之前出现的 White Page Bug，是因为在 Global 后台线程执行 write，导致与主线程 PDFView 渲染产生竞态。
+            // 现在我们已经将 workItem 强制在 MainActor 执行，彻底杜绝了 White Page 的问题！
+            let finalSuccess = document.write(to: url)
             
             if finalSuccess {
                 self?.fileMonitor?.updateLastKnownModDate()
