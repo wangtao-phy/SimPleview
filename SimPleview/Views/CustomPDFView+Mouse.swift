@@ -53,16 +53,20 @@ extension CustomPDFView {
         
         let pagePoint = convert(viewPoint, to: page)
         
-        // --- 拦截签名缩放 ---
-        if let selectedBatchID = self.currentSelectedBatchID, selectedBatchID.hasPrefix("S-") {
-            let handleSize: CGFloat = 12.0 // 点击热区稍微大一点
-            for annot in page.annotations where annot.userName == selectedBatchID {
-                let generousBounds = annot.bounds.insetBy(dx: -4, dy: -4)
+        // --- 签名缩放与拖拽拦截 ---
+        var hitSignatureForMove: PDFAnnotation? = nil
+        
+        for annot in page.annotations where (annot.userName ?? "").hasPrefix("S-") {
+            let generousBounds = annot.bounds.insetBy(dx: -4, dy: -4)
+            
+            // 1. 如果是当前选中的签名，先检查四个缩放手柄
+            if annot.userName == self.currentSelectedBatchID {
+                let handleSize: CGFloat = 12.0
                 let hitRects = [
-                    0: NSRect(x: generousBounds.minX - handleSize/2, y: generousBounds.minY - handleSize/2, width: handleSize, height: handleSize), // Bottom Left
-                    1: NSRect(x: generousBounds.maxX - handleSize/2, y: generousBounds.minY - handleSize/2, width: handleSize, height: handleSize), // Bottom Right
-                    2: NSRect(x: generousBounds.minX - handleSize/2, y: generousBounds.maxY - handleSize/2, width: handleSize, height: handleSize), // Top Left
-                    3: NSRect(x: generousBounds.maxX - handleSize/2, y: generousBounds.maxY - handleSize/2, width: handleSize, height: handleSize)  // Top Right
+                    0: NSRect(x: generousBounds.minX - handleSize/2, y: generousBounds.minY - handleSize/2, width: handleSize, height: handleSize),
+                    1: NSRect(x: generousBounds.maxX - handleSize/2, y: generousBounds.minY - handleSize/2, width: handleSize, height: handleSize),
+                    2: NSRect(x: generousBounds.minX - handleSize/2, y: generousBounds.maxY - handleSize/2, width: handleSize, height: handleSize),
+                    3: NSRect(x: generousBounds.maxX - handleSize/2, y: generousBounds.maxY - handleSize/2, width: handleSize, height: handleSize)
                 ]
                 
                 for (corner, rect) in hitRects {
@@ -76,8 +80,31 @@ extension CustomPDFView {
                     }
                 }
             }
+            
+            // 2. 检查是否点中了签名的主体（准备拖拽移动）
+            if generousBounds.contains(pagePoint) {
+                hitSignatureForMove = annot
+                // 我们不 break，因为后面的批注在 z-index 上可能更高
+            }
         }
-        // --- 签名缩放拦截结束 ---
+        
+        if let annotToMove = hitSignatureForMove {
+            // 如果还没选中，先选中
+            if self.currentSelectedBatchID != annotToMove.userName {
+                self.currentSelectedBatchID = annotToMove.userName
+                onAnnotationSelected?(annotToMove)
+                self.currentPopover?.close()
+                self.setNeedsDisplay(self.bounds)
+            }
+            
+            // 进入移动模式 (corner 为 nil 代表移动)
+            self.resizingAnnotation = annotToMove
+            self.resizeHandleCorner = nil
+            self.resizeStartBounds = annotToMove.bounds
+            self.resizeStartMouse = event.locationInWindow
+            return // 拦截
+        }
+        // --- 签名缩放与拖拽拦截结束 ---
         
         // 【关键修复】必须将事件传递给父类 PDFView，否则用户将完全无法选中文本或拖拽！
         super.mouseDown(with: event)
@@ -100,45 +127,52 @@ extension CustomPDFView {
             self.setNeedsDisplay(dirtyRect)
             return
         }
-        // --- 签名缩放处理 ---
-        if let annot = self.resizingAnnotation, let corner = self.resizeHandleCorner, let page = annot.page {
+        // --- 签名缩放与拖拽处理 ---
+        if let annot = self.resizingAnnotation, let page = annot.page {
             let startPagePoint = self.convert(self.resizeStartMouse, to: page)
             let currentPagePoint = self.convert(event.locationInWindow, to: page)
             let dx = currentPagePoint.x - startPagePoint.x
+            let dy = currentPagePoint.y - startPagePoint.y
             
             var newBounds = self.resizeStartBounds
-            let aspect = self.resizeStartBounds.width / self.resizeStartBounds.height
             
-            // 以 dx 变化为主轴来决定缩放比例，保持长宽比
-            switch corner {
-            case 0: // Bottom Left (minX, minY)
-                let newWidth = max(20, self.resizeStartBounds.width - dx)
-                let newHeight = newWidth / aspect
-                newBounds.size = CGSize(width: newWidth, height: newHeight)
-                newBounds.origin.x = self.resizeStartBounds.maxX - newWidth
-                newBounds.origin.y = self.resizeStartBounds.maxY - newHeight
-            case 1: // Bottom Right (maxX, minY)
-                let newWidth = max(20, self.resizeStartBounds.width + dx)
-                let newHeight = newWidth / aspect
-                newBounds.size = CGSize(width: newWidth, height: newHeight)
-                newBounds.origin.y = self.resizeStartBounds.maxY - newHeight
-            case 2: // Top Left (minX, maxY)
-                let newWidth = max(20, self.resizeStartBounds.width - dx)
-                let newHeight = newWidth / aspect
-                newBounds.size = CGSize(width: newWidth, height: newHeight)
-                newBounds.origin.x = self.resizeStartBounds.maxX - newWidth
-            case 3: // Top Right (maxX, maxY)
-                let newWidth = max(20, self.resizeStartBounds.width + dx)
-                let newHeight = newWidth / aspect
-                newBounds.size = CGSize(width: newWidth, height: newHeight)
-            default: break
+            if let corner = self.resizeHandleCorner {
+                let aspect = self.resizeStartBounds.width / self.resizeStartBounds.height
+                // 以 dx 变化为主轴来决定缩放比例，保持长宽比
+                switch corner {
+                case 0: // Bottom Left (minX, minY)
+                    let newWidth = max(20, self.resizeStartBounds.width - dx)
+                    let newHeight = newWidth / aspect
+                    newBounds.size = CGSize(width: newWidth, height: newHeight)
+                    newBounds.origin.x = self.resizeStartBounds.maxX - newWidth
+                    newBounds.origin.y = self.resizeStartBounds.maxY - newHeight
+                case 1: // Bottom Right (maxX, minY)
+                    let newWidth = max(20, self.resizeStartBounds.width + dx)
+                    let newHeight = newWidth / aspect
+                    newBounds.size = CGSize(width: newWidth, height: newHeight)
+                    newBounds.origin.y = self.resizeStartBounds.maxY - newHeight
+                case 2: // Top Left (minX, maxY)
+                    let newWidth = max(20, self.resizeStartBounds.width - dx)
+                    let newHeight = newWidth / aspect
+                    newBounds.size = CGSize(width: newWidth, height: newHeight)
+                    newBounds.origin.x = self.resizeStartBounds.maxX - newWidth
+                case 3: // Top Right (maxX, maxY)
+                    let newWidth = max(20, self.resizeStartBounds.width + dx)
+                    let newHeight = newWidth / aspect
+                    newBounds.size = CGSize(width: newWidth, height: newHeight)
+                default: break
+                }
+            } else {
+                // 拖拽移动模式
+                newBounds.origin.x += dx
+                newBounds.origin.y += dy
             }
             
             annot.bounds = newBounds
             self.setNeedsDisplay(self.bounds)
             return
         }
-        // --- 签名缩放处理结束 ---
+        // --- 签名缩放与拖拽处理结束 ---
         
         super.mouseDragged(with: event)
     }
@@ -212,7 +246,7 @@ extension CustomPDFView {
         
         // 1. 优先检测是否点中了“当前选中批注”的【边框】或【右下角图标】
         // 图标的位置会向下凸出 bounds，全局惰性扫描保证图标不会被漏掉
-        if let selectedBatchID = self.currentSelectedBatchID {
+        if let selectedBatchID = self.currentSelectedBatchID, !selectedBatchID.hasPrefix("S-") {
             if let borderHit = annotations.first(where: { 
                 supportedTypes.contains(($0.type ?? "").lowercased()) && 
                 $0.userName == selectedBatchID && 
