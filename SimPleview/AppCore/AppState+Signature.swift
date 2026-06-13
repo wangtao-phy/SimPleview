@@ -101,12 +101,24 @@ extension AppState {
         
         // 2. 图像预处理：VNDetectContoursRequest 对黑底白字效果最好。
         // 原图是透明底、深色字。我们将透明底填充为黑色，字变成白色。
-        let width = cgImage.width
-        let height = cgImage.height
+        let originalWidth = CGFloat(cgImage.width)
+        let originalHeight = CGFloat(cgImage.height)
+        
+        // [核心优化：大幅降低生成矢量点数]
+        // 限制最大处理分辨率，既能降噪使曲线更平滑，又能将生成的矢量点数减少 10-100 倍！
+        let maxDim: CGFloat = 300.0
+        let scale = min(1.0, maxDim / max(originalWidth, originalHeight))
+        
+        let width = Int(originalWidth * scale)
+        let height = Int(originalHeight * scale)
+        
         let colorSpace = CGColorSpaceCreateDeviceGray()
         guard let context = CGContext(data: nil, width: width, height: height, bitsPerComponent: 8, bytesPerRow: 0, space: colorSpace, bitmapInfo: CGImageAlphaInfo.none.rawValue) else { return nil }
         
-        // 黑底
+        // 强制高质量插值，保证缩放后的边缘平滑
+        context.interpolationQuality = .high
+        
+        // 填充黑底
         context.setFillColor(gray: 0, alpha: 1)
         context.fill(CGRect(x: 0, y: 0, width: width, height: height))
         
