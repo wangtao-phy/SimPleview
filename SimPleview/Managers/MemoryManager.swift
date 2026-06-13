@@ -48,9 +48,11 @@ final class MemoryManager {
         
         // 1. 强行砍掉缩略图渲染队列和图片池
         // 因为就算当前在“性能模式”保活了 500 张图，在系统要命的关头，也必须让步。
-        for weakState in AppState.allInstances {
-            if let state = weakState.value {
-                state.thumbnailManager.clearCache()
+        Task { @MainActor in
+            for weakState in AppState.allInstances {
+                if let state = weakState.value {
+                    state.thumbnailManager.clearCache()
+                }
             }
         }
         
@@ -59,10 +61,12 @@ final class MemoryManager {
     
     /// 手动清理系统所有全局可用内存缓存
     func clearCaches() {
-        for weakState in AppState.allInstances {
-            if let state = weakState.value {
-                state.thumbnailManager.clearCache()
-                // 可以加更多全局缓存清理逻辑
+        Task { @MainActor in
+            for weakState in AppState.allInstances {
+                if let state = weakState.value {
+                    state.thumbnailManager.clearCache()
+                    // 可以加更多全局缓存清理逻辑
+                }
             }
         }
         logger.info("♻️ [MemoryManager] Manually cleared caches.")

@@ -24,6 +24,7 @@ struct WeakAppState {
 /// - 高级内存管理与深度休眠机制 (Deep Hibernation)。
 /// - 全局撤销/重做栈的调度。
 /// - 多窗口并发环境下的状态同步。
+@MainActor
 final class AppState: NSObject, ObservableObject, PDFViewDelegate {
     
     // [核心概念：响应式视图容器]
@@ -213,24 +214,15 @@ final class AppState: NSObject, ObservableObject, PDFViewDelegate {
     
     // 静态全局变量池
     static var hasAttemptedRestore = false
-    private static var _allInstances: [WeakAppState] = []
-    private static let instancesQueue = DispatchQueue(label: "com.simpleview.instancesQueue")
-    
-    static var allInstances: [WeakAppState] {
-        instancesQueue.sync { _allInstances }
-    }
+    private(set) static var allInstances: [WeakAppState] = []
     
     static func addInstance(_ instance: AppState) {
-        instancesQueue.sync {
-            _allInstances.removeAll { $0.value == nil }
-            _allInstances.append(WeakAppState(value: instance))
-        }
+        allInstances.removeAll { $0.value == nil }
+        allInstances.append(WeakAppState(value: instance))
     }
     
     static func removeInstance(_ instance: AppState) {
-        instancesQueue.sync {
-            _allInstances.removeAll { $0.value === instance || $0.value == nil }
-        }
+        allInstances.removeAll { $0.value === instance || $0.value == nil }
     }
     static var pendingRestoreURLs: [URL] = []
     static var isAppExiting = false

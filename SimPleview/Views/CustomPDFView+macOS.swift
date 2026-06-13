@@ -322,6 +322,13 @@ struct PDFKitRepresentable: NSViewRepresentable {
         pdfView.interpolationQuality = policy.interpolationQuality
         pdfView.pageShadowsEnabled = policy.pageShadowsEnabled
         
+        // [极致节约]：如果在节约模式下，取消页面边缘的额外绘制缓冲
+        if !MemoryMode.isPerformance {
+            pdfView.displaysPageBreaks = false
+        } else {
+            pdfView.displaysPageBreaks = true
+        }
+        
         return pdfView
     }
     

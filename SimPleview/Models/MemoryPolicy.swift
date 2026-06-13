@@ -37,7 +37,8 @@ struct PerformanceMemoryPolicy: MemoryPolicy {
     var interpolationQuality: PDFInterpolationQuality { .high }
     var pageShadowsEnabled: Bool { true }
     
-    var thumbnailCountLimit: Int { 500 }
+    // [极致视觉优化]：提供极大的缓存以保证 ProMotion 等高刷屏滚动时绝对不掉帧
+    var thumbnailCountLimit: Int { 1000 }
     var thumbnailMaxEdge: CGFloat { 1024 }
     var usesStrongCacheRetention: Bool { true }
     
@@ -49,13 +50,14 @@ struct PerformanceMemoryPolicy: MemoryPolicy {
 }
 
 /// 节约模式：对标 Skim
-/// 降级渲染质量、较小的内存上限、遇到压力或关闭文档立即回收、极速滚动开启防抖。
+/// 降级渲染质量、极小的内存上限、遇到压力或关闭文档立即回收、极速滚动开启防抖。
 struct SavingMemoryPolicy: MemoryPolicy {
-    var interpolationQuality: PDFInterpolationQuality { .low }
+    var interpolationQuality: PDFInterpolationQuality { .none } // 追求最低内存占用和最快渲染
     var pageShadowsEnabled: Bool { false }
     
-    var thumbnailCountLimit: Int { 50 }
-    var thumbnailMaxEdge: CGFloat { 256 }
+    // [极限内存节约]：极大地缩减缩略图的占用大小和缓存数量，以空间换取极低的常驻内存
+    var thumbnailCountLimit: Int { 20 }
+    var thumbnailMaxEdge: CGFloat { 128 }
     var usesStrongCacheRetention: Bool { false }
     
     var delaysNavigationJumps: Bool { true }

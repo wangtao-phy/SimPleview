@@ -74,8 +74,11 @@ extension AppState {
             MemoryManager.shared.clearCaches()
             thumbnailManager.clearCache()
             
-            // 可以通过隐式触发一些机制让 PDFKit 释放一些 Tile，但不重新 new 实例
+            // [极致节约]：隐式触发机制让 PDFKit 释放不可见图块
             pdfView.clearSelection()
+            pdfView.displaysPageBreaks = false // 强制关闭页边距渲染以清空额外图层
+            pdfView.layoutDocumentView()       // 强制重新布局，触底释放
+            pdfView.displaysPageBreaks = true  // 恢复状态
         }
         // [性能模式]：什么都不做！保留原有的 pdfView 和所有的内存状态，主打用空间换时间！
         
