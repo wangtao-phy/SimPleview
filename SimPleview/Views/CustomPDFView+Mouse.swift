@@ -66,7 +66,10 @@ extension CustomPDFView {
             
             path.line(to: pagePoint)
             self._threadSafeDrawingPath = path.copy() as? NSBezierPath
-            self.needsDisplay = true
+            
+            // [性能优化] 只重绘线条所在的矩形区域（适当扩大 10 像素包容笔触宽度），避免全屏重绘导致 CPU 飙升
+            let dirtyRect = self.convert(path.bounds, from: page).insetBy(dx: -10, dy: -10)
+            self.setNeedsDisplay(dirtyRect)
             return
         }
         super.mouseDragged(with: event)
@@ -94,7 +97,8 @@ extension CustomPDFView {
             self._threadSafeDrawingPath = nil
             self._threadSafeDrawingPage = nil
             
-            self.needsDisplay = true
+            let dirtyRect = self.convert(path.bounds, from: page).insetBy(dx: -10, dy: -10)
+            self.setNeedsDisplay(dirtyRect)
             self.onMouseUp?()
             return
         }

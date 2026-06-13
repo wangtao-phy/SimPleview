@@ -63,32 +63,38 @@ class ReadingTracker: ObservableObject {
     // 单例
     static let shared = ReadingTracker()
     
+    private var observers: [NSObjectProtocol] = []
+    
     // [生命周期钩子]
     private init() {
         createDirectoryIfNeeded()
-        
-        // 注册各种乱七八糟的系统通知。
-        // 目的是：不管是在 Mac 还是 iOS，只要应用被推到后台，或者被强制杀死，我们都能第一时间接到通知！
+        registerAppLifecycleNotifications()
+    }
+    
+    // 注册各种乱七八糟的系统通知。
+    // 目的是：不管是在 Mac 还是 iOS，只要应用被推到后台，或者被强制杀死，我们都能第一时间接到通知！
+    private func registerAppLifecycleNotifications() {
+        let center = NotificationCenter.default
         #if os(macOS)
-        NotificationCenter.default.addObserver(forName: NSApplication.willResignActiveNotification, object: nil, queue: .main) { [weak self] _ in
+        observers.append(center.addObserver(forName: NSApplication.willResignActiveNotification, object: nil, queue: .main) { [weak self] _ in
             Task { @MainActor [weak self] in self?.handleAppDeactivated() }
-        }
-        NotificationCenter.default.addObserver(forName: NSApplication.didBecomeActiveNotification, object: nil, queue: .main) { [weak self] _ in
+        })
+        observers.append(center.addObserver(forName: NSApplication.didBecomeActiveNotification, object: nil, queue: .main) { [weak self] _ in
             Task { @MainActor [weak self] in self?.handleAppActivated() }
-        }
-        NotificationCenter.default.addObserver(forName: NSApplication.willTerminateNotification, object: nil, queue: .main) { [weak self] _ in
+        })
+        observers.append(center.addObserver(forName: NSApplication.willTerminateNotification, object: nil, queue: .main) { [weak self] _ in
             Task { @MainActor [weak self] in self?.handleAppDeactivated() }
-        }
+        })
         #else
-        NotificationCenter.default.addObserver(forName: UIApplication.didEnterBackgroundNotification, object: nil, queue: .main) { [weak self] _ in
+        observers.append(center.addObserver(forName: UIApplication.didEnterBackgroundNotification, object: nil, queue: .main) { [weak self] _ in
             Task { @MainActor [weak self] in self?.handleAppDeactivated() }
-        }
-        NotificationCenter.default.addObserver(forName: UIApplication.willEnterForegroundNotification, object: nil, queue: .main) { [weak self] _ in
+        })
+        observers.append(center.addObserver(forName: UIApplication.willEnterForegroundNotification, object: nil, queue: .main) { [weak self] _ in
             Task { @MainActor [weak self] in self?.handleAppActivated() }
-        }
-        NotificationCenter.default.addObserver(forName: UIApplication.willTerminateNotification, object: nil, queue: .main) { [weak self] _ in
+        })
+        observers.append(center.addObserver(forName: UIApplication.willTerminateNotification, object: nil, queue: .main) { [weak self] _ in
             Task { @MainActor [weak self] in self?.handleAppDeactivated() }
-        }
+        })
         #endif
     }
     
@@ -217,8 +223,8 @@ class ReadingTracker: ObservableObject {
                         try data.write(to: url, options: .atomic)
                     } catch {
                         // [P1修复] 写入失败时，将脏标记放回，下次重试
-                        DispatchQueue.main.async { [weak self] in
-                            self?.dirtyRecords.insert(record.documentID)
+                        DispatchQueue.main.async { [weak shared = ReadingTracker.shared] in
+                            shared?.dirtyRecords.insert(record.documentID)
                         }
                     }
                 }

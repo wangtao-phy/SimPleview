@@ -42,8 +42,8 @@ class CustomPDFView: PDFView {
     #endif
     
     #if os(macOS)
-    var menuObserver: NSObjectProtocol?
-    var colorObserver: NSKeyValueObservation?
+    nonisolated(unsafe) var menuObserver: NSObjectProtocol?
+    nonisolated(unsafe) var colorObserver: NSKeyValueObservation?
     var currentPopover: NSPopover?
     
     // macOS 原生手绘的实时状态缓存
@@ -72,6 +72,13 @@ class CustomPDFView: PDFView {
         }
         self.setPlatformNeedsDisplay()
         return true
+    }
+    
+    deinit {
+        if let obs = menuObserver {
+            NotificationCenter.default.removeObserver(obs)
+        }
+        colorObserver?.invalidate()
     }
     #endif
     

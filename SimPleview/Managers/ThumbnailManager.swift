@@ -54,13 +54,14 @@ final class ThumbnailManager: ObservableObject {
     let thumbnailUpdateSubject = PassthroughSubject<Int, Never>()
     
     private var currentMemoryMode: MemoryMode
+    nonisolated(unsafe) private var observer: NSObjectProtocol?
     
     init() {
         self.currentMemoryMode = MemoryMode.current
         applyMemoryMode()
         
         // 仅监听 memoryMode 键的变化，避免任意 UserDefaults 变更都触发缓存策略重评估
-        NotificationCenter.default.addObserver(forName: UserDefaults.didChangeNotification, object: nil, queue: .main) { [weak self] _ in
+        observer = NotificationCenter.default.addObserver(forName: UserDefaults.didChangeNotification, object: nil, queue: .main) { [weak self] _ in
             Task { @MainActor [weak self] in
                 guard let self = self else { return }
                 let newMode = MemoryMode.current
@@ -69,6 +70,12 @@ final class ThumbnailManager: ObservableObject {
                     self.applyMemoryMode()
                 }
             }
+        }
+    }
+    
+    deinit {
+        if let observer = observer {
+            NotificationCenter.default.removeObserver(observer)
         }
     }
     
