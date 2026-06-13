@@ -27,16 +27,6 @@ struct AnnotationToolbarGroup: CustomizableToolbarContent {
                 .disabled(state.fileURL == nil)
         }
         
-        // 旧版系统原生墨迹按钮（隐藏）
-        ToolbarItem(id: "Ink", placement: .primaryAction, showsByDefault: false) {
-            Button(action: {
-                if let url = state.fileURL {
-                    QuickLookHelper.shared.openMarkupService(for: url, document: state.pdfView.document)
-                }
-            }) {
-                Label(state.L("Ink"), systemImage: "pencil.tip")
-            }
-            .disabled(state.fileURL == nil)
-        }
+
     }
 }
