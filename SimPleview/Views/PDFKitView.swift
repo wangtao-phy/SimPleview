@@ -58,7 +58,10 @@ class CustomPDFView: PDFView {
         didSet { _threadSafeDraftInkPaths = draftInkPaths }
     }
     nonisolated(unsafe) var _threadSafeDraftInkPaths: [NSBezierPath] = []
-    var draftInkPage: PDFPage?
+    var draftInkPage: PDFPage? {
+        didSet { _threadSafeDraftInkPage = draftInkPage }
+    }
+    nonisolated(unsafe) var _threadSafeDraftInkPage: PDFPage?
     
     // 支持在草稿阶段（还没 commit）的单笔撤销
     func undoDraftInk() -> Bool {

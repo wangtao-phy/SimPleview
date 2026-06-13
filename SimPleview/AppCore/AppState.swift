@@ -209,6 +209,7 @@ final class AppState: NSObject, ObservableObject, PDFViewDelegate {
     
     var eventMonitor: Any? // 存 macOS 的原生事件监听器指针
     var savedDisplayMode: PDFDisplayMode = .singlePageContinuous
+    var savedBackgroundColor: PlatformColor = .clear
     
     // 静态全局变量池
     static var hasAttemptedRestore = false
@@ -418,6 +419,11 @@ final class AppState: NSObject, ObservableObject, PDFViewDelegate {
         WindowRegistry.shared.add(windowController)
         
         windowController.showWindow(nil)
+        
+        DispatchQueue.main.async {
+            NSApp.activate(ignoringOtherApps: true)
+            window.makeKeyAndOrderFront(nil)
+        }
         #endif
     }
 }

@@ -134,7 +134,7 @@ extension CustomPDFView {
         // 2.5 实时渲染尚未成组的草稿线条集合
         if self._threadSafeActiveType == .ink,
            !self._threadSafeDraftInkPaths.isEmpty,
-           let draftPage = self.draftInkPage, // 此处直接读取即可
+           let draftPage = self._threadSafeDraftInkPage, // 此处直接读取即可
            draftPage == page {
             NSGraphicsContext.saveGraphicsState()
             NSGraphicsContext.current = NSGraphicsContext(cgContext: context, flipped: false)

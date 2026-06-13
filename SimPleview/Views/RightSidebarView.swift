@@ -63,7 +63,11 @@ struct SearchSidebarView: View {
     @ObservedObject var state: AppState
     @ObservedObject var uiState: UIState
     @ObservedObject var searchManager: SearchManager
+    #if os(macOS)
+    @State private var isSearchFocused: Bool = false
+    #else
     @FocusState private var isSearchFocused: Bool
+    #endif
     
     var body: some View {
         VStack(spacing: 0) {
@@ -74,20 +78,32 @@ struct SearchSidebarView: View {
                 HStack {
                     Image(systemName: "magnifyingglass").foregroundColor(.secondary)
                     
-                    TextField(state.L("Search Document..."), text: $searchManager.searchQuery)
-                        .textFieldStyle(.plain) // 扒掉系统默认的白底圆角框，因为我们外面自己画了一个更好看的
+                    Group {
                         #if os(macOS)
-                        .focusEffectDisabled() // 彻底消除系统聚焦时闪烁的默认白色边框 / 聚焦环
-                        .background(Color.clear)
-                        #endif
-                        .focused($isSearchFocused)
-                        .submitLabel(.search) // iOS 专用：把键盘右下角的回车键变成蓝色的“搜索”按钮
-                        .onSubmit {
-                            // 当用户按下回车时，显式触发主线程更新，调用搜索下一个的逻辑
-                            DispatchQueue.main.async {
-                                state.goToNextSearchResult()
+                        SearchTextField(
+                            placeholder: state.L("Search Document..."),
+                            text: $searchManager.searchQuery,
+                            onCommit: {
+                                DispatchQueue.main.async {
+                                    state.goToNextSearchResult()
+                                }
+                            },
+                            isFocused: $isSearchFocused
+                        )
+                        .frame(height: 22)
+                        #else
+                        TextField(state.L("Search Document..."), text: $searchManager.searchQuery)
+                            .textFieldStyle(.plain) // 扒掉系统默认的白底圆角框，因为我们外面自己画了一个更好看的
+                            .focused($isSearchFocused)
+                            .submitLabel(.search) // iOS 专用：把键盘右下角的回车键变成蓝色的“搜索”按钮
+                            .onSubmit {
+                                // 当用户按下回车时，显式触发主线程更新，调用搜索下一个的逻辑
+                                DispatchQueue.main.async {
+                                    state.goToNextSearchResult()
+                                }
                             }
-                        }
+                        #endif
+                    }
                         .onChange(of: uiState.focusSearchTrigger) { _, _ in
                             DispatchQueue.main.async {
                                 isSearchFocused = true

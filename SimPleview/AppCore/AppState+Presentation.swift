@@ -28,6 +28,7 @@ extension AppState {
             // 裁剪掉白边
             self.pdfView.displayBox = .cropBox
             self.pdfView.displaysPageBreaks = false
+            self.savedBackgroundColor = self.pdfView.backgroundColor
             self.pdfView.backgroundColor = .black
             
             // 4. 暴力隐藏所有原生的 Mac 窗口边框、标题和按钮
@@ -67,7 +68,7 @@ extension AppState {
             guard let self = self, let win = window else { return }
             self.pdfView.displayMode = self.savedDisplayMode
             self.pdfView.displaysPageBreaks = true
-            self.pdfView.backgroundColor = .controlBackgroundColor
+            self.pdfView.backgroundColor = self.savedBackgroundColor
             win.titleVisibility = .visible
             win.titlebarAppearsTransparent = false
             win.toolbar?.isVisible = true
