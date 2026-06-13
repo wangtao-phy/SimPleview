@@ -259,12 +259,12 @@ struct ContentView: View {
                 if state.fileURL != nil {
                     // 如果有文件，加载真正的 PDF 引擎视图
                     #if os(iOS)
-                    PDFKitRepresentable(pdfView: state.pdfView, activeType: $state.activeType, inkColor: state.inkColor, selectedBatchID: state.selectedAnnotation?.userName)
+                    PDFKitRepresentable(pdfView: state.pdfView, activeType: $state.activeType, inkColor: state.currentColor, selectedBatchID: state.selectedAnnotation?.userName)
                         .focusable()
                         .focusEffectDisabled()
                         .id(state.pdfViewId) // 绑定唯一ID强制系统刷新
                     #else
-                    PDFKitRepresentable(pdfView: state.pdfView, activeType: $state.activeType, inkColor: state.inkColor, selectedBatchID: state.selectedAnnotation?.userName)
+                    PDFKitRepresentable(pdfView: state.pdfView, activeType: $state.activeType, inkColor: state.currentColor, selectedBatchID: state.selectedAnnotation?.userName)
                         .focusable()
                         .focusEffectDisabled()
                         .id(state.pdfViewId)
