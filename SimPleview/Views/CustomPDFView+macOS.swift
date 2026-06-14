@@ -4,6 +4,15 @@ import PDFKit
 #if os(macOS)
 import AppKit
 
+private nonisolated(unsafe) var inkPathAssociatedKey: UInt8 = 0
+
+extension PDFAnnotation {
+    nonisolated var cachedInkBezierPath: NSBezierPath? {
+        get { objc_getAssociatedObject(self, &inkPathAssociatedKey) as? NSBezierPath }
+        set { objc_setAssociatedObject(self, &inkPathAssociatedKey, newValue, .OBJC_ASSOCIATION_RETAIN_NONATOMIC) }
+    }
+}
+
 extension CustomPDFView {
     // MARK: - macOS Custom Menu Logic
     
@@ -58,105 +67,103 @@ extension CustomPDFView {
         NSGraphicsContext.saveGraphicsState()
         NSGraphicsContext.current = NSGraphicsContext(cgContext: context, flipped: false)
         
-        // 1. 如果当前有被选中的批次 ID，我们就在这页上把属于它的批注框出来
-        if let batchID = self._threadSafeBatchID {
-            // MARK: Zero Allocation Rendering Algorithm
-            // [极致渲染优化：零内存分配 (Zero Allocation)]
-            // 该 draw 方法在用户缩放、滚动时，会以 60FPS 的极高频率被核心渲染线程调用。
-            // 传统的 `.filter { }` 或 `.min { }` 高阶函数会在每一帧动态申请堆内存来存储临时闭包和中间数组，
-            // 进而导致系统垃圾回收 (GC) 频繁介入，造成可感知的掉帧和电量消耗。
-            // 此处采用最底层的单次 for 循环 (O(N) 甚至提早 break 的变种)，直接计算外接矩形最低点并立即绘制。
-            var lowestAnnotation: PDFAnnotation? = nil
-            var minMinY: CGFloat = .greatestFiniteMagnitude
-            
-            // 第一次遍历：找到最低点（用于挂载便签图标）
-            for a in page.annotations where a.userName == batchID {
-                let y = a.bounds.minY
-                if y < minMinY {
-                    minMinY = y
-                    lowestAnnotation = a
+        // 提前全量获取一次 annotations，避免在循环中重复触发 PDFKit 内部可能存在的数组重构和跨语言调用开销
+        let allAnnotations = page.annotations
+        
+        let batchID = self._threadSafeBatchID ?? ""
+        
+        // 第一次遍历：查找最底部的批注
+        var lowestAnnotation: PDFAnnotation? = nil
+        var currentLowestY: CGFloat = .greatestFiniteMagnitude
+        for a in allAnnotations where a.userName == batchID {
+            let y = a.bounds.minY
+            if y < currentLowestY {
+                currentLowestY = y
+                lowestAnnotation = a
+            }
+        }
+        
+        // [P1优化] 使用缓存的 SF Symbol 图标，避免在高频 draw 方法中每帧重新创建
+        if _cachedNoteIcon == nil {
+            if #available(macOS 11.0, *), let image = NSImage(systemSymbolName: "note.text", accessibilityDescription: nil) {
+                if #available(macOS 12.0, *) {
+                    let config = NSImage.SymbolConfiguration(hierarchicalColor: tintColor)
+                    _cachedNoteIcon = image.withSymbolConfiguration(config) ?? image
+                } else {
+                    _cachedNoteIcon = image
                 }
             }
+        }
+        let noteIcon = _cachedNoteIcon
+        
+        let isSignature = batchID.hasPrefix("S-")
+        
+        // 第二次遍历：绘制所有线框
+        for a in allAnnotations where a.userName == batchID {
+            let generousBounds = a.bounds.insetBy(dx: -4, dy: -4)
             
-            if lowestAnnotation != nil {
-                // [P1优化] 使用缓存的 SF Symbol 图标，避免在高频 draw 方法中每帧重新创建
-                if _cachedNoteIcon == nil {
-                    if #available(macOS 11.0, *), let image = NSImage(systemSymbolName: "note.text", accessibilityDescription: nil) {
-                        if #available(macOS 12.0, *) {
-                            let config = NSImage.SymbolConfiguration(hierarchicalColor: tintColor)
-                            _cachedNoteIcon = image.withSymbolConfiguration(config) ?? image
-                        } else {
-                            _cachedNoteIcon = image
-                        }
-                    }
+            if isSignature {
+                // 利用底层 ObjC 消息机制，绕过 Swift 6 @MainActor 的隔离检查读取 scaleFactor
+                let sfGetter = class_getInstanceMethod(PDFView.self, #selector(getter: PDFView.scaleFactor))!
+                let sfImp = method_getImplementation(sfGetter)
+                typealias GetterType = @convention(c) (AnyObject, Selector) -> CGFloat
+                let getScaleFactor = unsafeBitCast(sfImp, to: GetterType.self)
+                let sf = getScaleFactor(self, #selector(getter: PDFView.scaleFactor))
+                
+                // 恢复最初的实线圆角边框
+                let visualInset: CGFloat = 8.0 / sf
+                let generousBounds = a.bounds.insetBy(dx: -visualInset, dy: -visualInset)
+                let path = NSBezierPath(roundedRect: generousBounds, xRadius: 4, yRadius: 4)
+                path.lineWidth = 1.5 / sf
+                strokeColor.setStroke()
+                path.stroke()
+                
+                // 四个角落的蓝色拖拽圆点
+                let handleSize: CGFloat = 8.0 / sf
+                let handleRadius = handleSize / 2.0
+                let corners = [
+                    NSPoint(x: generousBounds.minX, y: generousBounds.minY),
+                    NSPoint(x: generousBounds.maxX, y: generousBounds.minY),
+                    NSPoint(x: generousBounds.minX, y: generousBounds.maxY),
+                    NSPoint(x: generousBounds.maxX, y: generousBounds.maxY)
+                ]
+                
+                NSColor.white.setFill()
+                strokeColor.setStroke()
+                for corner in corners {
+                    let rect = NSRect(x: corner.x - handleRadius, y: corner.y - handleRadius, width: handleSize, height: handleSize)
+                    let circle = NSBezierPath(ovalIn: rect)
+                    circle.lineWidth = 1.0 / sf
+                    circle.fill()
+                    circle.stroke()
                 }
-                let noteIcon = _cachedNoteIcon
+            } else {
+                // 按照用户要求：选区范围稍微扩大，线框本身不需太粗，不带填充
+                let path = NSBezierPath(roundedRect: generousBounds, xRadius: 4, yRadius: 4)
+                path.lineWidth = 1.5 // 恢复优雅的细线
                 
-                let isSignature = batchID.hasPrefix("S-")
+                // 绘制边框
+                strokeColor.setStroke()
+                path.stroke()
                 
-                // 第二次遍历：绘制所有线框
-                for a in page.annotations where a.userName == batchID {
-                    let generousBounds = a.bounds.insetBy(dx: -4, dy: -4)
-                    
-                    if isSignature {
-                        // 利用底层 ObjC 消息机制，绕过 Swift 6 @MainActor 的隔离检查读取 scaleFactor
-                        let sfGetter = class_getInstanceMethod(PDFView.self, #selector(getter: PDFView.scaleFactor))!
-                        let sfImp = method_getImplementation(sfGetter)
-                        typealias GetterType = @convention(c) (AnyObject, Selector) -> CGFloat
-                        let getScaleFactor = unsafeBitCast(sfImp, to: GetterType.self)
-                        let sf = getScaleFactor(self, #selector(getter: PDFView.scaleFactor))
-                        
-                        // 恢复最初的实线圆角边框
-                        let visualInset: CGFloat = 8.0 / sf
-                        let generousBounds = a.bounds.insetBy(dx: -visualInset, dy: -visualInset)
-                        let path = NSBezierPath(roundedRect: generousBounds, xRadius: 4, yRadius: 4)
-                        path.lineWidth = 1.5 / sf
-                        strokeColor.setStroke()
-                        path.stroke()
-                        
-                        // 四个角落的蓝色拖拽圆点
-                        let handleSize: CGFloat = 8.0 / sf
-                        let handleRadius = handleSize / 2.0
-                        let corners = [
-                            NSPoint(x: generousBounds.minX, y: generousBounds.minY),
-                            NSPoint(x: generousBounds.maxX, y: generousBounds.minY),
-                            NSPoint(x: generousBounds.minX, y: generousBounds.maxY),
-                            NSPoint(x: generousBounds.maxX, y: generousBounds.maxY)
-                        ]
-                        
-                        NSColor.white.setFill()
-                        strokeColor.setStroke()
-                        for corner in corners {
-                            let rect = NSRect(x: corner.x - handleRadius, y: corner.y - handleRadius, width: handleSize, height: handleSize)
-                            let circle = NSBezierPath(ovalIn: rect)
-                            circle.lineWidth = 1.0 / sf
-                            circle.fill()
-                            circle.stroke()
-                        }
-                    } else {
-                        // 按照用户要求：选区范围稍微扩大，线框本身不需太粗，不带填充
-                        let path = NSBezierPath(roundedRect: generousBounds, xRadius: 4, yRadius: 4)
-                        path.lineWidth = 1.5 // 恢复优雅的细线
-                        
-                        // 绘制边框
-                        strokeColor.setStroke()
-                        path.stroke()
-                        
-                        // 只要一个是属于最底部的块，我们就在它的右下角绘制唯一的便签图标
-                        if a === lowestAnnotation {
-                            if let finalIcon = noteIcon {
-                                let iconSize: CGFloat = 20
-                                // 锚定在右下角，稍微向外扩展一点
-                                let iconRect = NSRect(x: generousBounds.maxX - 6, y: generousBounds.minY - iconSize + 6, width: iconSize, height: iconSize)
-                                finalIcon.draw(in: iconRect)
-                            }
-                        }
+                // 只要一个是属于最底部的块，我们就在它的右下角绘制唯一的便签图标
+                if a === lowestAnnotation {
+                    if let finalIcon = noteIcon {
+                        let iconSize: CGFloat = 20.0
+                        let padding: CGFloat = 6.0
+                        let iconRect = NSRect(
+                            x: generousBounds.maxX + padding,
+                            y: generousBounds.minY - (iconSize - generousBounds.height) / 2,
+                            width: iconSize,
+                            height: iconSize
+                        )
+                        finalIcon.draw(in: iconRect)
                     }
                 }
             }
         }
         
-        // 2. 实时渲染当前正在绘制的单笔手绘线条
+        // 2. 实时渲染当前正在拖拽产生的、还没有被 PDFDocument 真正收录为 Annotation 的平滑手绘轨迹
         if self._threadSafeActiveType == .ink,
            let path = self._threadSafeDrawingPath,
            let drawingPage = self._threadSafeDrawingPage,
@@ -193,77 +200,59 @@ extension CustomPDFView {
         }
 
         // 3. [核心黑科技] 渲染那些由于 macOS PDFKit Bug 无法写入 /InkList 的自定义笔迹！
-        for annot in page.annotations where (annot.type ?? "") == "Ink" {
-            // [严重恶性 Bug 修复：读取分块保存的路径字符串]
-            var pathStr = ""
-            var chunkIndex = 0
-            while true {
-                let keyStr = chunkIndex == 0 ? "/SimPlePath" : "/SimPlePath\(chunkIndex)"
-                if let chunk = annot.value(forAnnotationKey: PDFAnnotationKey(rawValue: keyStr)) as? String {
-                    pathStr += chunk
-                    chunkIndex += 1
-                } else {
-                    break
-                }
-            }
-            
-            if !pathStr.isEmpty {
-                let pairs = pathStr.split(separator: ";")
-                guard !pairs.isEmpty else { continue }
-                
-                let bPath = NSBezierPath()
-                for (i, pair) in pairs.enumerated() {
-                    let coords = pair.split(separator: ",")
-                    if coords.count == 3 {
-                        // 新格式: M,x,y 或 L,x,y
-                        let type = coords[0]
-                        if let x = Double(coords[1]), let y = Double(coords[2]) {
-                            let point = NSPoint(x: x, y: y)
-                            if type == "M" { bPath.move(to: point) }
-                            else if type == "L" { bPath.line(to: point) }
-                        }
-                    } else if coords.count == 2 {
-                        // 兼容老格式: x,y
-                        if let x = Double(coords[0]), let y = Double(coords[1]) {
-                            let point = NSPoint(x: x, y: y)
-                            if i == 0 { bPath.move(to: point) }
-                            else { bPath.line(to: point) }
-                        }
+        // [超级性能优化]：使用 cachedInkBezierPath 彻底消灭 O(N) 字符串切分，实现 0 allocation 60FPS 渲染！
+        for annot in allAnnotations where (annot.type ?? "") == "Ink" {
+            let bPath: NSBezierPath
+            if let cached = annot.cachedInkBezierPath {
+                bPath = cached
+            } else {
+                var pathStr = ""
+                var chunkIndex = 0
+                while true {
+                    let keyStr = chunkIndex == 0 ? "/SimPlePath" : "/SimPlePath\(chunkIndex)"
+                    if let chunk = annot.value(forAnnotationKey: PDFAnnotationKey(rawValue: keyStr)) as? String {
+                        pathStr += chunk
+                        chunkIndex += 1
+                    } else {
+                        break
                     }
                 }
                 
-                NSGraphicsContext.saveGraphicsState()
-                NSGraphicsContext.current = NSGraphicsContext(cgContext: context, flipped: false)
-                annot.color.setStroke()
-                bPath.lineWidth = annot.border?.lineWidth ?? 3.0
-                bPath.lineCapStyle = .round
-                bPath.lineJoinStyle = .round
-                bPath.stroke()
-                NSGraphicsContext.restoreGraphicsState()
+                if pathStr.isEmpty { continue }
+                
+                let pairs = pathStr.split(separator: ";")
+                guard !pairs.isEmpty else { continue }
+                
+                let newPath = NSBezierPath()
+                for (i, pair) in pairs.enumerated() {
+                    let coords = pair.split(separator: ",")
+                    if coords.count == 3 {
+                        let type = coords[0]
+                        if let x = Double(coords[1]), let y = Double(coords[2]) {
+                            let point = NSPoint(x: x, y: y)
+                            if type == "M" { newPath.move(to: point) }
+                            else if type == "L" { newPath.line(to: point) }
+                        }
+                    } else if coords.count == 2 {
+                        if let x = Double(coords[0]), let y = Double(coords[1]) {
+                            let point = NSPoint(x: x, y: y)
+                            if i == 0 { newPath.move(to: point) }
+                            else { newPath.line(to: point) }
+                        }
+                    }
+                }
+                annot.cachedInkBezierPath = newPath
+                bPath = newPath
             }
-        }
-
-        // 4. [核心黑科技] 强制拦截 VectorSignatureAnnotation 进行原生高清渲染！
-        // 绕过 PDFKit 内部可能存在的低清晰度位图缓存机制
-        for annot in page.annotations {
-            if let vectorAnnot = annot as? VectorSignatureAnnotation {
-                NSGraphicsContext.saveGraphicsState()
-                NSGraphicsContext.current = NSGraphicsContext(cgContext: context, flipped: false)
-                
-                context.saveGState()
-                context.interpolationQuality = .high
-                context.setShouldAntialias(true)
-                
-                context.translateBy(x: vectorAnnot.bounds.minX, y: vectorAnnot.bounds.minY)
-                context.scaleBy(x: vectorAnnot.bounds.width, y: vectorAnnot.bounds.height)
-                
-                context.setFillColor(vectorAnnot.themeColor.cgColor)
-                context.addPath(vectorAnnot.vectorPath)
-                context.fillPath()
-                
-                context.restoreGState()
-                NSGraphicsContext.restoreGraphicsState()
-            }
+            
+            NSGraphicsContext.saveGraphicsState()
+            NSGraphicsContext.current = NSGraphicsContext(cgContext: context, flipped: false)
+            annot.color.setStroke()
+            bPath.lineWidth = annot.border?.lineWidth ?? 3.0
+            bPath.lineCapStyle = .round
+            bPath.lineJoinStyle = .round
+            bPath.stroke()
+            NSGraphicsContext.restoreGraphicsState()
         }
 
         NSGraphicsContext.restoreGraphicsState()

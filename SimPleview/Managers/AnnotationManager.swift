@@ -120,6 +120,8 @@ final class AnnotationManager: ObservableObject {
                     }
                 } else if id.starts(with: "S-") {
                     // 保留签名批注的 ID，千万不能覆盖！
+                    // [修复老文件兼容性]：强制让旧版中 shouldDisplay = false 的签名变得可见
+                    annot.shouldDisplay = true
                     collectedAnnots.append(annot)
                 } else {
                     if !id.starts(with: "EXT-") {
