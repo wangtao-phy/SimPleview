@@ -48,7 +48,16 @@ extension AppState {
             // 1. PDFKit 会关闭底层的异步图块渲染（Asynchronous Tile Rendering），导致主线程被同步渲染阻塞（触发 UI 严重闪烁/白屏）。
             // 2. doc.documentURL 会变成 nil，导致所有强依赖此属性的功能（如阅读记录追踪 ReadingTracker）直接报废。
             // 因此，我们必须拥抱原生的 URL 加载模式，将内存的回收调度权完全交还给 macOS/iOS 的虚拟内存内核。
-            guard let doc = PDFDocument(url: targetURL) else {
+            // [混合架构：图片包装]
+            let document: PDFDocument?
+            let isImage = ImageDocumentManager.isImageFile(url: targetURL)
+            if isImage {
+                document = ImageDocumentManager.createPDFDocument(fromImageURL: targetURL)
+            } else {
+                document = PDFDocument(url: targetURL)
+            }
+            
+            guard let doc = document else {
                 if accessing { targetURL.stopAccessingSecurityScopedResource() }
                 return
             }

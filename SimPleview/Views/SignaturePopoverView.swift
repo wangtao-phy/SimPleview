@@ -64,6 +64,9 @@ struct SignaturePopoverView: View {
                                 // 点击立刻插入到当前 PDF 中，并关闭面板
                                 state.processAndInsertSignature(imageURL: url)
                                 uiState.isShowingSignaturePopover = false
+                                if state.activeType != .none {
+                                    state.activeType = .none
+                                }
                             }) {
                                 SignatureThumbnail(url: url)
                             }

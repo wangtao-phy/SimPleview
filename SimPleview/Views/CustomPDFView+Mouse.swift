@@ -56,12 +56,14 @@ extension CustomPDFView {
         // --- 签名缩放与拖拽拦截 ---
         var hitSignatureForMove: PDFAnnotation? = nil
         
+        let visualInset: CGFloat = 8.0 / self.scaleFactor // 屏幕上的 8 像素裕量
+        
         for annot in page.annotations where (annot.userName ?? "").hasPrefix("S-") {
-            let generousBounds = annot.bounds.insetBy(dx: -4, dy: -4)
+            let generousBounds = annot.bounds.insetBy(dx: -visualInset, dy: -visualInset)
             
             // 1. 如果是当前选中的签名，先检查四个缩放手柄
             if annot.userName == self.currentSelectedBatchID {
-                let handleSize: CGFloat = 12.0
+                let handleSize: CGFloat = 16.0 / self.scaleFactor // 屏幕上的 16 像素热区
                 let hitRects = [
                     0: NSRect(x: generousBounds.minX - handleSize/2, y: generousBounds.minY - handleSize/2, width: handleSize, height: handleSize),
                     1: NSRect(x: generousBounds.maxX - handleSize/2, y: generousBounds.minY - handleSize/2, width: handleSize, height: handleSize),

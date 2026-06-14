@@ -117,8 +117,27 @@ final class DocumentManager: ObservableObject {
             // 必须直接 write(to: url) 才能触发苹果底层的 Incremental Save（增量保存），这样 100% 保护原文档不被破坏。
             // 之前出现的 White Page Bug，是因为在 Global 后台线程执行 write，导致与主线程 PDFView 渲染产生竞态。
             // 现在我们已经将 workItem 强制在 MainActor 执行，彻底杜绝了 White Page 的问题！
-            let finalSuccess = document.write(to: url)
+            // [混合架构：图片包装导出]
+            if ImageDocumentManager.isImageFile(url: url) {
+                // 如果是后台静默保存，对于图片我们直接忽略，不影响原文件，也不弹窗打扰用户
+                guard sync || immediate else {
+                    self?.fileMonitor?.isSelfSaving = false
+                    return
+                }
+                
+                #if os(macOS)
+                ImageDocumentManager.promptSaveAs(pdfDocument: document, originalURL: url) { savedURL in
+                    if savedURL != nil {
+                        self?.isDirty = false
+                        self?.fileMonitor?.updateLastKnownModDate()
+                    }
+                    self?.fileMonitor?.isSelfSaving = false
+                }
+                #endif
+                return
+            }
             
+            let finalSuccess = document.write(to: url)
             if finalSuccess {
                 self?.fileMonitor?.updateLastKnownModDate()
                 self?.isDirty = false
@@ -161,6 +180,10 @@ final class DocumentManager: ObservableObject {
             defer { if accessing { url.stopAccessingSecurityScopedResource() } }
             
             // iOS 端同样强制使用增量保存保护 LaTeX 字体，直接在主线程毫秒级完成
+            if ImageDocumentManager.isImageFile(url: url) {
+                // TODO: iOS 端暂不支持图片另存为面板，暂时忽略自动保存以保护原图
+                return
+            }
             let success = document.write(to: url)
             
             if success {

@@ -35,13 +35,15 @@ extension CustomPDFView {
     /// 由于 `PDFView.draw(_:to:)` 是 ObjC API，Swift 6 在 `DefaultActorIsolation=MainActor` 模式下
     /// 会隐式检查主线程，若不加 `nonisolated` 标记，将在真机上触发 `dispatch_assert_queue_fail` 致命崩溃。
     nonisolated override func draw(_ page: PDFPage, to context: CGContext) {
-        // 由于我们在 nonisolated 上下文中，直接调用 super.draw 可能会报 Actor 警告
-        // 苹果官方针对此类底层框架调用的推荐做法是使用 MainActor.assumeIsolated 
-        // 苹果官方文档指出 PDFView.draw(_:to:) 的默认实现为空。
-        // 但是实际上如果不调用，页面原文就会消失变成白屏！
-        // 因为在 Swift 6 下我们无法调用被 MainActor 隔离的 super.draw(page, to: context)，
-        // 我们可以直接调用 PDFPage 的底层非隔离绘图 API 来绘制原文。
-        page.draw(with: .cropBox, to: context)
+        // [核心性能修复] 我们必须调用原生的 super.draw 以利用 PDFKit 的瓦片缓存渲染，
+        // 否则如果用 page.draw(with:to:) 会强制从头解析整个矢量页面，导致手绘时巨幅掉帧（一卡一卡、一段一段）。
+        // 由于在 Swift 6 下，PDFView 是 @MainActor，而此方法由 PDFKit 的后台线程调用，不能直接 super.draw。
+        // 我们利用底层 ObjC 消息机制，绕过 Swift 6 编译器的强制检查：
+        let sel = #selector(PDFView.draw(_:to:))
+        let imp = class_getMethodImplementation(class_getSuperclass(CustomPDFView.self), sel)
+        typealias DrawFunc = @convention(c) (AnyObject, Selector, PDFPage, CGContext) -> Void
+        let drawFunc = unsafeBitCast(imp, to: DrawFunc.self)
+        drawFunc(self, sel, page, context)
         
         // 【性能优化】：将主题色获取提取到循环外
         let accentColor: NSColor
@@ -97,28 +99,32 @@ extension CustomPDFView {
                     let generousBounds = a.bounds.insetBy(dx: -4, dy: -4)
                     
                     if isSignature {
-                        // 画一个带角的边框，简单矩形
-                        let path = NSBezierPath(rect: generousBounds)
-                        path.lineWidth = 1.0
+                        // 恢复最初的实线圆角边框
+                        let visualInset: CGFloat = 8.0 / self.scaleFactor
+                        let generousBounds = a.bounds.insetBy(dx: -visualInset, dy: -visualInset)
+                        let path = NSBezierPath(roundedRect: generousBounds, xRadius: 4, yRadius: 4)
+                        path.lineWidth = 1.5 / self.scaleFactor
                         strokeColor.setStroke()
                         path.stroke()
                         
-                        // 画四个控制点
-                        let handleSize: CGFloat = 6.0
-                        let handles = [
-                            NSRect(x: generousBounds.minX - handleSize/2, y: generousBounds.minY - handleSize/2, width: handleSize, height: handleSize),
-                            NSRect(x: generousBounds.maxX - handleSize/2, y: generousBounds.minY - handleSize/2, width: handleSize, height: handleSize),
-                            NSRect(x: generousBounds.minX - handleSize/2, y: generousBounds.maxY - handleSize/2, width: handleSize, height: handleSize),
-                            NSRect(x: generousBounds.maxX - handleSize/2, y: generousBounds.maxY - handleSize/2, width: handleSize, height: handleSize)
+                        // 四个角落的蓝色拖拽圆点
+                        let handleSize: CGFloat = 8.0 / self.scaleFactor
+                        let handleRadius = handleSize / 2.0
+                        let corners = [
+                            NSPoint(x: generousBounds.minX, y: generousBounds.minY),
+                            NSPoint(x: generousBounds.maxX, y: generousBounds.minY),
+                            NSPoint(x: generousBounds.minX, y: generousBounds.maxY),
+                            NSPoint(x: generousBounds.maxX, y: generousBounds.maxY)
                         ]
                         
                         NSColor.white.setFill()
                         strokeColor.setStroke()
-                        for handle in handles {
-                            let handlePath = NSBezierPath(rect: handle)
-                            handlePath.lineWidth = 1.0
-                            handlePath.fill()
-                            handlePath.stroke()
+                        for corner in corners {
+                            let rect = NSRect(x: corner.x - handleRadius, y: corner.y - handleRadius, width: handleSize, height: handleSize)
+                            let circle = NSBezierPath(ovalIn: rect)
+                            circle.lineWidth = 1.0 / self.scaleFactor
+                            circle.fill()
+                            circle.stroke()
                         }
                     } else {
                         // 按照用户要求：选区范围稍微扩大，线框本身不需太粗，不带填充

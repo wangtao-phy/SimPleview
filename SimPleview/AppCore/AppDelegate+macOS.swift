@@ -103,7 +103,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationShouldOpenUntitledFile(_ sender: NSApplication) -> Bool {
         DispatchQueue.main.async {
             let panel = NSOpenPanel()
-            panel.allowedContentTypes = [UTType.pdf]
+            panel.allowedContentTypes = [UTType.pdf, UTType.image]
             panel.allowsMultipleSelection = false
             if panel.runModal() == .OK, let url = panel.url {
                 NSApp.openSwiftUIWindow(for: url)

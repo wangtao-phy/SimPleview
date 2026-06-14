@@ -19,10 +19,15 @@ extension AppState {
             
             let cgWidth = CGFloat(transparentCGImage.width)
             let cgHeight = CGFloat(transparentCGImage.height)
-            let targetWidth: CGFloat = min(200, cgWidth)
-            let targetHeight = cgHeight * (targetWidth / cgWidth)
             
             let pageBounds = page.bounds(for: .cropBox)
+            
+            // 优化：针对极高分辨率的图片(如4000x3000)，不能写死 200，否则插入后会显得极其微小
+            // 默认占据页面宽度的 25%，但为了避免在普通 PDF (约 600 points) 上太大，我们取一个合理的平衡值
+            let adaptiveWidth = max(200.0, pageBounds.width * 0.25)
+            let targetWidth: CGFloat = min(adaptiveWidth, cgWidth)
+            let targetHeight = cgHeight * (targetWidth / cgWidth)
+            
             let x = pageBounds.midX - targetWidth / 2
             let y = pageBounds.midY - targetHeight / 2
             let bounds = NSRect(x: x, y: y, width: targetWidth, height: targetHeight)
