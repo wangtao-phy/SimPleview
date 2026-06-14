@@ -9,7 +9,7 @@ private nonisolated(unsafe) var inkPathAssociatedKey: UInt8 = 0
 extension PDFAnnotation {
     nonisolated var cachedInkBezierPath: NSBezierPath? {
         get { objc_getAssociatedObject(self, &inkPathAssociatedKey) as? NSBezierPath }
-        set { objc_setAssociatedObject(self, &inkPathAssociatedKey, newValue, .OBJC_ASSOCIATION_RETAIN_NONATOMIC) }
+        set { objc_setAssociatedObject(self, &inkPathAssociatedKey, newValue, .OBJC_ASSOCIATION_RETAIN) }
     }
 }
 

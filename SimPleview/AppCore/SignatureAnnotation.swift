@@ -26,24 +26,29 @@ class VectorSignatureAnnotation: PDFAnnotation {
         self.shouldPrint = true
         
         // 序列化 CGPath 为字符串，保存到 PDF 底层字典中，实现永久无损保存
-        var pointsStr = ""
+        // 性能优化：使用数组并在末尾 joined()，消除 += 带来的大量内存重分配
+        var pointsArr = [String]()
+        pointsArr.reserveCapacity(2000)
+        
         path.applyWithBlock { element in
             let points = element.pointee.points
             switch element.pointee.type {
             case .moveToPoint:
-                pointsStr += "M,\(points[0].x),\(points[0].y);"
+                pointsArr.append("M,\(points[0].x),\(points[0].y);")
             case .addLineToPoint:
-                pointsStr += "L,\(points[0].x),\(points[0].y);"
+                pointsArr.append("L,\(points[0].x),\(points[0].y);")
             case .addQuadCurveToPoint:
-                pointsStr += "L,\(points[1].x),\(points[1].y);"
+                pointsArr.append("L,\(points[1].x),\(points[1].y);")
             case .addCurveToPoint:
-                pointsStr += "L,\(points[2].x),\(points[2].y);"
+                pointsArr.append("L,\(points[2].x),\(points[2].y);")
             case .closeSubpath:
                 break
             @unknown default:
                 break
             }
         }
+        
+        let pointsStr = pointsArr.joined()
         
         let chunkSize = 30000
         var chunkIndex = 0
