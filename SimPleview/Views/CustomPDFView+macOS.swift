@@ -99,16 +99,23 @@ extension CustomPDFView {
                     let generousBounds = a.bounds.insetBy(dx: -4, dy: -4)
                     
                     if isSignature {
+                        // 利用底层 ObjC 消息机制，绕过 Swift 6 @MainActor 的隔离检查读取 scaleFactor
+                        let sfGetter = class_getInstanceMethod(PDFView.self, #selector(getter: PDFView.scaleFactor))!
+                        let sfImp = method_getImplementation(sfGetter)
+                        typealias GetterType = @convention(c) (AnyObject, Selector) -> CGFloat
+                        let getScaleFactor = unsafeBitCast(sfImp, to: GetterType.self)
+                        let sf = getScaleFactor(self, #selector(getter: PDFView.scaleFactor))
+                        
                         // 恢复最初的实线圆角边框
-                        let visualInset: CGFloat = 8.0 / self.scaleFactor
+                        let visualInset: CGFloat = 8.0 / sf
                         let generousBounds = a.bounds.insetBy(dx: -visualInset, dy: -visualInset)
                         let path = NSBezierPath(roundedRect: generousBounds, xRadius: 4, yRadius: 4)
-                        path.lineWidth = 1.5 / self.scaleFactor
+                        path.lineWidth = 1.5 / sf
                         strokeColor.setStroke()
                         path.stroke()
                         
                         // 四个角落的蓝色拖拽圆点
-                        let handleSize: CGFloat = 8.0 / self.scaleFactor
+                        let handleSize: CGFloat = 8.0 / sf
                         let handleRadius = handleSize / 2.0
                         let corners = [
                             NSPoint(x: generousBounds.minX, y: generousBounds.minY),
@@ -122,7 +129,7 @@ extension CustomPDFView {
                         for corner in corners {
                             let rect = NSRect(x: corner.x - handleRadius, y: corner.y - handleRadius, width: handleSize, height: handleSize)
                             let circle = NSBezierPath(ovalIn: rect)
-                            circle.lineWidth = 1.0 / self.scaleFactor
+                            circle.lineWidth = 1.0 / sf
                             circle.fill()
                             circle.stroke()
                         }

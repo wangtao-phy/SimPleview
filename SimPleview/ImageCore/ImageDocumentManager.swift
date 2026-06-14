@@ -314,6 +314,7 @@ final class ImageDocumentManager {
         let widthField = NSTextField(frame: NSRect(x: 75, y: 5, width: 60, height: 20))
         widthField.stringValue = String(format: "%.0f", originalSize.width)
         widthField.delegate = delegate
+        widthField.wantsLayer = true
         delegate.widthField = widthField
         
         let crossLabel = NSTextField(labelWithString: "x")
@@ -322,6 +323,7 @@ final class ImageDocumentManager {
         let heightField = NSTextField(frame: NSRect(x: 155, y: 5, width: 60, height: 20))
         heightField.stringValue = String(format: "%.0f", originalSize.height)
         heightField.delegate = delegate
+        heightField.wantsLayer = true
         delegate.heightField = heightField
         
         accessoryView.addSubview(formatLabel)
@@ -331,6 +333,7 @@ final class ImageDocumentManager {
         accessoryView.addSubview(crossLabel)
         accessoryView.addSubview(heightField)
         
+        accessoryView.wantsLayer = true
         panel.accessoryView = accessoryView
         
         // 防止阻塞，捕获 delegate 保持其存活

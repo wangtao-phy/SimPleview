@@ -89,8 +89,20 @@ final class DocumentManager: ObservableObject {
     ///   - sync: 是否需要强制同步保存 (例如应用即将退出或休眠时，必须等它写完)
     ///   - immediate: 是否跳过防抖时间，立即在后台异步保存
     func save(pdfView: PDFView?, sync: Bool = false, immediate: Bool = false) {
-        // 如果文件没有被修改，或者缺乏必要的上下文，直接跳过以节省性能
-        guard isDirty, let url = fileURL, let document = pdfView?.document else { return }
+        guard let url = fileURL, let document = pdfView?.document else { return }
+
+        // 快速判断是否为图片 (避免频繁的文件系统调用)
+        let ext = url.pathExtension.lowercased()
+        let isImage = ["png", "jpg", "jpeg", "heic", "tiff", "tif", "gif", "bmp", "webp"].contains(ext)
+
+        // 如果文件没有被修改：
+        // 对于普通 PDF，直接跳过以节省性能
+        // 对于图片，只有在用户明确触发保存（Cmd+S 会传入 immediate=true 或 sync=true）时，才允许弹出另存为窗口
+        if !isDirty {
+            if !isImage || (!sync && !immediate) {
+                return
+            }
+        }
 
         // 每次触发保存时，先把之前倒计时的任务取消掉（这就是典型的 Debounce 防抖逻辑）
         saveWorkItem?.cancel()
