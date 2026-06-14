@@ -35,6 +35,42 @@ extension CustomPDFView {
                 self._threadSafeDrawingPage = page
                 
                 self.needsDisplay = true
+                
+                // [核心修复] 使用原生 AppKit 事件追踪循环，100% 拦截鼠标轨迹，彻底解决断点和空白高亮问题
+                var keepTracking = true
+                while keepTracking {
+                    guard let nextEvent = self.window?.nextEvent(matching: [.leftMouseDragged, .leftMouseUp], until: .distantFuture, inMode: .eventTracking, dequeue: true) else { break }
+                    
+                    let curPoint = self.convert(nextEvent.locationInWindow, from: nil)
+                    let curPagePoint = self.convert(curPoint, to: page)
+                    
+                    if nextEvent.type == .leftMouseDragged {
+                        path.line(to: curPagePoint)
+                        self._threadSafeDrawingPath = path.copy() as? NSBezierPath
+                        
+                        let dirtyRect = self.convert(path.bounds, from: page).insetBy(dx: -10, dy: -10)
+                        self.setNeedsDisplay(dirtyRect)
+                    } else if nextEvent.type == .leftMouseUp {
+                        path.line(to: curPagePoint)
+                        
+                        // 误触检测：如果整个线条极短（点了一下没拖动），直接丢弃
+                        if path.bounds.width > 2 || path.bounds.height > 2 || path.elementCount > 3 {
+                            self.draftInkPaths.append(path)
+                            self.draftInkPage = page
+                            self._threadSafeDraftInkPaths = self.draftInkPaths
+                        }
+                        
+                        self.currentDrawingPath = nil
+                        self.currentDrawingPage = nil
+                        self._threadSafeDrawingPath = nil
+                        self._threadSafeDrawingPage = nil
+                        
+                        let dirtyRect = self.convert(path.bounds, from: page).insetBy(dx: -10, dy: -10)
+                        self.setNeedsDisplay(dirtyRect)
+                        self.onMouseUp?()
+                        keepTracking = false
+                    }
+                }
                 return
             }
         }
@@ -71,26 +107,30 @@ extension CustomPDFView {
                     3: NSRect(x: generousBounds.maxX - handleSize/2, y: generousBounds.maxY - handleSize/2, width: handleSize, height: handleSize)
                 ]
                 
+                var hitCorner: Int? = nil
                 for (corner, rect) in hitRects {
                     if rect.contains(pagePoint) {
-                        // 进入缩放模式
-                        self.resizingAnnotation = annot
-                        self.resizeHandleCorner = corner
-                        self.resizeStartBounds = annot.bounds
-                        self.resizeStartMouse = event.locationInWindow
-                        return // 彻底拦截，不传递给 super
+                        hitCorner = corner
+                        break
                     }
+                }
+                
+                if let corner = hitCorner {
+                    self.resizingAnnotation = annot
+                    self.resizeHandleCorner = corner
+                    self.resizeStartBounds = annot.bounds
+                    self.resizeStartMouse = event.locationInWindow
                 }
             }
             
             // 2. 检查是否点中了签名的主体（准备拖拽移动）
-            if generousBounds.contains(pagePoint) {
+            if self.resizingAnnotation == nil && generousBounds.contains(pagePoint) {
                 hitSignatureForMove = annot
                 // 我们不 break，因为后面的批注在 z-index 上可能更高
             }
         }
         
-        if let annotToMove = hitSignatureForMove {
+        if self.resizingAnnotation == nil, let annotToMove = hitSignatureForMove {
             // 如果还没选中，先选中
             if self.currentSelectedBatchID != annotToMove.userName {
                 self.currentSelectedBatchID = annotToMove.userName
@@ -104,7 +144,64 @@ extension CustomPDFView {
             self.resizeHandleCorner = nil
             self.resizeStartBounds = annotToMove.bounds
             self.resizeStartMouse = event.locationInWindow
-            return // 拦截
+        }
+        
+        if let annot = self.resizingAnnotation {
+            // 进入签名的追踪循环
+            var keepTracking = true
+            while keepTracking {
+                guard let nextEvent = self.window?.nextEvent(matching: [.leftMouseDragged, .leftMouseUp], until: .distantFuture, inMode: .eventTracking, dequeue: true) else { break }
+                
+                if nextEvent.type == .leftMouseDragged {
+                    let startPagePoint = self.convert(self.resizeStartMouse, to: page)
+                    let currentPagePoint = self.convert(nextEvent.locationInWindow, to: page)
+                    let dx = currentPagePoint.x - startPagePoint.x
+                    let dy = currentPagePoint.y - startPagePoint.y
+                    
+                    var newBounds = self.resizeStartBounds
+                    
+                    if let corner = self.resizeHandleCorner {
+                        let aspect = self.resizeStartBounds.width / self.resizeStartBounds.height
+                        // 以 dx 变化为主轴来决定缩放比例，保持长宽比
+                        switch corner {
+                        case 0: // Bottom Left (minX, minY)
+                            let newWidth = max(20, self.resizeStartBounds.width - dx)
+                            let newHeight = newWidth / aspect
+                            newBounds.size = CGSize(width: newWidth, height: newHeight)
+                            newBounds.origin.x = self.resizeStartBounds.maxX - newWidth
+                            newBounds.origin.y = self.resizeStartBounds.maxY - newHeight
+                        case 1: // Bottom Right (maxX, minY)
+                            let newWidth = max(20, self.resizeStartBounds.width + dx)
+                            let newHeight = newWidth / aspect
+                            newBounds.size = CGSize(width: newWidth, height: newHeight)
+                            newBounds.origin.y = self.resizeStartBounds.maxY - newHeight
+                        case 2: // Top Left (minX, maxY)
+                            let newWidth = max(20, self.resizeStartBounds.width - dx)
+                            let newHeight = newWidth / aspect
+                            newBounds.size = CGSize(width: newWidth, height: newHeight)
+                            newBounds.origin.x = self.resizeStartBounds.maxX - newWidth
+                        case 3: // Top Right (maxX, maxY)
+                            let newWidth = max(20, self.resizeStartBounds.width + dx)
+                            let newHeight = newWidth / aspect
+                            newBounds.size = CGSize(width: newWidth, height: newHeight)
+                        default: break
+                        }
+                    } else {
+                        // 拖拽移动模式
+                        newBounds.origin.x += dx
+                        newBounds.origin.y += dy
+                    }
+                    
+                    annot.bounds = newBounds
+                    self.setNeedsDisplay(self.bounds)
+                } else if nextEvent.type == .leftMouseUp {
+                    self.resizingAnnotation = nil
+                    self.resizeHandleCorner = nil
+                    self.onMouseUp?()
+                    keepTracking = false
+                }
+            }
+            return // 彻底拦截，不传递给 super
         }
         // --- 签名缩放与拖拽拦截结束 ---
         
@@ -114,109 +211,12 @@ extension CustomPDFView {
     
 
     override func mouseDragged(with event: NSEvent) {
-        if self.activeType == .ink,
-           let path = self.currentDrawingPath,
-           let page = self.currentDrawingPage {
-            
-            let point = self.convert(event.locationInWindow, from: nil)
-            let pagePoint = self.convert(point, to: page)
-            
-            path.line(to: pagePoint)
-            self._threadSafeDrawingPath = path.copy() as? NSBezierPath
-            
-            // [性能优化] 只重绘线条所在的矩形区域（适当扩大 10 像素包容笔触宽度），避免全屏重绘导致 CPU 飙升
-            let dirtyRect = self.convert(path.bounds, from: page).insetBy(dx: -10, dy: -10)
-            self.setNeedsDisplay(dirtyRect)
-            return
-        }
-        // --- 签名缩放与拖拽处理 ---
-        if let annot = self.resizingAnnotation, let page = annot.page {
-            let startPagePoint = self.convert(self.resizeStartMouse, to: page)
-            let currentPagePoint = self.convert(event.locationInWindow, to: page)
-            let dx = currentPagePoint.x - startPagePoint.x
-            let dy = currentPagePoint.y - startPagePoint.y
-            
-            var newBounds = self.resizeStartBounds
-            
-            if let corner = self.resizeHandleCorner {
-                let aspect = self.resizeStartBounds.width / self.resizeStartBounds.height
-                // 以 dx 变化为主轴来决定缩放比例，保持长宽比
-                switch corner {
-                case 0: // Bottom Left (minX, minY)
-                    let newWidth = max(20, self.resizeStartBounds.width - dx)
-                    let newHeight = newWidth / aspect
-                    newBounds.size = CGSize(width: newWidth, height: newHeight)
-                    newBounds.origin.x = self.resizeStartBounds.maxX - newWidth
-                    newBounds.origin.y = self.resizeStartBounds.maxY - newHeight
-                case 1: // Bottom Right (maxX, minY)
-                    let newWidth = max(20, self.resizeStartBounds.width + dx)
-                    let newHeight = newWidth / aspect
-                    newBounds.size = CGSize(width: newWidth, height: newHeight)
-                    newBounds.origin.y = self.resizeStartBounds.maxY - newHeight
-                case 2: // Top Left (minX, maxY)
-                    let newWidth = max(20, self.resizeStartBounds.width - dx)
-                    let newHeight = newWidth / aspect
-                    newBounds.size = CGSize(width: newWidth, height: newHeight)
-                    newBounds.origin.x = self.resizeStartBounds.maxX - newWidth
-                case 3: // Top Right (maxX, maxY)
-                    let newWidth = max(20, self.resizeStartBounds.width + dx)
-                    let newHeight = newWidth / aspect
-                    newBounds.size = CGSize(width: newWidth, height: newHeight)
-                default: break
-                }
-            } else {
-                // 拖拽移动模式
-                newBounds.origin.x += dx
-                newBounds.origin.y += dy
-            }
-            
-            annot.bounds = newBounds
-            self.setNeedsDisplay(self.bounds)
-            return
-        }
-        // --- 签名缩放与拖拽处理结束 ---
-        
+        // 自定义模式下已经被 mouseDown 循环彻底拦截了，来到这里的一定是 PDFKit 原生的选择事件
         super.mouseDragged(with: event)
     }
 
     override func mouseUp(with event: NSEvent) { 
-        // --- 签名缩放结束处理 ---
-        if self.resizingAnnotation != nil {
-            self.resizingAnnotation = nil
-            self.resizeHandleCorner = nil
-            
-            // 触发可能的状态保存或刷新
-            self.onMouseUp?()
-            return
-        }
-        // --- 签名缩放结束处理完毕 --- 
-        // --- 手绘模式抬起处理 ---
-        if self.activeType == .ink,
-           let path = self.currentDrawingPath,
-           let page = self.currentDrawingPage {
-            
-            let point = self.convert(event.locationInWindow, from: nil)
-            let pagePoint = self.convert(point, to: page)
-            path.line(to: pagePoint)
-            
-            // 误触检测：如果整个线条极短（点了一下没拖动），直接丢弃
-            if path.bounds.width > 2 || path.bounds.height > 2 || path.elementCount > 3 {
-                self.draftInkPaths.append(path)
-                self.draftInkPage = page
-                self._threadSafeDraftInkPaths = self.draftInkPaths
-            }
-            
-            self.currentDrawingPath = nil
-            self.currentDrawingPage = nil
-            self._threadSafeDrawingPath = nil
-            self._threadSafeDrawingPage = nil
-            
-            let dirtyRect = self.convert(path.bounds, from: page).insetBy(dx: -10, dy: -10)
-            self.setNeedsDisplay(dirtyRect)
-            self.onMouseUp?()
-            return
-        }
-        // --- 手绘模式拦截结束 ---
+        // 原生选择抬起事件处理
 
         guard event.type == .leftMouseUp else {
             super.mouseUp(with: event)
