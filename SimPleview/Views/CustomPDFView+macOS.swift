@@ -199,9 +199,14 @@ extension CustomPDFView {
             NSGraphicsContext.restoreGraphicsState()
         }
 
-        // 3. [核心黑科技] 渲染那些由于 macOS PDFKit Bug 无法写入 /InkList 的自定义笔迹！
+        // 3. [核心黑科技] 渲染由于 macOS PDFKit Bug 无法写入 /InkList 的自定义笔迹，以及重载后变回普通批注的签名！
         // [超级性能优化]：使用 cachedInkBezierPath 彻底消灭 O(N) 字符串切分，实现 0 allocation 60FPS 渲染！
-        for annot in allAnnotations where (annot.type ?? "") == "Ink" {
+        for annot in allAnnotations {
+            let isInk = (annot.type ?? "") == "Ink"
+            let isLoadedSignature = !isInk && (annot.userName ?? "").hasPrefix("S-") && !(annot is VectorSignatureAnnotation)
+            
+            if !isInk && !isLoadedSignature { continue }
+            
             let bPath: NSBezierPath
             if let cached = annot.cachedInkBezierPath {
                 bPath = cached
@@ -247,12 +252,55 @@ extension CustomPDFView {
             
             NSGraphicsContext.saveGraphicsState()
             NSGraphicsContext.current = NSGraphicsContext(cgContext: context, flipped: false)
-            annot.color.setStroke()
-            bPath.lineWidth = annot.border?.lineWidth ?? 3.0
-            bPath.lineCapStyle = .round
-            bPath.lineJoinStyle = .round
-            bPath.stroke()
+            
+            if isLoadedSignature {
+                // 恢复原生高清抗锯齿
+                context.saveGState()
+                context.interpolationQuality = .high
+                context.setShouldAntialias(true)
+                
+                // 签名路径是 0~1 的归一化坐标，所以我们要将画布坐标系拉伸到批注框大小
+                let transform = NSAffineTransform()
+                transform.translateX(by: annot.bounds.minX, yBy: annot.bounds.minY)
+                transform.scaleX(by: annot.bounds.width, yBy: annot.bounds.height)
+                transform.concat()
+                
+                annot.color.setFill()
+                bPath.fill()
+                
+                context.restoreGState()
+            } else {
+                annot.color.setStroke()
+                bPath.lineWidth = annot.border?.lineWidth ?? 3.0
+                bPath.lineCapStyle = .round
+                bPath.lineJoinStyle = .round
+                bPath.stroke()
+            }
+            
             NSGraphicsContext.restoreGraphicsState()
+        }
+
+        // 4. [核心黑科技] 强制拦截 VectorSignatureAnnotation 进行原生高清渲染！
+        // 绕过 PDFKit 内部可能存在的低清晰度位图缓存机制
+        for annot in allAnnotations {
+            if let vectorAnnot = annot as? VectorSignatureAnnotation {
+                NSGraphicsContext.saveGraphicsState()
+                NSGraphicsContext.current = NSGraphicsContext(cgContext: context, flipped: false)
+                
+                context.saveGState()
+                context.interpolationQuality = .high
+                context.setShouldAntialias(true)
+                
+                context.translateBy(x: vectorAnnot.bounds.minX, y: vectorAnnot.bounds.minY)
+                context.scaleBy(x: vectorAnnot.bounds.width, y: vectorAnnot.bounds.height)
+                
+                context.setFillColor(vectorAnnot.themeColor.cgColor)
+                context.addPath(vectorAnnot.vectorPath)
+                context.fillPath()
+                
+                context.restoreGState()
+                NSGraphicsContext.restoreGraphicsState()
+            }
         }
 
         NSGraphicsContext.restoreGraphicsState()

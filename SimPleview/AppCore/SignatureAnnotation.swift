@@ -19,10 +19,43 @@ class VectorSignatureAnnotation: PDFAnnotation {
         super.init(bounds: bounds, forType: .stamp, withProperties: nil)
         self.color = color
         
-        // 1. 允许原生的 shouldDisplay：解决文件重新打开后无法显示的问题，因为系统默认的 PDFAnnotation 会继承这个隐藏状态
+        // [核心黑科技]
+        // 1. 关闭 shouldDisplay：防止 PDFKit 在屏幕上渲染出基于缓存的低清模糊版本
         // 2. 开启 shouldPrint：确保导出/保存/打印 PDF 时，原生的纯矢量外观能够写入文件
-        self.shouldDisplay = true
+        self.shouldDisplay = false
         self.shouldPrint = true
+        
+        // 序列化 CGPath 为字符串，保存到 PDF 底层字典中，实现永久无损保存
+        var pointsStr = ""
+        path.applyWithBlock { element in
+            let points = element.pointee.points
+            switch element.pointee.type {
+            case .moveToPoint:
+                pointsStr += "M,\(points[0].x),\(points[0].y);"
+            case .addLineToPoint:
+                pointsStr += "L,\(points[0].x),\(points[0].y);"
+            case .addQuadCurveToPoint:
+                pointsStr += "L,\(points[1].x),\(points[1].y);"
+            case .addCurveToPoint:
+                pointsStr += "L,\(points[2].x),\(points[2].y);"
+            case .closeSubpath:
+                break
+            @unknown default:
+                break
+            }
+        }
+        
+        let chunkSize = 30000
+        var chunkIndex = 0
+        var currentIndex = pointsStr.startIndex
+        while currentIndex < pointsStr.endIndex {
+            let nextIndex = pointsStr.index(currentIndex, offsetBy: chunkSize, limitedBy: pointsStr.endIndex) ?? pointsStr.endIndex
+            let chunk = String(pointsStr[currentIndex..<nextIndex])
+            let keyStr = chunkIndex == 0 ? "/SimPlePath" : "/SimPlePath\(chunkIndex)"
+            self.setValue(chunk, forAnnotationKey: PDFAnnotationKey(rawValue: keyStr))
+            chunkIndex += 1
+            currentIndex = nextIndex
+        }
     }
     
     nonisolated override init(bounds: CGRect, forType annotationType: PDFAnnotationSubtype, withProperties properties: [AnyHashable : Any]?) {
