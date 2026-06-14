@@ -120,8 +120,8 @@ final class AnnotationManager: ObservableObject {
                     }
                 } else if id.starts(with: "S-") {
                     // 保留签名批注的 ID，千万不能覆盖！
-                    // [修复老文件兼容性]：强制让旧版中 shouldDisplay = false 的签名变得可见
-                    annot.shouldDisplay = true
+                    // [彻底根除模糊位图]：强制让签名的 shouldDisplay = false，完全隐藏 PDFKit 的低清光栅化位图渲染，仅由我们自定义的渲染引擎在屏幕上高清绘制矢量路径
+                    annot.shouldDisplay = false
                     collectedAnnots.append(annot)
                 } else {
                     if !id.starts(with: "EXT-") {
