@@ -21,11 +21,25 @@ final class ImageDocumentManager {
         return imageExts.contains(ext)
     }
     
-    /// 从图像文件创建一个单页的内存级 PDFDocument 壳
     nonisolated static func createPDFDocument(fromImageURL url: URL) -> PDFDocument? {
-        guard let image = PlatformImage(contentsOfFile: url.path) else {
+        // [核心修复]: 不使用 contentsOfFile 避免 NSImage 的懒加载导致 PDFKit 在转换时读取不到数据而白屏
+        guard let data = try? Data(contentsOf: url),
+              let image = PlatformImage(data: data) else {
             return nil
         }
+        
+        #if os(macOS)
+        // [核心修复]: 解决部分 JPEG/PNG 图片由于 DPI 元数据损坏或异常（例如 30000 DPI 或 1 DPI），
+        // 导致 NSImage 的 size 极度畸变（如 0x0 或是几百万x几百万），进而引发 PDFPage 创建出空白页面的恶性 Bug。
+        // 我们强制将其尺寸重置为物理像素大小（等效 72 DPI），确保 PDFKit 始终能生成正常的页面。
+        if let rep = image.representations.first {
+            let pixelWidth = CGFloat(rep.pixelsWide)
+            let pixelHeight = CGFloat(rep.pixelsHigh)
+            if pixelWidth > 0 && pixelHeight > 0 {
+                image.size = NSSize(width: pixelWidth, height: pixelHeight)
+            }
+        }
+        #endif
         
         let pdfDocument = PDFDocument()
         guard let pdfPage = PDFPage(image: image) else {
