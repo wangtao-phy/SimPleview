@@ -146,8 +146,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         let wc = NSWindowController(window: window)
         wc.shouldCascadeWindows = false // 防止被系统默认的叠放逻辑推到屏幕顶部
         self.newDocumentWindowController = wc
-        window.center() // 恢复原生居中代码
+        
         wc.showWindow(nil)
+        window.center() // 必须在 showWindow 之后调用，否则 SwiftUI 布局未完成会导致系统将其推到屏幕顶部
     }
     
     // 拦截通过 Finder 双击 PDF 文件启动的事件
