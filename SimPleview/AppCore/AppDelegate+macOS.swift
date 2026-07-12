@@ -146,18 +146,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         let wc = NSWindowController(window: window)
         wc.shouldCascadeWindows = false // 防止被系统默认的叠放逻辑推到屏幕顶部
         self.newDocumentWindowController = wc
-        
-        // 强制计算主屏幕居中坐标，彻底解决不在中心的问题
-        if let screen = NSScreen.main {
-            let screenRect = screen.visibleFrame
-            let windowRect = window.frame
-            let x = screenRect.origin.x + (screenRect.width - windowRect.width) / 2
-            let y = screenRect.origin.y + (screenRect.height - windowRect.height) / 2
-            window.setFrameOrigin(NSPoint(x: x, y: y))
-        } else {
-            window.center()
-        }
-        
+        window.center() // 恢复原生居中代码
         wc.showWindow(nil)
     }
     

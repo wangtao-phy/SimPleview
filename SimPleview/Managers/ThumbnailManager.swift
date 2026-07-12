@@ -189,8 +189,8 @@ final class ThumbnailManager: ObservableObject {
         lock.unlock()
         
         // [极致原子化和性能优化]：不再拷贝整本 PDF 导致巨大开销和标注不同步！
-        // 只提取当前发生变化的单页数据，极低内存消耗，并且能完美包含最新画上去的批注！
-        guard let page = doc.page(at: index), let pageData = page.dataRepresentation else {
+        // 传递单页对象的引用，将耗时的 dataRepresentation 完全剥离到后台队列中去执行
+        guard let page = doc.page(at: index) else {
             markAsFinished(index, id: nil)
             return
         }
@@ -206,8 +206,11 @@ final class ThumbnailManager: ObservableObject {
                 return
             }
             
-            // 数据里只有这一页，因此必定是索引 0
-            guard let safeDoc = PDFDocument(data: pageData),
+            // [极其关键的卡顿修复]
+            // 将耗时几百毫秒的 page.dataRepresentation 放入后台线程执行！
+            // 这彻底解决了滑动和初次加载缩略图时的严重掉帧问题。
+            guard let pageData = page.dataRepresentation,
+                  let safeDoc = PDFDocument(data: pageData),
                   let safePage = safeDoc.page(at: 0) else {
                 DispatchQueue.main.async { self.markAsFinished(index, id: operationID) }
                 return
