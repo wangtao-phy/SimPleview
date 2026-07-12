@@ -162,10 +162,7 @@ extension CustomPDFView {
             }
         }
         
-        // 提取页面旋转角度
-        let rotation = page.rotation
-        let pageBounds = page.bounds(for: .cropBox)
-        
+
         // 2. 实时渲染当前正在拖拽产生的、还没有被 PDFDocument 真正收录为 Annotation 的平滑手绘轨迹
         if self._threadSafeActiveType == .ink,
            let path = self._threadSafeDrawingPath,
