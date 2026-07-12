@@ -142,6 +142,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         
         window.title = SimPleview.L.s("New Blank Document", UserDefaults.standard.string(forKey: "appLanguage") == "en" ? .en : .zh)
         window.contentViewController = hostingController
+        window.setContentSize(NSSize(width: 480, height: 420)) // 强制锁定内容尺寸，防止被 NSHostingController 初始的 0x0 尺寸给拉瘪
+        window.center() // 此时由于尺寸已被强制锁定为真实大小，这句系统级居中代码终于能完美生效了
+        
         window.isReleasedWhenClosed = false // 交由 Controller 管理生命周期，防止闪退
         window.isRestorable = false // 彻底禁用 macOS 的窗口位置记忆功能，防止被强制恢复到之前的位置
         
@@ -153,7 +156,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         window.setFrameAutosaveName("")
         
         wc.showWindow(nil)
-        window.center() // 必须在 showWindow 之后调用，否则 SwiftUI 布局未完成会导致系统将其推到屏幕顶部
     }
     
     // 拦截通过 Finder 双击 PDF 文件启动的事件
