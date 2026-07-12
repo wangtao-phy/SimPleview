@@ -142,11 +142,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         
         window.title = SimPleview.L.s("New Blank Document", UserDefaults.standard.string(forKey: "appLanguage") == "en" ? .en : .zh)
         window.contentViewController = hostingController
-        window.center()
-        // 交由 Controller 和闭包来管理释放，不依赖底层的隐式机制，解决闪退 Bug
-        window.isReleasedWhenClosed = false 
-        
+        window.isReleasedWhenClosed = false // 交由 Controller 管理生命周期，防止闪退
         let wc = NSWindowController(window: window)
+        wc.shouldCascadeWindows = false // 防止被系统默认的叠放逻辑推到屏幕顶部
+        window.center() // 居中显示
         self.newDocumentWindowController = wc
         wc.showWindow(nil)
     }
