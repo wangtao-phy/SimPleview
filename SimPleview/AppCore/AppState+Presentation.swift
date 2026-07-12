@@ -17,11 +17,9 @@ extension AppState {
         // 关闭自动缩放，防止在变形期间出现闪烁和巨大的性能消耗
         self.pdfView.autoScales = false
         
-        // 2. 将左右侧栏全部收起 (添加动画避免卡顿)
-        withAnimation(.easeInOut(duration: 0.3)) {
-            uiState.columnVisibility = .detailOnly
-            uiState.showRightSidebar = false
-        }
+        // 2. 将左右侧栏全部收起
+        uiState.columnVisibility = .detailOnly
+        uiState.showRightSidebar = false
         
         DispatchQueue.main.async { [weak self, weak window, weak uiState] in
             guard let self = self, let win = window else { return }
@@ -75,11 +73,9 @@ extension AppState {
             win.titlebarAppearsTransparent = false
             win.toolbar?.isVisible = true
             if let uiState = uiState {
-                // 恢复原来的左右边栏，使用动画丝滑拉出
-                withAnimation(.easeInOut(duration: 0.3)) {
-                    uiState.columnVisibility = uiState.savedColumnVisibility
-                    uiState.showRightSidebar = uiState.savedShowRightSidebar
-                }
+                // 恢复原来的左右边栏
+                uiState.columnVisibility = uiState.savedColumnVisibility
+                uiState.showRightSidebar = uiState.savedShowRightSidebar
             }
             // 撤销键盘监听，防止影响其他地方输入
             if let monitor = self.eventMonitor { NSEvent.removeMonitor(monitor); self.eventMonitor = nil }
