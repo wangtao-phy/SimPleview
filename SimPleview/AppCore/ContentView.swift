@@ -346,11 +346,7 @@ struct ContentView: View {
         }
         .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("GlobalPresentation"))) { _ in
             executeIfActive {
-                if uiState.isSlideshowActive {
-                    state.exitPresentationMode(uiState: uiState)
-                } else {
-                    state.enterPresentationMode(uiState: uiState)
-                }
+                uiState.isSlideshowActive.toggle()
             }
         }
         .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("GlobalRevealInFinder"))) { _ in executeIfActive { state.revealInFinder() } }
