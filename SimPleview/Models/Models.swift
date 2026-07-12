@@ -212,7 +212,21 @@ struct L {
             "General Options": [.zh: "常规选项", .en: "General Options"],
             "Burn-in Annotations...": [.zh: "烧录", .en: "Burn-in Annotations..."],
             "Reveal in Finder": [.zh: "在访达中显示", .en: "Reveal in Finder"],
-            "Slideshow": [.zh: "幻灯片", .en: "Slideshow"]
+            "Slideshow": [.zh: "幻灯片", .en: "Slideshow"],
+            "New Blank File...": [.zh: "新建空文件...", .en: "New Blank File..."],
+            "New Blank Document": [.zh: "新建空文件", .en: "New Blank Document"],
+            "Document Properties": [.zh: "文档属性", .en: "Document Properties"],
+            "File Type:": [.zh: "文件类型:", .en: "File Type:"],
+            "Paper Size:": [.zh: "纸张尺寸:", .en: "Paper Size:"],
+            "Width": [.zh: "宽度", .en: "Width"],
+            "Height": [.zh: "高度", .en: "Height"],
+            "Save Options": [.zh: "保存选项", .en: "Save Options"],
+            "File Name:": [.zh: "文件名称:", .en: "File Name:"],
+            "Untitled": [.zh: "未命名", .en: "Untitled"],
+            "Save To:": [.zh: "保存至:", .en: "Save To:"],
+            "Browse...": [.zh: "浏览...", .en: "Browse..."],
+            "Cancel": [.zh: "取消", .en: "Cancel"],
+            "Create": [.zh: "创建", .en: "Create"]
     ]
     static func s(_ key: String, _ lang: AppLanguage) -> String {
         return dict[key]?[lang] ?? key

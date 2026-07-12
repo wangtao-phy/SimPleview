@@ -30,11 +30,19 @@ struct NewDocumentWindow: View {
     @State private var customWidth: String = "1600"
     @State private var customHeight: String = "800"
     
-    @State private var fileName: String = SimPleview.L.s("Untitled", UserDefaults.standard.string(forKey: "appLanguage") == "en" ? .en : .zh)
+    @AppStorage("appLanguage") private var appLangStr: String = "zh"
+    private var lang: AppLanguage {
+        AppLanguage(rawValue: appLangStr) ?? .zh
+    }
     
+    @State private var fileName: String = ""
     @State private var saveDirectory: URL = FileManager.default.urls(for: .downloadsDirectory, in: .userDomainMask).first ?? URL(fileURLWithPath: NSHomeDirectory())
     
     var onClose: () -> Void
+    
+    init(onClose: @escaping () -> Void) {
+        self.onClose = onClose
+    }
     
     private func updateDimensions(for size: PaperSize) {
         if let dim = size.dimensions {
@@ -45,87 +53,133 @@ struct NewDocumentWindow: View {
     
     var body: some View {
         VStack(spacing: 0) {
-            Form {
-                Section(header: Text("Document Properties").font(.headline)) {
-                    Picker("File Type:", selection: $selectedType) {
-                        ForEach(DocumentGenerator.DocumentType.allCases) { type in
-                            Text(type.rawValue).tag(type)
+            // Main content area
+            VStack(spacing: 24) {
+                
+                // Document Properties Section
+                VStack(alignment: .leading, spacing: 12) {
+                    Text(SimPleview.L.s("Document Properties", lang))
+                        .font(.headline)
+                        .foregroundColor(.secondary)
+                    
+                    Grid(alignment: .leadingFirstTextBaseline, horizontalSpacing: 16, verticalSpacing: 16) {
+                        GridRow {
+                            Text(SimPleview.L.s("File Type:", lang))
+                                .gridColumnAlignment(.trailing)
+                            Picker("", selection: $selectedType) {
+                                ForEach(DocumentGenerator.DocumentType.allCases) { type in
+                                    Text(type.rawValue).tag(type)
+                                }
+                            }
+                            .labelsHidden()
+                            .pickerStyle(.menu)
+                            .frame(width: 150)
+                        }
+                        
+                        GridRow {
+                            Text(SimPleview.L.s("Paper Size:", lang))
+                                .gridColumnAlignment(.trailing)
+                            Picker("", selection: $selectedPaperSize) {
+                                ForEach(PaperSize.allCases) { size in
+                                    Text(size.rawValue).tag(size)
+                                }
+                            }
+                            .labelsHidden()
+                            .pickerStyle(.menu)
+                            .frame(width: 150)
+                            .onChange(of: selectedPaperSize) { newValue in
+                                updateDimensions(for: newValue)
+                            }
+                        }
+                        
+                        GridRow {
+                            Text("") // Empty label
+                            HStack(spacing: 8) {
+                                TextField(SimPleview.L.s("Width", lang), text: $customWidth)
+                                    .textFieldStyle(.roundedBorder)
+                                    .disabled(selectedPaperSize != .custom)
+                                    .frame(width: 65)
+                                
+                                Text("x")
+                                    .foregroundColor(.secondary)
+                                
+                                TextField(SimPleview.L.s("Height", lang), text: $customHeight)
+                                    .textFieldStyle(.roundedBorder)
+                                    .disabled(selectedPaperSize != .custom)
+                                    .frame(width: 65)
+                                
+                                Text("pt").foregroundColor(.secondary)
+                            }
                         }
                     }
-                    .pickerStyle(.menu)
-                    .frame(width: 200)
-                    
-                    Picker("Paper Size:", selection: $selectedPaperSize) {
-                        ForEach(PaperSize.allCases) { size in
-                            Text(size.rawValue).tag(size)
-                        }
-                    }
-                    .pickerStyle(.menu)
-                    .frame(width: 200)
-                    .onChange(of: selectedPaperSize) { newValue in
-                        updateDimensions(for: newValue)
-                    }
-                    
-                    HStack {
-                        TextField("Width", text: $customWidth)
-                            .textFieldStyle(.roundedBorder)
-                            .disabled(selectedPaperSize != .custom)
-                            .frame(width: 80)
-                        
-                        Text("x")
-                            .foregroundColor(.secondary)
-                        
-                        TextField("Height", text: $customHeight)
-                            .textFieldStyle(.roundedBorder)
-                            .disabled(selectedPaperSize != .custom)
-                            .frame(width: 80)
-                        
-                        Text("px/pt").foregroundColor(.secondary)
-                    }
-                    .padding(.leading, 75) // 对齐标签
+                    .padding(.leading, 8)
                 }
                 
-                Divider().padding(.vertical, 8)
-                
-                Section(header: Text("Save Options").font(.headline)) {
-                    TextField("File Name:", text: $fileName)
-                        .textFieldStyle(.roundedBorder)
+                // Save Options Section
+                VStack(alignment: .leading, spacing: 12) {
+                    Text(SimPleview.L.s("Save Options", lang))
+                        .font(.headline)
+                        .foregroundColor(.secondary)
                     
-                    HStack {
-                        Text("Save To:")
-                        Text(saveDirectory.path)
-                            .truncationMode(.middle)
-                            .foregroundColor(.secondary)
-                            .lineLimit(1)
-                            .frame(maxWidth: 200, alignment: .leading)
-                        Spacer()
-                        Button("Browse...") {
-                            selectDirectory()
+                    Grid(alignment: .leadingFirstTextBaseline, horizontalSpacing: 16, verticalSpacing: 16) {
+                        GridRow {
+                            Text(SimPleview.L.s("File Name:", lang))
+                                .gridColumnAlignment(.trailing)
+                            TextField(SimPleview.L.s("Untitled", lang), text: $fileName)
+                                .textFieldStyle(.roundedBorder)
+                                .frame(maxWidth: .infinity)
+                        }
+                        
+                        GridRow {
+                            Text(SimPleview.L.s("Save To:", lang))
+                                .gridColumnAlignment(.trailing)
+                            HStack {
+                                Text(saveDirectory.path)
+                                    .truncationMode(.middle)
+                                    .lineLimit(1)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                                
+                                Button(SimPleview.L.s("Browse...", lang)) {
+                                    selectDirectory()
+                                }
+                            }
                         }
                     }
+                    .padding(.leading, 8)
                 }
+                
             }
-            .padding(20)
+            .padding(24)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
             
-            Divider()
-            
+            // Bottom Action Bar
             HStack {
                 Spacer()
-                Button("Cancel") {
+                Button(SimPleview.L.s("Cancel", lang)) {
                     onClose()
                 }
                 .keyboardShortcut(.cancelAction)
+                .controlSize(.large)
                 
-                Button("Create") {
+                Button(SimPleview.L.s("Create", lang)) {
                     createDocument()
                 }
                 .keyboardShortcut(.defaultAction)
                 .buttonStyle(.borderedProminent)
+                .controlSize(.large)
             }
             .padding(16)
-            .background(Color(NSColor.windowBackgroundColor))
+            .background(Color(NSColor.controlBackgroundColor))
+            .overlay(
+                Divider(), alignment: .top
+            )
         }
-        .frame(width: 450, height: 380)
+        .frame(width: 480, height: 420)
+        .onAppear {
+            if fileName.isEmpty {
+                fileName = SimPleview.L.s("Untitled", lang)
+            }
+        }
     }
     
     private func selectDirectory() {
