@@ -134,7 +134,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         
         let hostingController = NSHostingController(rootView: newDocView)
         let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 450, height: 380),
+            contentRect: NSRect(x: 0, y: 0, width: 480, height: 420),
             styleMask: [.titled, .closable, .fullSizeContentView],
             backing: .buffered,
             defer: false
@@ -145,8 +145,19 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         window.isReleasedWhenClosed = false // 交由 Controller 管理生命周期，防止闪退
         let wc = NSWindowController(window: window)
         wc.shouldCascadeWindows = false // 防止被系统默认的叠放逻辑推到屏幕顶部
-        window.center() // 居中显示
         self.newDocumentWindowController = wc
+        
+        // 强制计算主屏幕居中坐标，彻底解决不在中心的问题
+        if let screen = NSScreen.main {
+            let screenRect = screen.visibleFrame
+            let windowRect = window.frame
+            let x = screenRect.origin.x + (screenRect.width - windowRect.width) / 2
+            let y = screenRect.origin.y + (screenRect.height - windowRect.height) / 2
+            window.setFrameOrigin(NSPoint(x: x, y: y))
+        } else {
+            window.center()
+        }
+        
         wc.showWindow(nil)
     }
     
