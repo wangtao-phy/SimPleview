@@ -31,6 +31,27 @@ SimPleview 是一款完全通过 AI 辅助编程构建的 macOS PDF 阅读器。
 
 ---
 
+## 📥 Installation & Usage / 安装与使用指南
+
+**[English]**
+If you download the pre-compiled `.dmg` file from the Releases page, you may encounter a macOS Gatekeeper warning ("App is damaged and can't be opened" or "Unidentified developer") because this is an independently published, unsigned open-source application.
+To open it:
+1. Drag the `SimPleview.app` from the DMG to your `Applications` folder.
+2. Go to **System Settings > Privacy & Security**, scroll down, and click **"Open Anyway"** for SimPleview.
+3. Alternatively, right-click the App and select **"Open"**.
+4. (Advanced) If macOS claims the app is "damaged", run this command in Terminal to clear the quarantine attributes: `xattr -cr /Applications/SimPleview.app`
+
+**[中文]**
+如果您直接从 Releases 页面下载了打包好的 `.dmg` 安装包，在打开时可能会遇到 macOS 的安全拦截（提示“应用已损坏，打不开”或“来自未知开发者”）。这是因为本应用为个人发布的开源软件，未向苹果官方签发开发者证书。
+解决方法：
+1. 请务必先将 DMG 里面的 `SimPleview.app` 拖入到您的「应用程序 (Applications)」文件夹中。
+2. 打开 Mac 的**系统设置 > 隐私与安全性**，向下滑动，找到拦截提示并点击**“仍要打开”**。
+3. 或者，在访达中右键（或按住 Control 键点击）该 App，然后在弹出的菜单中选择**“打开”**。
+4. （高阶技巧）如果 macOS 仍然无理取闹地提示“应用已损坏”，请打开“终端 (Terminal)”，输入以下命令彻底清除苹果的隔离属性，然后即可完美运行：
+   `xattr -cr /Applications/SimPleview.app`
+
+---
+
 ##  Tech Stack / 技术细节
 
 
