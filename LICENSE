@@ -1,7 +1,8 @@
 Copyright (c) 2026 wangtao
 
-SimPleview Custom Non-Commercial License
+SimPleview Custom Non-Commercial License (SimPleview 自定义非商业许可协议)
 
+**[English]**
 This application (SimPleview) and its source code are open to everyone for learning, research, and personal use. 
 
 1. Non-Commercial Use Only: Commercial use of this software, its source code, or any of its derivatives is strictly prohibited. You may not use this software to generate revenue, incorporate it into commercial products, or use it for any commercial advantage or private monetary compensation.
@@ -9,3 +10,14 @@ This application (SimPleview) and its source code are open to everyone for learn
 2. Attribution: Users are encouraged to build upon this framework and leverage AI to add customized features that suit their own preferences. If you use, modify, or distribute any code from this project, you must provide proper attribution by citing the original source.
 
 3. No Warranty: THIS SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+
+---
+
+**[中文]**
+本应用程序（SimPleview）及其源代码向所有人开放，仅供学习、研究和个人使用。
+
+1. 严禁商业用途：严格禁止对本软件、源代码或其任何衍生作品进行任何形式的商业使用。您不得利用本软件产生收益、将其整合入商业产品中，或将其用于任何商业优势或私人金钱报酬的目的。
+
+2. 署名要求：鼓励用户在此现有框架的基础上，利用 AI 助手为其增加符合自身需求的个性化功能。若您使用、修改或分发本项目的任何代码，必须通过标明原作者出处来进行适当的署名。
+
+3. 免责声明：本软件按“原样”提供，不带有任何明示或暗示的担保，包括但不限于对适销性、特定用途的适用性和非侵权性的担保。在任何情况下，作者或版权所有者均不对因软件、软件的使用或其他交易而产生、引起或与之相关的任何索赔、损害或其他责任承担连带责任，无论是在合同诉讼、侵权诉讼还是其他诉讼中。
