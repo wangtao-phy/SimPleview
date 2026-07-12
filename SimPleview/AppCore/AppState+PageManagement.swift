@@ -135,7 +135,7 @@ extension AppState {
         isDirty = true
     }
     
-    // [功能点：原生的逆时针旋转当前页 90 度]
+    /// [功能点：原生的逆时针旋转当前页 90 度]
     func rotateCurrentPageLeft() {
         guard let doc = pdfView.document, let page = doc.page(at: currentPageIndex) else { return }
         
@@ -143,14 +143,23 @@ extension AppState {
         let newRotation = (page.rotation - 90) % 360
         page.rotation = newRotation < 0 ? newRotation + 360 : newRotation
         
-        // 刷新缩略图并强制重绘
-        thumbnailManager.cancelThumbnail(for: currentPageIndex)
-        thumbnailManager.removeThumbnail(for: currentPageIndex)
-        generateThumbnail(for: currentPageIndex)
+        // [Bug修复核心] 旋转后，页面的物理宽高比例发生了反转（比如横版变竖版）。
+        // 如果不同步更新内存中的 pageAspectRatios，左侧边栏的骨架屏占位框高度就会错乱。
+        if pageAspectRatios.indices.contains(currentPageIndex) {
+            pageAspectRatios[currentPageIndex] = 1.0 / pageAspectRatios[currentPageIndex]
+        }
         
+        // 使用异步主线程调用，既满足 @MainActor 限制，又能确保修改立刻反映到 UI 上。
         DispatchQueue.main.async { [weak self] in
-            self?.pdfView.layoutDocumentView()
-            self?.pdfView.setPlatformNeedsDisplay()
+            guard let self = self else { return }
+            
+            // [性能优化] 抛弃了以前那种“删除缓存 -> 排队等后台线程用 dataRepresentation 重新画”的低效做法。
+            // 这种旧做法由于存在竞态条件，极大概率导致缩略图不更新。
+            // 现在的 updateLiveThumbnail 直接在主线程抓取页面最新快照并瞬间强制覆盖缓存，速度快且 100% 准确！
+            self.thumbnailManager.updateLiveThumbnail(for: page, at: self.currentPageIndex)
+            
+            self.pdfView.layoutDocumentView()
+            self.pdfView.setPlatformNeedsDisplay()
         }
         isDirty = true
     }
