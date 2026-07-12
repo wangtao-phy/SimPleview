@@ -88,6 +88,9 @@ struct SimpleViewApp: App {
             Button(LS("Compare View")) { NotificationCenter.default.post(name: NSNotification.Name("GlobalCompareView"), object: nil) }
                 .keyboardShortcut(shortcutManager.compareView.keyEquivalent, modifiers: shortcutManager.compareView.modifiers)
             
+            Button(LS("Slideshow")) { NotificationCenter.default.post(name: NSNotification.Name("GlobalPresentation"), object: nil) }
+                .keyboardShortcut(shortcutManager.slideshow.keyEquivalent, modifiers: shortcutManager.slideshow.modifiers)
+            
             Divider()
             
             Picker(LS("Switch Language"), selection: $appLanguage) {
@@ -123,7 +126,12 @@ struct SimpleViewApp: App {
             Button(LS("Save")) { NotificationCenter.default.post(name: NSNotification.Name("GlobalSave"), object: nil) }
                 .keyboardShortcut(shortcutManager.save.keyEquivalent, modifiers: shortcutManager.save.modifiers)
             #if os(macOS)
+            Button(LS("Reveal in Finder")) { NotificationCenter.default.post(name: NSNotification.Name("GlobalRevealInFinder"), object: nil) }
+                .keyboardShortcut(shortcutManager.revealInFinder.keyEquivalent, modifiers: shortcutManager.revealInFinder.modifiers)
+            
             Button(LS("Burn-in Annotations...")) { NotificationCenter.default.post(name: NSNotification.Name("TriggerBurnIn"), object: nil) }
+                .keyboardShortcut(shortcutManager.burnIn.keyEquivalent, modifiers: shortcutManager.burnIn.modifiers)
+            
             Button(LS("Close Window")) { NSApp.keyWindow?.performClose(nil) }
                 .keyboardShortcut(shortcutManager.closeWindow.keyEquivalent, modifiers: shortcutManager.closeWindow.modifiers)
             #endif

@@ -210,7 +210,9 @@ struct L {
             "Customize Toolbar...": [.zh: "自定义工具栏...", .en: "Customize Toolbar..."],
             "Bio": [.zh: "简介", .en: "Bio"],
             "General Options": [.zh: "常规选项", .en: "General Options"],
-            "Burn-in Annotations...": [.zh: "烧录", .en: "Burn-in Annotations..."]
+            "Burn-in Annotations...": [.zh: "烧录", .en: "Burn-in Annotations..."],
+            "Reveal in Finder": [.zh: "在访达中显示", .en: "Reveal in Finder"],
+            "Slideshow": [.zh: "幻灯片", .en: "Slideshow"]
     ]
     static func s(_ key: String, _ lang: AppLanguage) -> String {
         return dict[key]?[lang] ?? key

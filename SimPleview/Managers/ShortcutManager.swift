@@ -75,6 +75,11 @@ final class ShortcutManager: ObservableObject {
     @Published var closeWindow = AppShortcut(key: "w", modifiers: .command)
     @Published var openInBrowser = AppShortcut(key: "g", modifiers: .command)
     
+    // 新增
+    @Published var burnIn = AppShortcut(key: "s", modifiers: [.command, .shift])
+    @Published var slideshow = AppShortcut(key: "f", modifiers: .control)
+    @Published var revealInFinder = AppShortcut(key: "o", modifiers: [.command, .shift])
+    
     // 保存在 UserDefaults 里的一大坨 JSON 的 Key 名称
     private let userDefaultsKey = "AppShortcutsConfig"
     
@@ -104,6 +109,10 @@ final class ShortcutManager: ObservableObject {
             if let v = dict["save"] { save = v }
             if let v = dict["closeWindow"] { closeWindow = v }
             if let v = dict["openInBrowser"] { openInBrowser = v }
+            
+            if let v = dict["burnIn"] { burnIn = v }
+            if let v = dict["slideshow"] { slideshow = v }
+            if let v = dict["revealInFinder"] { revealInFinder = v }
         } catch {
             // Ignore
         }
@@ -127,7 +136,10 @@ final class ShortcutManager: ObservableObject {
             "compareView": compareView,
             "save": save,
             "closeWindow": closeWindow,
-            "openInBrowser": openInBrowser
+            "openInBrowser": openInBrowser,
+            "burnIn": burnIn,
+            "slideshow": slideshow,
+            "revealInFinder": revealInFinder
         ]
         
         do {
@@ -156,6 +168,11 @@ final class ShortcutManager: ObservableObject {
         save = AppShortcut(key: "s", modifiers: .command)
         closeWindow = AppShortcut(key: "w", modifiers: .command)
         openInBrowser = AppShortcut(key: "g", modifiers: .command)
+        
+        burnIn = AppShortcut(key: "s", modifiers: [.command, .shift])
+        slideshow = AppShortcut(key: "f", modifiers: .control)
+        revealInFinder = AppShortcut(key: "o", modifiers: [.command, .shift])
+        
         saveToDefaults() // 别忘了最后执行存盘
     }
 }

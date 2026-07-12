@@ -84,6 +84,18 @@ struct ShortcutsSettingsView: View {
                         labelView(LS("Draw"))
                         recorderView($shortcutManager.ink)
                     }
+                    
+                    // 第 6 行
+                    GridRow {
+                        labelView(LS("Reveal in Finder"))
+                        recorderView($shortcutManager.revealInFinder)
+                        
+                        labelView(LS("Slideshow"))
+                        recorderView($shortcutManager.slideshow)
+                        
+                        labelView(LS("Burn-in Annotations..."))
+                        recorderView($shortcutManager.burnIn)
+                    }
                 }
                 .padding(.vertical, 40)
                 .frame(maxWidth: .infinity, minHeight: 350, alignment: .center)

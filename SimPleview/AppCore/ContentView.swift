@@ -235,27 +235,7 @@ struct ContentView: View {
             }
             #endif
         }
-        .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("TriggerBurnIn"))) { _ in
-            #if os(macOS)
-            if hostingWindow?.isKeyWindow == true {
-                state.documentManager.burnInAnnotations(pdfView: state.pdfView)
-            }
-            #endif
-        }
-        .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("GlobalUndo"))) { _ in executeIfActive { state.undo() } }
-        .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("GlobalRedo"))) { _ in executeIfActive { state.redo() } }
-        .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("GlobalSave"))) { _ in executeIfActive { state.save(immediate: true) } }
-        .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("GlobalHighlight"))) { _ in executeIfActive { state.activeType = .highlight } }
-        .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("GlobalUnderline"))) { _ in executeIfActive { state.activeType = .underline } }
-        .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("GlobalStrikeout"))) { _ in executeIfActive { state.activeType = .strikeout } }
-        .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("GlobalNone"))) { _ in executeIfActive { state.activeType = .none } }
-        .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("GlobalInk"))) { _ in executeIfActive { state.activeType = .ink } }
-        .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("GlobalCompareView"))) { _ in executeIfActive { state.openCompareWindow() } }
-        .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("GlobalPrint"))) { _ in
-            #if os(macOS)
-            executeIfActive { state.printDocument() }
-            #endif
-        }
+        // Global commands moved to PDFContainerView to reduce compiler complexity
         .onDisappear {
             state.cleanup()
         }
@@ -343,6 +323,37 @@ struct ContentView: View {
             case .failure(_): break
             }
         }
+        .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("TriggerBurnIn"))) { _ in
+            #if os(macOS)
+            if hostingWindow?.isKeyWindow == true {
+                state.documentManager.burnInAnnotations(pdfView: state.pdfView)
+            }
+            #endif
+        }
+        .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("GlobalUndo"))) { _ in executeIfActive { state.undo() } }
+        .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("GlobalRedo"))) { _ in executeIfActive { state.redo() } }
+        .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("GlobalSave"))) { _ in executeIfActive { state.save(immediate: true) } }
+        .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("GlobalHighlight"))) { _ in executeIfActive { state.activeType = .highlight } }
+        .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("GlobalUnderline"))) { _ in executeIfActive { state.activeType = .underline } }
+        .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("GlobalStrikeout"))) { _ in executeIfActive { state.activeType = .strikeout } }
+        .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("GlobalNone"))) { _ in executeIfActive { state.activeType = .none } }
+        .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("GlobalInk"))) { _ in executeIfActive { state.activeType = .ink } }
+        .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("GlobalCompareView"))) { _ in executeIfActive { state.openCompareWindow() } }
+        .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("GlobalPrint"))) { _ in
+            #if os(macOS)
+            executeIfActive { state.printDocument() }
+            #endif
+        }
+        .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("GlobalPresentation"))) { _ in
+            executeIfActive {
+                if uiState.isSlideshowActive {
+                    state.exitPresentationMode(uiState: uiState)
+                } else {
+                    state.enterPresentationMode(uiState: uiState)
+                }
+            }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("GlobalRevealInFinder"))) { _ in executeIfActive { state.revealInFinder() } }
     }
 
     // 翻页控件输入框独立拆分成一个组件视图，保持主代码的整洁
