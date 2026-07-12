@@ -122,6 +122,7 @@ struct L {
             "Toggle Left Sidebar": [.zh: "切换左侧边栏", .en: "Toggle Left Sidebar"],
             "Toggle Right Sidebar": [.zh: "切换右侧边栏", .en: "Toggle Right Sidebar"],
             "Undo": [.zh: "撤销", .en: "Undo"],
+            "Redo": [.zh: "重做", .en: "Redo"],
             "Save": [.zh: "保存", .en: "Save"],
             "Close Window": [.zh: "关闭窗口", .en: "Close Window"],
             "Page": [.zh: "页", .en: "Page"],
