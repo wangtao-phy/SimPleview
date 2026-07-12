@@ -166,7 +166,10 @@ final class DocumentManager: ObservableObject {
         saveWorkItem = workItem
 
         // 因为增量保存极快，我们统一调度在主线程执行，避免非 Sendable 警告和多线程崩溃
-        if sync || immediate {
+        if sync {
+            // 退出流程要求 write 已经完成；不能仅仅排到下一轮主事件循环。
+            workItem.perform()
+        } else if immediate {
             DispatchQueue.main.async(execute: workItem)
         } else {
             DispatchQueue.main.asyncAfter(deadline: .now() + 2.0, execute: workItem)
@@ -230,6 +233,19 @@ final class DocumentManager: ObservableObject {
         return url.startAccessingSecurityScopedResource()
         #endif
     }
+
+    /// 仅在该 URL 仍是当前持有的授权时释放它，避免过期加载任务误释放新文档的权限。
+    func releaseDocumentAccessIfCurrent(url: URL, wasAccessing: Bool = true) {
+        #if os(macOS)
+        guard macOSAccessingURL == url else { return }
+        guard wasAccessing else { return }
+        url.stopAccessingSecurityScopedResource()
+        macOSAccessingURL = nil
+        #else
+        guard wasAccessing else { return }
+        url.stopAccessingSecurityScopedResource()
+        #endif
+    }
     
     // 程序退出时的终极清理
     func closeAll() {
@@ -265,6 +281,8 @@ class FileMonitor: NSObject {
     nonisolated(unsafe) private var source: DispatchSourceFileSystemObject?
     /// 实例级防抖任务，替代全局 cancelPreviousPerformRequests，避免多窗口互相干扰
     nonisolated(unsafe) private var debounceWorkItem: DispatchWorkItem?
+    nonisolated(unsafe) private var restartWorkItem: DispatchWorkItem?
+    private var isStopped = false
     
     init(url: URL) {
         self.url = url
@@ -274,6 +292,7 @@ class FileMonitor: NSObject {
     }
     
     private func startMonitoring() {
+        guard !isStopped, source == nil else { return }
         // [极限性能优化] 使用底层的 kqueue (vnode) 机制监听文件变更
         // 放弃笨重且经常漏报的 NSFilePresenter。DispatchSource 直接监听内核级别的写入事件。
         fileDescriptor = open(url.path, O_EVTONLY)
@@ -290,14 +309,21 @@ class FileMonitor: NSObject {
             
             // 发生了原子覆盖保存，原有物理文件已经被“狸猫换太子”，当前句柄失效
             if data.contains(.delete) || data.contains(.rename) || data.contains(.revoke) {
-                self.stop() // 立刻掐断对旧鬼影文件的监听
-                
+                // 仅停止旧 vnode，不将整个监视器标记为停止；关闭窗口时的 stop()
+                // 会取消下面的重启任务，避免陈旧监听器复活。
+                self.source?.cancel()
+                self.source = nil
+                self.restartWorkItem?.cancel()
+
                 // 给系统 0.5 秒的喘息时间，让新文件彻底在硬盘上落位，然后重新抛出事件并挂载监听
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                let restart = DispatchWorkItem { [weak self] in
+                    guard let self, !self.isStopped else { return }
                     self.lastKnownModDate = self.getModDate()
                     self.triggerChange()
                     self.startMonitoring()
                 }
+                self.restartWorkItem = restart
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.5, execute: restart)
                 return
             }
             
@@ -327,8 +353,11 @@ class FileMonitor: NSObject {
     }
     
     func stop() {
+        isStopped = true
         debounceWorkItem?.cancel()
         debounceWorkItem = nil
+        restartWorkItem?.cancel()
+        restartWorkItem = nil
         source?.cancel()
         source = nil
     }
@@ -352,6 +381,7 @@ class FileMonitor: NSObject {
     }
     deinit {
         debounceWorkItem?.cancel()
+        restartWorkItem?.cancel()
         source?.cancel()
     }
 }

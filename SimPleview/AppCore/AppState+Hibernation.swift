@@ -1,5 +1,6 @@
 import Foundation
 import PDFKit
+import Combine
 #if os(macOS)
 import AppKit
 #else
@@ -122,6 +123,8 @@ extension AppState {
             }
         }
         // [性能模式]：底层视图和缩略图在此期间毫发无损，仅仅是撤掉了黑屏蒙版，瞬间回归，没有任何复杂的重新挂载逻辑，极其稳健！
+        
+        thumbnailManager.hotReloadSubject.send()
         
         cancelHibernation()
     }

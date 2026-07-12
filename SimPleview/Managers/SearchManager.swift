@@ -46,7 +46,6 @@ final class SearchManager: ObservableObject {
     func performSearch(in document: PDFDocument?, pdfView: PDFView?) {
         // 第一步：立刻废弃掉之前正在进行的旧搜索（因为用户的 query 可能已经变了）
         searchQueue.cancelAllOperations()
-        document?.cancelFindString()
         
         let query = searchQuery.trimmingCharacters(in: .whitespacesAndNewlines)
         
@@ -63,9 +62,13 @@ final class SearchManager: ObservableObject {
         
         isSearching = true
         let currentQuery = query
-        
+
         let startIndex = pdfView?.currentPage.map { document.index(for: $0) } ?? 0
-        nonisolated(unsafe) let safeDocument = document
+        // 搜索在独立的 PDFKit 副本上执行，避免与可视 PDFView 的渲染、标注和保存并发访问同一对象。
+        guard let documentData = document.dataRepresentation() else {
+            isSearching = false
+            return
+        }
         
         // [异步编程：OperationBlock]
         // 切入后台线程执行底层的文本扫描，支持被中途取消
@@ -73,6 +76,10 @@ final class SearchManager: ObservableObject {
         operation.addExecutionBlock { [weak self, weak operation] in
             // 刚进来就先查一下有没有被取消，不要浪费算力
             guard let operation = operation, !operation.isCancelled else { return }
+            guard let safeDocument = PDFDocument(data: documentData) else {
+                DispatchQueue.main.async { [weak self] in self?.isSearching = false }
+                return
+            }
             
             // [流式渐进搜索引擎 (Iterative Streaming Search)]
             // 获取当前所处页码，以此作为搜索起点
@@ -260,6 +267,7 @@ final class SearchManager: ObservableObject {
     
     // 清空重置
     func clear() {
+        searchQueue.cancelAllOperations()
         searchQuery = ""
         searchResults = []
         currentSearchIndex = nil

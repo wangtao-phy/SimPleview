@@ -141,6 +141,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         
         // 将最后还在看的文件路径持久化到磁盘，以便下次启动满血复活
         UserDefaults.standard.set(openURLs, forKey: "SavedOpenWindows")
+        // 这些数据此前是纯异步写入，terminateNow 会让尚未开始的任务直接丢失。
+        ReadingTracker.shared.saveAllRecords(sync: true)
+        GlobalAuthorManager.shared.saveAuthors(sync: true)
         
         return .terminateNow
     }
@@ -188,7 +191,8 @@ class WindowRegistry: NSObject, NSWindowDelegate {
                 
                 if response == .alertFirstButtonReturn {
                     // 用户选择“保存”
-                    state.save(immediate: true)
+                    // 窗口随后会销毁 PDFView；必须在允许关闭前完成写入。
+                    state.save(sync: true)
                     return true
                 } else if response == .alertSecondButtonReturn {
                     // 用户选择“取消”，阻止关闭

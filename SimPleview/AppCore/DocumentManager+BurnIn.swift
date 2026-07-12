@@ -30,10 +30,14 @@ extension DocumentManager {
     }
     
     private func performBurnIn(document: PDFDocument, targetURL: URL) {
-        nonisolated(unsafe) let safeDoc = document
-        // 使用一个高优先级的后台线程来做烧录，避免阻塞主线程 UI
+        // PDFKit 文档正被 PDFView 使用，不能把它直接交给 detached task。
+        // 先在主线程取得快照，后台只操作自己的 PDFDocument 副本。
+        guard let documentData = document.dataRepresentation() else { return }
         Task.detached(priority: .userInitiated) {
-            let tempURL = URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent(UUID().uuidString + ".pdf")
+            guard let safeDoc = PDFDocument(data: documentData) else { return }
+            let tempURL = targetURL.deletingLastPathComponent()
+                .appendingPathComponent(".SimPleview-\(UUID().uuidString).pdf")
+            defer { try? FileManager.default.removeItem(at: tempURL) }
             
             // 我们需要拿到第一页的大小来初始化 CGContext，虽然页面可以改变大小，
             // 但 PDFKit 创建上下文时需要一个初始的 MediaBox。
@@ -72,9 +76,10 @@ extension DocumentManager {
             // 将临时文件移动到用户指定的目录
             do {
                 if FileManager.default.fileExists(atPath: targetURL.path) {
-                    try FileManager.default.removeItem(at: targetURL)
+                    _ = try FileManager.default.replaceItemAt(targetURL, withItemAt: tempURL)
+                } else {
+                    try FileManager.default.moveItem(at: tempURL, to: targetURL)
                 }
-                try FileManager.default.moveItem(at: tempURL, to: targetURL)
                 
                 // 可选：烧录完成后在 Finder 中显示
                 #if os(macOS)

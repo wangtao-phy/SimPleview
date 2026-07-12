@@ -115,6 +115,7 @@ class GlobalAuthorManager: ObservableObject {
     
     // 存放在内存里的数据库核心。键 (Key) 是作者的全名。
     @Published var authors: [String: GlobalAuthor] = [:]
+    private let persistenceQueue = DispatchQueue(label: "com.simpleview.global-author-writer", qos: .utility)
     
     private init() {
         loadAuthors()
@@ -211,10 +212,10 @@ class GlobalAuthorManager: ObservableObject {
     }
     
     // 将整个内存库一次性序列化并进行原子保存 (Atomic Save)
-    func saveAuthors() {
+    func saveAuthors(sync: Bool = false) {
         let url = fileURL
         let currentAuthors = self.authors // Copy value type for thread safety 值拷贝，保护线程安全
-        DispatchQueue.global(qos: .background).async {
+        let writeAuthors: @Sendable () -> Void = {
             do {
                 let encoder = JSONEncoder()
                 encoder.outputFormatting = .prettyPrinted
@@ -223,6 +224,11 @@ class GlobalAuthorManager: ObservableObject {
             } catch {
                 // Ignore
             }
+        }
+        if sync {
+            persistenceQueue.sync(execute: writeAuthors)
+        } else {
+            persistenceQueue.async(execute: writeAuthors)
         }
     }
     

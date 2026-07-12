@@ -64,6 +64,8 @@ class ReadingTracker: ObservableObject {
     static let shared = ReadingTracker()
     
     private var observers: [NSObjectProtocol] = []
+    /// 所有记录写入按提交顺序串行执行，防止旧快照晚完成后覆盖新记录。
+    private let persistenceQueue = DispatchQueue(label: "com.simpleview.reading-record-writer", qos: .utility)
     
     // [生命周期钩子]
     private init() {
@@ -186,7 +188,7 @@ class ReadingTracker: ObservableObject {
     }
     
     // [高性能存储流水线]
-    func saveAllRecords() {
+    func saveAllRecords(sync: Bool = false) {
         // 存之前先结算一下当前秒表累计的最后一点时间
         commitCurrentTime()
         
@@ -207,7 +209,7 @@ class ReadingTracker: ObservableObject {
         }
         
         // 第二步：拿着数据的快照，跑去后台线程进行 CPU 密集型的 JSON 编码和硬盘读写操作
-        DispatchQueue.global(qos: .background).async { [recordsToSave] in
+        let writeRecords: @Sendable () -> Void = { [recordsToSave] in
             let encoder = JSONEncoder()
             encoder.outputFormatting = .prettyPrinted
             
@@ -241,6 +243,11 @@ class ReadingTracker: ObservableObject {
                     GlobalAuthorManager.shared.recalculateArticleCounts()
                 }
             }
+        }
+        if sync {
+            persistenceQueue.sync(execute: writeRecords)
+        } else {
+            persistenceQueue.async(execute: writeRecords)
         }
     }
     

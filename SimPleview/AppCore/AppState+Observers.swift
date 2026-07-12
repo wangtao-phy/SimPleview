@@ -113,6 +113,19 @@ extension AppState {
                 }
             }
             .store(in: &cancellables)
+            
+        // 监听可见区域变化（包括微小的滚动），如果处于非活动状态但用户还在阅读，应重置休眠倒计时
+        nc.publisher(for: .PDFViewVisiblePagesChanged)
+            .debounce(for: .milliseconds(500), scheduler: RunLoop.main)
+            .sink { [weak self] _ in
+                guard let self = self else { return }
+                #if os(macOS)
+                if let window = self.hostingWindow, !window.isKeyWindow {
+                    self.scheduleHibernation()
+                }
+                #endif
+            }
+            .store(in: &cancellables)
 
         // 监听文本选择事件
         nc.publisher(for: .PDFViewSelectionChanged)

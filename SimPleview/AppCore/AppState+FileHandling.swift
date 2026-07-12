@@ -33,13 +33,28 @@ extension AppState {
         let targetURL = url
         #endif
         
+        // 每一次加载都获得版本号；慢的旧请求只能自行释放资源，不能回写 UI。
+        loadGeneration &+= 1
+        let generation = loadGeneration
+        loadTask?.cancel()
+
         // [性能优化：后台线程解析 PDF]
         // 有些几百兆的学术巨作，如果在主线程打开，整个 App 会卡死好几秒。
         // 所以我们在高优先级后台线程读取文件。
-        Task.detached(priority: .userInitiated) { [weak self] in
+        let task = Task.detached(priority: .userInitiated) { [weak self] in
+            guard !Task.isCancelled else { return }
             // 开始申请访问这个文件的系统级授权
-            let accessing = await MainActor.run {
-                self?.documentManager.handleDocumentAccess(url: targetURL) ?? false
+            let accessResult: Bool? = await MainActor.run {
+                guard let self, self.loadGeneration == generation else { return nil }
+                return self.documentManager.handleDocumentAccess(url: targetURL)
+            }
+            guard let accessing = accessResult else { return }
+
+            guard !Task.isCancelled else {
+                await MainActor.run { [weak self] in
+                    self?.documentManager.releaseDocumentAccessIfCurrent(url: targetURL, wasAccessing: accessing)
+                }
+                return
             }
             
             // [系统架构级决策：为什么必须使用 URL 而不能用 Data(mmap) 避开缓存]
@@ -58,7 +73,9 @@ extension AppState {
             }
             
             guard let doc = document else {
-                if accessing { targetURL.stopAccessingSecurityScopedResource() }
+                await MainActor.run { [weak self] in
+                    self?.documentManager.releaseDocumentAccessIfCurrent(url: targetURL, wasAccessing: accessing)
+                }
                 return
             }
             
@@ -67,8 +84,12 @@ extension AppState {
             
             // [逻辑流程：回归主线程极速更新 UI]
             // PDF 读取完毕后，必须切回主线程进行 UI 绑定，让用户能够瞬间看到 PDF！
-            DispatchQueue.main.async {
-                guard let self = self else { return }
+            await MainActor.run {
+                guard let self, !Task.isCancelled, self.loadGeneration == generation else {
+                    // 新请求已经接管了授权；只释放仍归本请求持有的权限。
+                    if accessing { self?.documentManager.releaseDocumentAccessIfCurrent(url: targetURL, wasAccessing: accessing) }
+                    return
+                }
                 
                 #if os(iOS)
                 // iOS: 新开一个标签页
@@ -80,7 +101,7 @@ extension AppState {
                 self.documentManager.removeFromOpenedRecent(url: self.fileURL)
                 #endif
                 
-                self.setupDocument(doc, url: url, isHotReloading: isHotReloading)
+                self.setupDocument(doc, url: targetURL, isHotReloading: isHotReloading)
                 
                 #if os(iOS)
                 // 存进UserDefaults持久化标签状态
@@ -88,6 +109,7 @@ extension AppState {
                 #endif
             }
         }
+        loadTask = task
     }
     
 

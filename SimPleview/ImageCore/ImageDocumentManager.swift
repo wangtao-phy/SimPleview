@@ -23,6 +23,12 @@ final class ImageDocumentManager {
     
     nonisolated static func createPDFDocument(fromImageURL url: URL) -> PDFDocument? {
         // [核心修复]: 不使用 contentsOfFile 避免 NSImage 的懒加载导致 PDFKit 在转换时读取不到数据而白屏
+        // 避免把异常大的文件整体读入内存后才发现无法解码。
+        let maxInputBytes = 200 * 1024 * 1024
+        if let size = try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize,
+           size > maxInputBytes {
+            return nil
+        }
         guard let data = try? Data(contentsOf: url),
               let image = PlatformImage(data: data) else {
             return nil
@@ -60,10 +66,20 @@ final class ImageDocumentManager {
         
         let mediaBox = page.bounds(for: .cropBox)
         let finalSize = targetSize ?? mediaBox.size
+        // CGContext/UIGraphics 会立即分配 width * height * 4 字节。先验证用户输入和 PDF
+        // 元数据，避免无穷值、负数或超大位图导致整数转换崩溃和 OOM。
+        let maxDimension: CGFloat = 16_384
+        let maxPixels: CGFloat = 100_000_000
+        guard finalSize.width.isFinite, finalSize.height.isFinite,
+              finalSize.width > 0, finalSize.height > 0,
+              finalSize.width <= maxDimension, finalSize.height <= maxDimension,
+              finalSize.width * finalSize.height <= maxPixels else {
+            return false
+        }
         
         #if os(macOS)
-        let width = Int(finalSize.width)
-        let height = Int(finalSize.height)
+        let width = Int(finalSize.width.rounded(.down))
+        let height = Int(finalSize.height.rounded(.down))
         let colorSpace = CGColorSpaceCreateDeviceRGB()
         let bitmapInfo = CGImageAlphaInfo.premultipliedLast.rawValue
         

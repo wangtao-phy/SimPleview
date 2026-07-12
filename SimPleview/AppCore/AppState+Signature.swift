@@ -38,8 +38,9 @@ extension AppState {
             
             _ = self.annotationManager.applySignature(annotation: annotation, to: page, pdfView: self.pdfView) { index in
                 self.thumbnailManager.cancelThumbnail(for: index)
-                self.thumbnailManager.removeThumbnail(for: index)
-                self.generateThumbnail(for: index)
+                if let updatedPage = self.pdfView.document?.page(at: index) {
+                    self.thumbnailManager.updateLiveThumbnail(for: updatedPage, at: index)
+                }
             }
             
             DispatchQueue.main.async {

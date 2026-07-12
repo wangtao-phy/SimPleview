@@ -202,6 +202,9 @@ final class AppState: NSObject, ObservableObject, PDFViewDelegate {
     var historyTimerTask: Task<Void, Never>?
     var annotationJumpTask: Task<Void, Never>? // 用于节约模式下防抖跳转
     var thumbnailJumpTask: Task<Void, Never>?  // 用于节约模式下缩略图导航防抖
+    /// 当前文档加载任务。用 generation 和取消共同保证慢请求不会覆盖较新的文档。
+    var loadTask: Task<Void, Never>?
+    var loadGeneration: UInt = 0
     
     // [核心概念：Combine 的垃圾桶]
     // AnyCancellable 的集合。在使用 Combine 框架监听事件时，如果不把监听者“存”起来，它出了作用域就会立马失效。
@@ -278,6 +281,8 @@ final class AppState: NSObject, ObservableObject, PDFViewDelegate {
         annotationTimerTask?.cancel()
         annotationJumpTask?.cancel()
         thumbnailJumpTask?.cancel()
+        loadTask?.cancel()
+        loadTask = nil
         
         // 结算阅读时长并停止追踪，防止 sessionStartTime 残留
         readingTracker.stopTracking()
@@ -328,8 +333,9 @@ final class AppState: NSObject, ObservableObject, PDFViewDelegate {
         // 将会 100% 导致 CGPDFDocument 的内部状态机死锁，进而使得整个页面永远变成一张白纸 (Blank Page Bug)！
         // 我们的解法是：趁现在我们在安全的 SwiftUI 主线程上，把这个页面对象“取出来”，然后再安全地“扔”给后台画画！
         guard let doc = pdfView.document, let page = doc.page(at: index) else { return }
-        thumbnailManager.generateThumbnail(for: page, at: index, in: doc) { [weak self] currentDoc in
-            return currentDoc === self?.pdfView.document
+        let documentID = ObjectIdentifier(doc)
+        thumbnailManager.generateThumbnail(for: page, at: index, in: doc) { [weak self] in
+            self?.pdfView.document.map(ObjectIdentifier.init) == documentID
         }
 }
     
@@ -352,8 +358,9 @@ final class AppState: NSObject, ObservableObject, PDFViewDelegate {
                 pagesToFetch.append((i, page))
             }
         }
-        thumbnailManager.prefetchThumbnails(pages: pagesToFetch, validRange: start...end, in: doc) { [weak self] currentDoc in
-            return currentDoc === self?.pdfView.document
+        let documentID = ObjectIdentifier(doc)
+        thumbnailManager.prefetchThumbnails(pages: pagesToFetch, validRange: start...end, in: doc) { [weak self] in
+            self?.pdfView.document.map(ObjectIdentifier.init) == documentID
         }
     }
     
