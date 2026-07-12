@@ -37,6 +37,12 @@ extension AppState {
             win.toolbar?.isVisible = false
             
             if #available(macOS 10.12, *) {
+                // 1. 如果存在真实的标签组并显示中，安全切换掉它
+                self.savedTabBarVisible = win.tabGroup?.isTabBarVisible ?? false
+                if self.savedTabBarVisible {
+                    win.toggleTabBar(nil)
+                }
+                // 2. 强制关闭 tabbingMode，杀掉由 .preferred 引发的占位标签栏
                 self.savedTabbingMode = win.tabbingMode
                 win.tabbingMode = .disallowed
             }
@@ -70,6 +76,9 @@ extension AppState {
         self.pdfView.autoScales = false
         if #available(macOS 10.12, *) {
             window.tabbingMode = self.savedTabbingMode
+            if self.savedTabBarVisible && window.tabGroup?.isTabBarVisible == false {
+                window.toggleTabBar(nil)
+            }
         }
         if window.styleMask.contains(.fullScreen) { window.toggleFullScreen(nil) }
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self, weak window, weak uiState] in
