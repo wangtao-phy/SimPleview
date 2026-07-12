@@ -35,6 +35,12 @@ extension AppState {
             win.titleVisibility = .hidden
             win.titlebarAppearsTransparent = true
             win.toolbar?.isVisible = false
+            if #available(macOS 10.12, *) {
+                self.savedTabBarVisible = win.tabGroup?.isTabBarVisible ?? false
+                if self.savedTabBarVisible {
+                    win.toggleTabBar(nil)
+                }
+            }
             
             // 5. 触发系统的全屏动画
             if !win.styleMask.contains(.fullScreen) { win.toggleFullScreen(nil) }
@@ -72,6 +78,11 @@ extension AppState {
             win.titleVisibility = .visible
             win.titlebarAppearsTransparent = false
             win.toolbar?.isVisible = true
+            if #available(macOS 10.12, *) {
+                if self.savedTabBarVisible && win.tabGroup?.isTabBarVisible == false {
+                    win.toggleTabBar(nil)
+                }
+            }
             if let uiState = uiState {
                 // 恢复原来的左右边栏
                 uiState.columnVisibility = uiState.savedColumnVisibility
