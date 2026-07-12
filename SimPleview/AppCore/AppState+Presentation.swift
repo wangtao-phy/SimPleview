@@ -69,6 +69,11 @@ extension AppState {
         #if os(macOS)
         guard let window = pdfView.window else { return }
         self.pdfView.autoScales = false
+        if #available(macOS 10.12, *) {
+            if self.savedTabBarVisible && window.tabGroup?.isTabBarVisible == false {
+                window.toggleTabBar(nil)
+            }
+        }
         if window.styleMask.contains(.fullScreen) { window.toggleFullScreen(nil) }
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self, weak window, weak uiState] in
             guard let self = self, let win = window else { return }
@@ -78,11 +83,6 @@ extension AppState {
             win.titleVisibility = .visible
             win.titlebarAppearsTransparent = false
             win.toolbar?.isVisible = true
-            if #available(macOS 10.12, *) {
-                if self.savedTabBarVisible && win.tabGroup?.isTabBarVisible == false {
-                    win.toggleTabBar(nil)
-                }
-            }
             if let uiState = uiState {
                 // 恢复原来的左右边栏
                 uiState.columnVisibility = uiState.savedColumnVisibility
