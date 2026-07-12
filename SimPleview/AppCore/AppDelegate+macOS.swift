@@ -143,9 +143,14 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         window.title = SimPleview.L.s("New Blank Document", UserDefaults.standard.string(forKey: "appLanguage") == "en" ? .en : .zh)
         window.contentViewController = hostingController
         window.isReleasedWhenClosed = false // 交由 Controller 管理生命周期，防止闪退
+        window.isRestorable = false // 彻底禁用 macOS 的窗口位置记忆功能，防止被强制恢复到之前的位置
+        
         let wc = NSWindowController(window: window)
         wc.shouldCascadeWindows = false // 防止被系统默认的叠放逻辑推到屏幕顶部
         self.newDocumentWindowController = wc
+        
+        // 确保在显示前清空可能存在的自动保存名
+        window.setFrameAutosaveName("")
         
         wc.showWindow(nil)
         window.center() // 必须在 showWindow 之后调用，否则 SwiftUI 布局未完成会导致系统将其推到屏幕顶部
