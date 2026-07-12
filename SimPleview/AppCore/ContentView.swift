@@ -138,8 +138,6 @@ struct ContentView: View {
                         ToolbarSelectionWindow(uiState: uiState)
                     }
                     #endif
-                    // 如果处于幻灯片演示模式，强行隐藏所有工具栏，只留全屏幕黑框
-                    .toolbar(uiState.isSlideshowActive ? .hidden : .visible)
                     #if os(macOS)
                     .modifier(MacToolbarModifier(
                         state: state,
