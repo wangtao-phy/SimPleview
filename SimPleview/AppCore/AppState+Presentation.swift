@@ -31,15 +31,14 @@ extension AppState {
             self.savedBackgroundColor = self.pdfView.backgroundColor
             self.pdfView.backgroundColor = .black
             
-            // 4. 暴力隐藏所有原生的 Mac 窗口边框、标题和按钮
+            // 4. 暴力隐藏所有原生的 Mac 窗口边框、标题和按钮、标签栏
             win.titleVisibility = .hidden
             win.titlebarAppearsTransparent = true
             win.toolbar?.isVisible = false
+            
             if #available(macOS 10.12, *) {
-                self.savedTabBarVisible = win.tabGroup?.isTabBarVisible ?? false
-                if self.savedTabBarVisible {
-                    win.toggleTabBar(nil)
-                }
+                self.savedTabbingMode = win.tabbingMode
+                win.tabbingMode = .disallowed
             }
             
             // 5. 触发系统的全屏动画
@@ -70,9 +69,7 @@ extension AppState {
         guard let window = pdfView.window else { return }
         self.pdfView.autoScales = false
         if #available(macOS 10.12, *) {
-            if self.savedTabBarVisible && window.tabGroup?.isTabBarVisible == false {
-                window.toggleTabBar(nil)
-            }
+            window.tabbingMode = self.savedTabbingMode
         }
         if window.styleMask.contains(.fullScreen) { window.toggleFullScreen(nil) }
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self, weak window, weak uiState] in

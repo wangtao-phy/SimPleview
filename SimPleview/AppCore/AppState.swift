@@ -220,8 +220,9 @@ final class AppState: NSObject, ObservableObject, PDFViewDelegate {
     var eventMonitor: Any? // 存 macOS 的原生事件监听器指针
     var savedDisplayMode: PDFDisplayMode = .singlePageContinuous
     var savedBackgroundColor: PlatformColor = .clear
-    var savedTabBarVisible: Bool = false
-    
+#if os(macOS)
+    var savedTabbingMode: NSWindow.TabbingMode = .automatic
+#endif
     // 静态全局变量池
     static var hasAttemptedRestore = false
     private(set) static var allInstances: [WeakAppState] = []
