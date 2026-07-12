@@ -12,6 +12,17 @@ extension AppState {
         documentManager.save(pdfView: pdfView, sync: sync, immediate: immediate)
     }
     
+    // [原生打印功能]
+    func printDocument() {
+        #if os(macOS)
+        // 使用 PDFView 自带的原生打印接口，完美包含一切手写和矢量批注
+        let printInfo = NSPrintInfo.shared
+        printInfo.horizontalPagination = .fit
+        printInfo.verticalPagination = .fit
+        pdfView.print(with: printInfo, autoRotate: true)
+        #endif
+    }
+    
     /// [核心概念：加载 PDF]
     /// 这是 App 启动后最重要的函数，负责将硬盘里的 PDF 文件塞入内存。
     func loadPDF(url: URL, isHotReloading: Bool = false) {

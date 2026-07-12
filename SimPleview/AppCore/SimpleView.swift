@@ -128,6 +128,14 @@ struct SimpleViewApp: App {
                 .keyboardShortcut(shortcutManager.closeWindow.keyEquivalent, modifiers: shortcutManager.closeWindow.modifiers)
             #endif
         }
+        
+        // 增加系统的打印功能
+        CommandGroup(replacing: .printItem) {
+            #if os(macOS)
+            Button(LS("Print...")) { NotificationCenter.default.post(name: NSNotification.Name("GlobalPrint"), object: nil) }
+                .keyboardShortcut("p", modifiers: .command)
+            #endif
+        }
     }
     
     /// [教程注释：主场景渲染区]

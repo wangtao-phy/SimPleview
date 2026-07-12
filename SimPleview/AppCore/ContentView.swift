@@ -251,6 +251,11 @@ struct ContentView: View {
         .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("GlobalNone"))) { _ in executeIfActive { state.activeType = .none } }
         .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("GlobalInk"))) { _ in executeIfActive { state.activeType = .ink } }
         .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("GlobalCompareView"))) { _ in executeIfActive { state.openCompareWindow() } }
+        .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("GlobalPrint"))) { _ in
+            #if os(macOS)
+            executeIfActive { state.printDocument() }
+            #endif
+        }
         .onDisappear {
             state.cleanup()
         }

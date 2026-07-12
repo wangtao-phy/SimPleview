@@ -125,6 +125,7 @@ struct L {
             "Redo": [.zh: "重做", .en: "Redo"],
             "Compare View": [.zh: "对比查看", .en: "Compare View"],
             "Save": [.zh: "保存", .en: "Save"],
+            "Print...": [.zh: "打印...", .en: "Print..."],
             "Close Window": [.zh: "关闭窗口", .en: "Close Window"],
             "Page": [.zh: "页", .en: "Page"],
             "Page Number Input": [.zh: "第 %@ 页", .en: "Page %@"],
