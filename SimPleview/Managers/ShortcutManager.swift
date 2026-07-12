@@ -62,12 +62,14 @@ final class ShortcutManager: ObservableObject {
     @Published var toggleRightSidebar = AppShortcut(key: "]", modifiers: .control)
     @Published var undo = AppShortcut(key: "z", modifiers: .command)
     @Published var redo = AppShortcut(key: "z", modifiers: [.command, .shift])
+    @Published var compareView = AppShortcut(key: "c", modifiers: .control)
     
     // 工具快捷键
     @Published var highlight = AppShortcut(key: "i", modifiers: .control)
     @Published var underline = AppShortcut(key: "o", modifiers: .control)
     @Published var strikeout = AppShortcut(key: "p", modifiers: .control)
     @Published var none = AppShortcut(key: "u", modifiers: .control)
+    @Published var ink = AppShortcut(key: "h", modifiers: .control)
     
     @Published var save = AppShortcut(key: "s", modifiers: .command)
     @Published var closeWindow = AppShortcut(key: "w", modifiers: .command)
@@ -97,6 +99,8 @@ final class ShortcutManager: ObservableObject {
             if let v = dict["underline"] { underline = v }
             if let v = dict["strikeout"] { strikeout = v }
             if let v = dict["none"] { none = v }
+            if let v = dict["ink"] { ink = v }
+            if let v = dict["compareView"] { compareView = v }
             if let v = dict["save"] { save = v }
             if let v = dict["closeWindow"] { closeWindow = v }
             if let v = dict["openInBrowser"] { openInBrowser = v }
@@ -119,6 +123,8 @@ final class ShortcutManager: ObservableObject {
             "underline": underline,
             "strikeout": strikeout,
             "none": none,
+            "ink": ink,
+            "compareView": compareView,
             "save": save,
             "closeWindow": closeWindow,
             "openInBrowser": openInBrowser
@@ -145,6 +151,8 @@ final class ShortcutManager: ObservableObject {
         underline = AppShortcut(key: "o", modifiers: .control)
         strikeout = AppShortcut(key: "p", modifiers: .control)
         none = AppShortcut(key: "u", modifiers: .control)
+        ink = AppShortcut(key: "h", modifiers: .control)
+        compareView = AppShortcut(key: "c", modifiers: .control)
         save = AppShortcut(key: "s", modifiers: .command)
         closeWindow = AppShortcut(key: "w", modifiers: .command)
         openInBrowser = AppShortcut(key: "g", modifiers: .command)

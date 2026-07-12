@@ -78,8 +78,11 @@ struct ShortcutsSettingsView: View {
                         labelView(LS("Redo"))
                         recorderView($shortcutManager.redo)
                         
-                        Color.clear; Color.clear
-                        Color.clear; Color.clear
+                        labelView(LS("Compare View"))
+                        recorderView($shortcutManager.compareView)
+                        
+                        labelView(LS("Draw"))
+                        recorderView($shortcutManager.ink)
                     }
                 }
                 .padding(.vertical, 40)
