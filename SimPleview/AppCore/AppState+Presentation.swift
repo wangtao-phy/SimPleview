@@ -36,10 +36,8 @@ extension AppState {
             win.titlebarAppearsTransparent = true
             win.toolbar?.isVisible = false
             
-            if #available(macOS 10.12, *) {
-                self.savedTabbingMode = win.tabbingMode
-                win.tabbingMode = .disallowed
-            }
+            self.savedStyleMask = win.styleMask
+            win.styleMask.remove(.titled)
             
             // 5. 触发系统的全屏动画
             if !win.styleMask.contains(.fullScreen) { win.toggleFullScreen(nil) }
@@ -68,8 +66,8 @@ extension AppState {
         #if os(macOS)
         guard let window = pdfView.window else { return }
         self.pdfView.autoScales = false
-        if #available(macOS 10.12, *) {
-            window.tabbingMode = self.savedTabbingMode
+        if let mask = self.savedStyleMask {
+            window.styleMask = mask
         }
         if window.styleMask.contains(.fullScreen) { window.toggleFullScreen(nil) }
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self, weak window, weak uiState] in
