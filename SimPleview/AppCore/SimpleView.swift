@@ -62,8 +62,12 @@ struct SimpleViewApp: App {
     // `@CommandsBuilder` 用于重写 Mac 顶部那排原生的系统菜单（文件、编辑、视图等）。
     @CommandsBuilder
     var appCommands: some Commands {
-        // [逻辑流程] 替换原生的“新建”菜单组
         CommandGroup(replacing: .newItem) {
+            #if os(macOS)
+            Button(LS("New Blank File...")) { NotificationCenter.default.post(name: NSNotification.Name("GlobalNewDocument"), object: nil) }
+                .keyboardShortcut(shortcutManager.newDocument.keyEquivalent, modifiers: shortcutManager.newDocument.modifiers)
+            #endif
+            
             Button(LS("Open...")) {
                 #if os(macOS)
                 _ = appDelegate.applicationShouldOpenUntitledFile(NSApp)

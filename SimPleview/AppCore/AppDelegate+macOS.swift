@@ -62,6 +62,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         // [静态挂载 Method Swizzling]
         let _ = PDFAnnotation.swizzleDrawMethod
         
+        NotificationCenter.default.addObserver(forName: NSNotification.Name("GlobalNewDocument"), object: nil, queue: .main) { _ in
+            self.openNewDocumentDialog()
+        }
+        
         // [逻辑流程]
         // 由于我们没有默认窗口，启动后如果发现没有任何可见的文档窗口，就自动弹出一个文件选择器（NSOpenPanel）。
         // 使用 DispatchQueue.main.async 确保是在下一个事件循环弹出，不阻塞系统绘制。
@@ -110,6 +114,32 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             }
         }
         return false // 返回 false 阻止系统自动生成一个傻乎乎的空白窗口
+    }
+    
+    // 打开“新建文档”弹窗
+    func openNewDocumentDialog() {
+        // 防止打开多个
+        for window in NSApp.windows {
+            if window.title == SimPleview.L.s("New Blank Document", UserDefaults.standard.string(forKey: "appLanguage") == "en" ? .en : .zh) {
+                window.makeKeyAndOrderFront(nil)
+                return
+            }
+        }
+        
+        let newDocView = NewDocumentWindow()
+        let hostingController = NSHostingController(rootView: newDocView)
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 400, height: 350),
+            styleMask: [.titled, .closable, .fullSizeContentView],
+            backing: .buffered,
+            defer: false
+        )
+        
+        window.title = SimPleview.L.s("New Blank Document", UserDefaults.standard.string(forKey: "appLanguage") == "en" ? .en : .zh)
+        window.contentViewController = hostingController
+        window.center()
+        window.isReleasedWhenClosed = true
+        window.makeKeyAndOrderFront(nil)
     }
     
     // 拦截通过 Finder 双击 PDF 文件启动的事件

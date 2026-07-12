@@ -79,6 +79,7 @@ final class ShortcutManager: ObservableObject {
     @Published var burnIn = AppShortcut(key: "s", modifiers: [.command, .shift])
     @Published var slideshow = AppShortcut(key: "f", modifiers: .control)
     @Published var revealInFinder = AppShortcut(key: "o", modifiers: [.command, .shift])
+    @Published var newDocument = AppShortcut(key: "n", modifiers: [.command, .shift])
     
     // 保存在 UserDefaults 里的一大坨 JSON 的 Key 名称
     private let userDefaultsKey = "AppShortcutsConfig"
@@ -113,6 +114,7 @@ final class ShortcutManager: ObservableObject {
             if let v = dict["burnIn"] { burnIn = v }
             if let v = dict["slideshow"] { slideshow = v }
             if let v = dict["revealInFinder"] { revealInFinder = v }
+            if let v = dict["newDocument"] { newDocument = v }
         } catch {
             // Ignore
         }
@@ -139,7 +141,8 @@ final class ShortcutManager: ObservableObject {
             "openInBrowser": openInBrowser,
             "burnIn": burnIn,
             "slideshow": slideshow,
-            "revealInFinder": revealInFinder
+            "revealInFinder": revealInFinder,
+            "newDocument": newDocument
         ]
         
         do {
@@ -172,6 +175,7 @@ final class ShortcutManager: ObservableObject {
         burnIn = AppShortcut(key: "s", modifiers: [.command, .shift])
         slideshow = AppShortcut(key: "f", modifiers: .control)
         revealInFinder = AppShortcut(key: "o", modifiers: [.command, .shift])
+        newDocument = AppShortcut(key: "n", modifiers: [.command, .shift])
         
         saveToDefaults() // 别忘了最后执行存盘
     }
