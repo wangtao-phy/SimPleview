@@ -249,6 +249,8 @@ struct ContentView: View {
         .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("GlobalUnderline"))) { _ in executeIfActive { state.activeType = .underline } }
         .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("GlobalStrikeout"))) { _ in executeIfActive { state.activeType = .strikeout } }
         .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("GlobalNone"))) { _ in executeIfActive { state.activeType = .none } }
+        .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("GlobalInk"))) { _ in executeIfActive { state.activeType = .ink } }
+        .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("GlobalCompareView"))) { _ in executeIfActive { state.openCompareWindow() } }
         .onDisappear {
             state.cleanup()
         }

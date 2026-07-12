@@ -85,6 +85,11 @@ struct SimpleViewApp: App {
             
             Divider()
             
+            Button(LS("Compare View")) { NotificationCenter.default.post(name: NSNotification.Name("GlobalCompareView"), object: nil) }
+                .keyboardShortcut(shortcutManager.compareView.keyEquivalent, modifiers: shortcutManager.compareView.modifiers)
+            
+            Divider()
+            
             Picker(LS("Switch Language"), selection: $appLanguage) {
                 ForEach(AppLanguage.allCases, id: \.self) { lang in
                     Text(lang.displayName).tag(lang)
@@ -109,6 +114,8 @@ struct SimpleViewApp: App {
                 .keyboardShortcut(shortcutManager.strikeout.keyEquivalent, modifiers: shortcutManager.strikeout.modifiers)
             Button(LS("none")) { NotificationCenter.default.post(name: NSNotification.Name("GlobalNone"), object: nil) }
                 .keyboardShortcut(shortcutManager.none.keyEquivalent, modifiers: shortcutManager.none.modifiers)
+            Button(LS("Draw")) { NotificationCenter.default.post(name: NSNotification.Name("GlobalInk"), object: nil) }
+                .keyboardShortcut(shortcutManager.ink.keyEquivalent, modifiers: shortcutManager.ink.modifiers)
         }
         
         // 替换“文件 -> 保存”逻辑
