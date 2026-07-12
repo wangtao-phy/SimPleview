@@ -1,75 +1,39 @@
 # SimPleview
 
-📖 **A Minimalist macOS PDF Reader Powered by AI Programming**  
-📖 **一款由 AI 编程驱动的极简 macOS PDF 阅读器**
-
-![macOS](https://img.shields.io/badge/macOS-14.0%2B-000000?style=flat-square&logo=apple)
-![SwiftUI](https://img.shields.io/badge/SwiftUI-Framework-blue?style=flat-square)
-![AI Driven](https://img.shields.io/badge/AI%20Driven-100%25-orange?style=flat-square)
-
----
-
-## 🌟 About The Project | 项目简介
-
 **[English]**  
-SimPleview is a modern, lightweight, and highly optimized PDF reader for macOS. What makes this project unique is that its entire architecture, UI design, bug fixing, and performance optimization were driven through **AI Pair Programming**. By bridging the gap between cutting-edge AI coding assistants and native Apple frameworks (SwiftUI + AppKit), SimPleview demonstrates the powerful potential of AI in building production-ready desktop applications.
+SimPleview is a minimalist macOS PDF reader built using AI-assisted programming. While macOS comes with a built-in Preview app, SimPleview focuses on specific workflows to provide a cleaner and more efficient reading and annotating experience. 
 
 **[中文]**  
-SimPleview 是一款专为 macOS 打造的现代、轻量级且经过深度优化的 PDF 阅读器。这个项目的独特之处在于，它的整体架构、UI 设计、Bug 修复以及性能优化，全都是通过 **AI 结对编程 (AI Pair Programming)** 驱动完成的。通过将前沿的 AI 编程助手与苹果原生框架 (SwiftUI + AppKit) 深度结合，SimPleview 完美展示了 AI 在构建生产级桌面端应用时的巨大潜能。
+SimPleview 是一款通过 AI 辅助编程构建的极简 macOS PDF 阅读器。虽然 macOS 自带了“预览(Preview)”应用，但 SimPleview 专注于特定工作流，旨在提供更干净、更高效的阅读与批注体验。
 
 ---
 
-## ✨ Key Features | 核心功能
+## Features vs. Apple Preview / 相比自带“预览”的优势功能
 
 **[English]**
-- 🚀 **AI-Driven Architecture**: Clean integration of SwiftUI for UI and AppKit for robust window lifecycle management.
-- 🎨 **Minimalist Design**: Clean, distraction-free interface built with `NavigationSplitView`.
-- 📝 **Rich Annotations**: Native support for Apple Pencil / Mouse drawing, highlighting, underlining, and striking out text.
-- 🧠 **Memory Hibernation**: Automatically freezes inactive windows to save RAM, with an elegant frosted-glass wake-up UI.
-- 📄 **Create Blank Documents**: Instantly create blank PDF or image files in any size (A4, A3, etc.) right from the menu.
-- ⚡ **Multi-Threaded Rendering**: Silky smooth thumbnail generation and asynchronous PDF rendering without blocking the main thread.
+- **Memory Hibernation (智能休眠)**: Unlike Preview which keeps all open PDFs actively loaded in memory, SimPleview automatically hibernates background windows after a period of inactivity, replacing them with a low-memory frosted glass state to save RAM.
+- **Create Blank Documents (新建空白文档)**: Preview requires complicated workarounds to create a blank PDF from scratch. SimPleview provides a direct menu option (Cmd+Shift+N) to instantly create blank PDFs or images in standard paper sizes (A4, A3, etc.) for quick sketching or note-taking.
+- **Distraction-Free UI (极简阅读界面)**: Built natively with SwiftUI's `NavigationSplitView`, it offers a cleaner sidebar and toolbar layout than Preview, focusing purely on the reading and annotating content without visual clutter.
+- **Optimized Thumbnail Generation (优化的缩略图加载)**: Uses asynchronous background threads to render PDF thumbnails, avoiding the UI stutter that occasionally happens in Preview with large documents.
+- **Streamlined Annotations (更直接的批注工具)**: Provides immediate access to highlight, underline, strikeout, and ink tools without needing to toggle an edit mode.
 
 **[中文]**
-- 🚀 **AI 驱动架构**：完美融合 SwiftUI（构建前沿界面）与 AppKit（管理底层原生窗口生命周期）。
-- 🎨 **极简设计**：基于 `NavigationSplitView` 打造的零干扰、沉浸式阅读界面。
-- 📝 **丰富的批注系统**：原生支持画笔（墨迹）、高亮、下划线、删除线等全套批注工具。
-- 🧠 **智能内存休眠**：自动冻结后台静置的阅读窗口以释放内存，点击毛玻璃蒙版即可瞬间唤醒。
-- 📄 **新建空白文档**：支持直接从菜单栏快速创建任意尺寸（A4、A3等）的空白 PDF 或图片文件用于草稿。
-- ⚡ **多线程渲染**：极致丝滑的缩略图生成与异步 PDF 渲染，绝不阻塞主线程。
+- **后台内存休眠**：自带的“预览”会将所有打开的 PDF 完整驻留在内存中。而 SimPleview 会自动侦测长期在后台静置的窗口，将其进入省电休眠状态（显示毛玻璃蒙版），大幅节省系统内存。
+- **一键新建空白文档**：在自带的“预览”中想要凭空新建一个空白 PDF 步骤非常繁琐。SimPleview 提供了直观的快捷键 (Cmd+Shift+N) 和菜单，可以直接生成 A4、A3 等标准纸张尺寸的空白 PDF 或图片，方便随时做草稿和笔记。
+- **纯净的沉浸式 UI**：使用 SwiftUI 原生的分栏架构，去除了自带“预览”繁杂的顶部状态栏视觉干扰，提供了更现代、更专注内容的侧边栏和阅读主界面。
+- **无感缩略图加载**：采用完全异步的后台多线程生成 PDF 侧边栏缩略图，解决了在打开超大文档时可能出现的卡顿掉帧问题。
+- **更快捷的批注流**：将高亮、下划线、删除线和画笔等常用工具直接提取，无需像自带“预览”那样反复点击切换进入“编辑模式”。
 
 ---
 
-## 🛠 Tech Stack | 技术栈
+## Tech Stack / 技术细节
 
 **[English]**
-- **Language**: Swift 6
-- **UI Framework**: SwiftUI & AppKit (NSApplicationDelegate, NSHostingController)
-- **PDF Engine**: PDFKit
-- **Development Method**: AI-Assisted Prompting & Autonomous Bug Fixing
+- Language: Swift 6
+- Frameworks: SwiftUI, AppKit (NSApplicationDelegate, NSWindowController), PDFKit
+- Development: Entirely built and optimized through AI Pair Programming.
 
 **[中文]**
-- **开发语言**：Swift 6
-- **UI 框架**：SwiftUI 与 AppKit（原生混编方案）
-- **阅读引擎**：苹果原生 PDFKit
-- **开发方式**：AI 辅助提示工程与自主除错编排
-
----
-
-## 🚀 How to Run | 运行指南
-
-**[English]**
-1. Clone this repository.
-2. Open `SimPleview.xcodeproj` in Xcode (macOS 14.0+ required).
-3. Select `Any Mac` as the target and hit `Cmd + R` to run.
-4. *(Optional)* Download the pre-packaged `.dmg` from the **Releases** tab.
-
-**[中文]**
-1. 克隆本仓库到本地。
-2. 使用 Xcode 打开 `SimPleview.xcodeproj`（需要 macOS 14.0 或更高版本）。
-3. 目标设备选择 `Any Mac`，按下 `Cmd + R` 即可编译运行。
-4. *（可选）* 直接前往右侧的 **Releases** 标签页，下载已打包好的 `.dmg` 安装包直接使用。
-
----
-
-> *"Built with ❤️ and Artificial Intelligence."*  
-> *"由 ❤️ 与人工智能共同构建。"*
+- 语言：Swift 6
+- 框架：SwiftUI，AppKit (底层窗口与生命周期控制)，PDFKit
+- 开发方式：全程通过 AI 结对编程完成代码构建与深度优化。
