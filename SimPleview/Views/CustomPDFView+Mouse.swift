@@ -371,6 +371,7 @@ extension CustomPDFView {
         if let doc = page.document {
             let index = doc.index(for: page)
             self.manager?.batchStack.append(.annotation(batchID: batchID, pageIndices: [index]))
+            self.manager?.redoStack.removeAll()
             
             annot.modificationDate = Date()
             self.manager?.pendingColorOverride = nil

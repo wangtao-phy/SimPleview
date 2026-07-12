@@ -113,14 +113,12 @@ extension AppState {
     func goToPreviousSearchResult() { searchManager.goToPreviousSearchResult(pdfView: pdfView) }
     func selectSearchResult(at index: Int) { searchManager.selectSearchResult(at: index, pdfView: pdfView) }
     
-    // MARK: - Undo (撤销机制)
+    // MARK: - Undo/Redo (撤销/重做机制)
     func undo() {
         // [新逻辑：如果是绘图过程中，优先单笔撤销]
-        #if os(macOS)
         if pdfView.undoDraftInk() {
             return
         }
-        #endif
         
         recordHistoryAction() 
         // 向管理器发送撤销请求。它会返回是否成功。
@@ -131,13 +129,37 @@ extension AppState {
                 self?.documentVersion = UUID() // 强刷整个文档的 UI
             } else {
                 // 否则只是局部页面的批注撤销，单独重绘那一页即可
-                self?.thumbnailManager.removeThumbnail(for: index)
-                self?.generateThumbnail(for: index)
+                if let updatedPage = self?.pdfView.document?.page(at: index) {
+                    self?.thumbnailManager.updateLiveThumbnail(for: updatedPage, at: index)
+                }
             }
         }, onPageChange: { [weak self] index in
             self?.goToPage(index)
         }) {
             isDirty = true
+            #if os(iOS)
+            if isDirty { documentManager.saveForiOS(pdfView: pdfView) }
+            #endif
+        }
+    }
+    
+    func redo() {
+        if annotationManager.redo(in: pdfView.document, pdfView: pdfView, onThumbnailUpdate: { [weak self] index in
+            if index == -1 {
+                self?.thumbnailManager.clearCache()
+                self?.documentVersion = UUID()
+            } else {
+                if let updatedPage = self?.pdfView.document?.page(at: index) {
+                    self?.thumbnailManager.updateLiveThumbnail(for: updatedPage, at: index)
+                }
+            }
+        }, onPageChange: { [weak self] index in
+            self?.goToPage(index)
+        }) {
+            isDirty = true
+            #if os(iOS)
+            if isDirty { documentManager.saveForiOS(pdfView: pdfView) }
+            #endif
         }
     }
     

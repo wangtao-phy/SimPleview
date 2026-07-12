@@ -25,6 +25,7 @@ extension AppState {
         
         // 3. 将这次移动操作压入撤销栈，以便用户反悔
         annotationManager.batchStack.append(.reorderPages(originalIndices: validSources, insertedAt: destinationIndex))
+        annotationManager.redoStack.removeAll()
         
         // 4. 计算插入点的数学偏移（因为当你删掉前面的页面后，原本的 destination 索引会发生改变）
         let offset = validSources.filter { $0 < destinationIndex }.count
@@ -73,6 +74,7 @@ extension AppState {
         
         // 压入撤销栈
         batchStack.append(.insertPages(count: 1, startIndex: insertAt))
+        redoStack.removeAll()
         totalPageCount = doc.pageCount
         thumbnailManager.clearCache()
         
@@ -105,6 +107,7 @@ extension AppState {
             if let pageToDelete = doc.page(at: idx) {
                 doc.removePage(at: idx)
                 batchStack.append(.deletePage(page: pageToDelete, index: idx))
+                redoStack.removeAll()
             }
         }
         selectedIndices.removeAll()
@@ -124,6 +127,7 @@ extension AppState {
             if let page = insertDoc.page(at: i) { doc.insert(page, at: insertAt + i) }
         }
         batchStack.append(.insertPages(count: insertDoc.pageCount, startIndex: insertAt))
+        redoStack.removeAll()
         totalPageCount = doc.pageCount
         thumbnailManager.clearCache()
         if currentPageIndex >= insertAt { currentPageIndex += insertDoc.pageCount }

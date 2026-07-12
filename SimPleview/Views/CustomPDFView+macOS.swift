@@ -149,9 +149,10 @@ extension CustomPDFView {
                 // 只要一个是属于最底部的块，我们就在它的右下角绘制唯一的便签图标
                 if a === lowestAnnotation {
                     if let finalIcon = noteIcon {
+                        // 将图标锚定在框的右下角内部
                         let iconRect = NSRect(
-                            x: generousBounds.maxX - 6,
-                            y: generousBounds.minY - 14,
+                            x: generousBounds.maxX - 20,
+                            y: generousBounds.minY - 20,
                             width: 20,
                             height: 20
                         )
@@ -165,15 +166,6 @@ extension CustomPDFView {
         let rotation = page.rotation
         let pageBounds = page.bounds(for: .cropBox)
         
-        // 应用页面旋转辅助函数（如果 PDF 页面被旋转，我们需要将上下文旋转，因为批注坐标是基于未旋转页面的）
-        func applyRotation(to ctx: CGContext) {
-            if rotation != 0 {
-                ctx.translateBy(x: pageBounds.midX, y: pageBounds.midY)
-                ctx.rotate(by: CGFloat(-rotation) * .pi / 180.0)
-                ctx.translateBy(x: -pageBounds.midX, y: -pageBounds.midY)
-            }
-        }
-        
         // 2. 实时渲染当前正在拖拽产生的、还没有被 PDFDocument 真正收录为 Annotation 的平滑手绘轨迹
         if self._threadSafeActiveType == .ink,
            let path = self._threadSafeDrawingPath,
@@ -181,7 +173,6 @@ extension CustomPDFView {
            drawingPage == page {
             NSGraphicsContext.saveGraphicsState()
             NSGraphicsContext.current = NSGraphicsContext(cgContext: context, flipped: false)
-            applyRotation(to: context)
             
             self._threadSafeInkColor.setStroke()
             path.lineWidth = self._threadSafeLineWidth
@@ -199,7 +190,6 @@ extension CustomPDFView {
            draftPage == page {
             NSGraphicsContext.saveGraphicsState()
             NSGraphicsContext.current = NSGraphicsContext(cgContext: context, flipped: false)
-            applyRotation(to: context)
             
             self._threadSafeInkColor.setStroke()
             for draftPath in self._threadSafeDraftInkPaths {
@@ -265,7 +255,6 @@ extension CustomPDFView {
             
             NSGraphicsContext.saveGraphicsState()
             NSGraphicsContext.current = NSGraphicsContext(cgContext: context, flipped: false)
-            applyRotation(to: context)
             
             if isLoadedSignature {
                 // 恢复原生高清抗锯齿
@@ -300,7 +289,7 @@ extension CustomPDFView {
             if let vectorAnnot = annot as? VectorSignatureAnnotation {
                 NSGraphicsContext.saveGraphicsState()
                 NSGraphicsContext.current = NSGraphicsContext(cgContext: context, flipped: false)
-                applyRotation(to: context)
+                // 移除 applyRotation(to: context)，修复签名随页面旋转的 Bug
                 
                 context.saveGState()
                 context.interpolationQuality = .high

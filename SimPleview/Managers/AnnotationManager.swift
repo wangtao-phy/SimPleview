@@ -23,6 +23,9 @@ final class AnnotationManager: ObservableObject {
     /// 采用自定义的 `UndoAction` 枚举封装每一次原子绘制动作，通过堆栈机制实现 Cmd+Z 无损回滚。
     @Published var batchStack: [UndoAction] = []
     
+    /// 重做动作栈 (Redo Stack)。
+    @Published var redoStack: [UndoAction] = []
+    
     // [颜色管理]
     // 给不同的批注类型设定当前选中的颜色，带有 @Published，一旦修改，UI 上所有使用了这颜色的画笔图标都会跟着变
     @Published var underlineColor: PlatformColor = .platformBlue
@@ -87,6 +90,7 @@ final class AnnotationManager: ObservableObject {
     private var currentRefreshUUID = UUID()
     
     var canUndo: Bool { !batchStack.isEmpty }
+    var canRedo: Bool { !redoStack.isEmpty }
     
     // [核心逻辑：全局批注扫描仪]
     // 遍历整个 PDF 每一页，把我们关心的批注挖出来，缓存给 UI
@@ -208,6 +212,7 @@ final class AnnotationManager: ObservableObject {
         
         // 压入撤销栈
         batchStack.append(.annotation(batchID: batchID, pageIndices: affectedPageIndices))
+        redoStack.removeAll()
         // 画完后自动取消文字选中状态，体验更好
         pdfView.clearSelection()
         
@@ -248,6 +253,7 @@ final class AnnotationManager: ObservableObject {
         
         // 压入撤销栈，以便 Cmd+Z 时能和普通标注一样被正常拔除
         batchStack.append(.annotation(batchID: batchID, pageIndices: [pageIndex]))
+        redoStack.removeAll()
         
         DispatchQueue.main.async { [weak self] in
             self?.allAnnotations.append(annotation)
@@ -270,99 +276,96 @@ final class AnnotationManager: ObservableObject {
         
         switch lastAction {
         case .annotation(let batchID, let pageIndices):
-            // 【极致 O(K) 优化】如果上次是画线，回滚就是：直接定位到被污染的那几页删去，绝不遍历全书！
             var affectedPageIndices = Set<Int>()
-            var deletedAnnots = Set<PDFAnnotation>()
+            var deletedAnnots: [PDFAnnotation] = []
+            var deletedIndices: [Int] = []
             for i in pageIndices {
                 if i < doc.pageCount, let page = doc.page(at: i) {
                     var hasRemoved = false
                     for a in page.annotations where a.userName == batchID {
-                        // 触发 PDFKit 原生 KVO 机制：状态变更会精准通知底层 CoreAnimation 废弃脏图块，实现 O(1) 局部刷新
                         a.shouldDisplay = false
                         page.removeAnnotation(a) 
-                        deletedAnnots.insert(a)
+                        deletedAnnots.append(a)
+                        deletedIndices.append(i)
                         hasRemoved = true
                     }
-                    if hasRemoved {
-                        affectedPageIndices.insert(i)
-                    }
+                    if hasRemoved { affectedPageIndices.insert(i) }
                 }
             }
-            for index in affectedPageIndices {
-                onThumbnailUpdate(index)
-            }
-            // 增量删除
+            for index in affectedPageIndices { onThumbnailUpdate(index) }
             DispatchQueue.main.async { [weak self] in
-                self?.allAnnotations.removeAll(where: { deletedAnnots.contains($0) })
+                let set = Set(deletedAnnots)
+                self?.allAnnotations.removeAll(where: { set.contains($0) })
             }
+            redoStack.append(.deleteAnnotation(annotations: deletedAnnots, pageIndices: deletedIndices))
             
         case .deleteAnnotation(let annotations, let pageIndices):
-            // 如果上次是不小心删除了某根线，回滚就是：把线原封不动地贴回去
             var affectedPageIndices = Set<Int>()
+            var batchID = ""
             for (annot, pageIdx) in zip(annotations, pageIndices) {
-                annot.shouldDisplay = true // 撤销时恢复显示
+                annot.shouldDisplay = true 
+                batchID = annot.userName ?? batchID
                 if pageIdx < doc.pageCount, let page = doc.page(at: pageIdx) {
                     page.addAnnotation(annot)
                     affectedPageIndices.insert(pageIdx)
                 }
             }
-            for index in affectedPageIndices {
-                onThumbnailUpdate(index)
-            }
-            // 增量增加
+            for index in affectedPageIndices { onThumbnailUpdate(index) }
             DispatchQueue.main.async { [weak self] in
                 guard let self = self else { return }
-                // 过滤掉 batchID 相同的碎块，只让唯一的代表进入 UI 列表
                 var seen = Set<String>()
                 let unique = annotations.filter { 
                     guard let id = $0.userName, !id.isEmpty else { return false }
                     return seen.insert(id).inserted
                 }
-                // [性能优化：移除 O(N log N) 的全量排序开销]
-                // 撤销时仅有少量元素需要恢复。由于元素很可能就是最新的，我们从后往前扫描进行 O(K) 甚至 O(1) 的定点插入
                 for ann in unique {
                     let targetDate = ann.modificationDate ?? Date.distantPast
                     let targetName = ann.userName ?? ""
                     var insertIndex = self.allAnnotations.count
-                    
                     for i in stride(from: self.allAnnotations.count - 1, through: 0, by: -1) {
                         let existingDate = self.allAnnotations[i].modificationDate ?? Date.distantPast
-                        if existingDate < targetDate {
-                            insertIndex = i + 1
-                            break
-                        } else if existingDate == targetDate {
-                            if (self.allAnnotations[i].userName ?? "") <= targetName {
-                                insertIndex = i + 1
-                                break
-                            }
+                        if existingDate < targetDate { insertIndex = i + 1; break }
+                        else if existingDate == targetDate {
+                            if (self.allAnnotations[i].userName ?? "") <= targetName { insertIndex = i + 1; break }
                         }
                     }
                     self.allAnnotations.insert(ann, at: insertIndex)
                 }
             }
+            redoStack.append(.annotation(batchID: batchID, pageIndices: affectedPageIndices))
             
         case .deletePage(let page, let index):
-            // 撤销删页
             doc.insert(page, at: index)
             onThumbnailUpdate(-1)
             onPageChange(index)
+            redoStack.append(.insertPages(count: 1, startIndex: index))
+            
+        case .deletePages(let pages, let indices):
+            let sortedOriginal = zip(pages, indices).sorted { $0.1 < $1.1 }
+            for (page, idx) in sortedOriginal { doc.insert(page, at: idx) }
+            onThumbnailUpdate(-1)
+            onPageChange(indices.first ?? 0)
+            redoStack.append(.insertPages(count: pages.count, startIndex: indices.first ?? 0))
             
         case .insertPages(let count, let startIndex):
-            // 撤销插入
+            var removedPages = [PDFPage]()
+            var removedIndices = [Int]()
             for _ in 0..<count {
-                if startIndex < doc.pageCount {
+                if startIndex < doc.pageCount, let page = doc.page(at: startIndex) {
+                    removedPages.append(page)
+                    removedIndices.append(startIndex)
                     doc.removePage(at: startIndex)
                 }
             }
             onThumbnailUpdate(-1)
             onPageChange(startIndex)
+            let actualIndices = (0..<removedPages.count).map { startIndex + $0 }
+            redoStack.append(.deletePages(pages: removedPages, indices: actualIndices))
             
         case .reorderPages(let originalIndices, let insertedAt):
-            // 撤销页面排序 (极其复杂的倒序恢复逻辑)
             let count = originalIndices.count
             let offset = originalIndices.filter { $0 < insertedAt }.count
             let currentStart = max(0, min(insertedAt - offset, doc.pageCount - count))
-            
             var pagesToRestore: [PDFPage] = []
             for _ in 0..<count {
                 if currentStart < doc.pageCount, let page = doc.page(at: currentStart) {
@@ -370,15 +373,135 @@ final class AnnotationManager: ObservableObject {
                     pagesToRestore.append(page)
                 }
             }
-            
             let sortedOriginal = originalIndices.enumerated().sorted { $0.element < $1.element }
             for (i, originalIdx) in sortedOriginal {
                 let page = pagesToRestore[i]
                 doc.insert(page, at: originalIdx)
             }
-            
             onThumbnailUpdate(-1)
             onPageChange(originalIndices.first ?? 0)
+            // Reorder Redo is too complex to invert symmetrically easily, we just clear redo stack to be safe.
+            redoStack.removeAll()
+        }
+        
+        pdfView?.setPlatformNeedsDisplay()
+        PlatformUtils.updateWindows()
+        return true
+    }
+
+    @discardableResult
+    func redo(in document: PDFDocument?, pdfView: PDFView?, onThumbnailUpdate: (Int) -> Void, onPageChange: (Int) -> Void) -> Bool {
+        // 弹出最后一次操作
+        guard let lastAction = redoStack.popLast(), let doc = document else { return false }
+        
+        switch lastAction {
+        case .annotation(let batchID, let pageIndices):
+            var affectedPageIndices = Set<Int>()
+            var deletedAnnots: [PDFAnnotation] = []
+            var deletedIndices: [Int] = []
+            for i in pageIndices {
+                if i < doc.pageCount, let page = doc.page(at: i) {
+                    var hasRemoved = false
+                    for a in page.annotations where a.userName == batchID {
+                        a.shouldDisplay = false
+                        page.removeAnnotation(a) 
+                        deletedAnnots.append(a)
+                        deletedIndices.append(i)
+                        hasRemoved = true
+                    }
+                    if hasRemoved { affectedPageIndices.insert(i) }
+                }
+            }
+            for index in affectedPageIndices { onThumbnailUpdate(index) }
+            DispatchQueue.main.async { [weak self] in
+                let set = Set(deletedAnnots)
+                self?.allAnnotations.removeAll(where: { set.contains($0) })
+            }
+            batchStack.append(.deleteAnnotation(annotations: deletedAnnots, pageIndices: deletedIndices))
+            
+        case .deleteAnnotation(let annotations, let pageIndices):
+            var affectedPageIndices = Set<Int>()
+            var batchID = ""
+            for (annot, pageIdx) in zip(annotations, pageIndices) {
+                annot.shouldDisplay = true 
+                batchID = annot.userName ?? batchID
+                if pageIdx < doc.pageCount, let page = doc.page(at: pageIdx) {
+                    page.addAnnotation(annot)
+                    affectedPageIndices.insert(pageIdx)
+                }
+            }
+            for index in affectedPageIndices { onThumbnailUpdate(index) }
+            DispatchQueue.main.async { [weak self] in
+                guard let self = self else { return }
+                var seen = Set<String>()
+                let unique = annotations.filter { 
+                    guard let id = $0.userName, !id.isEmpty else { return false }
+                    return seen.insert(id).inserted
+                }
+                for ann in unique {
+                    let targetDate = ann.modificationDate ?? Date.distantPast
+                    let targetName = ann.userName ?? ""
+                    var insertIndex = self.allAnnotations.count
+                    for i in stride(from: self.allAnnotations.count - 1, through: 0, by: -1) {
+                        let existingDate = self.allAnnotations[i].modificationDate ?? Date.distantPast
+                        if existingDate < targetDate { insertIndex = i + 1; break }
+                        else if existingDate == targetDate {
+                            if (self.allAnnotations[i].userName ?? "") <= targetName { insertIndex = i + 1; break }
+                        }
+                    }
+                    self.allAnnotations.insert(ann, at: insertIndex)
+                }
+            }
+            batchStack.append(.annotation(batchID: batchID, pageIndices: affectedPageIndices))
+            
+        case .deletePage(let page, let index):
+            doc.insert(page, at: index)
+            onThumbnailUpdate(-1)
+            onPageChange(index)
+            batchStack.append(.insertPages(count: 1, startIndex: index))
+            
+        case .deletePages(let pages, let indices):
+            let sortedOriginal = zip(pages, indices).sorted { $0.1 < $1.1 }
+            for (page, idx) in sortedOriginal { doc.insert(page, at: idx) }
+            onThumbnailUpdate(-1)
+            onPageChange(indices.first ?? 0)
+            batchStack.append(.insertPages(count: pages.count, startIndex: indices.first ?? 0))
+            
+        case .insertPages(let count, let startIndex):
+            var removedPages = [PDFPage]()
+            var removedIndices = [Int]()
+            for _ in 0..<count {
+                if startIndex < doc.pageCount, let page = doc.page(at: startIndex) {
+                    removedPages.append(page)
+                    removedIndices.append(startIndex)
+                    doc.removePage(at: startIndex)
+                }
+            }
+            onThumbnailUpdate(-1)
+            onPageChange(startIndex)
+            let actualIndices = (0..<removedPages.count).map { startIndex + $0 }
+            batchStack.append(.deletePages(pages: removedPages, indices: actualIndices))
+            
+        case .reorderPages(let originalIndices, let insertedAt):
+            let count = originalIndices.count
+            let offset = originalIndices.filter { $0 < insertedAt }.count
+            let currentStart = max(0, min(insertedAt - offset, doc.pageCount - count))
+            var pagesToRestore: [PDFPage] = []
+            for _ in 0..<count {
+                if currentStart < doc.pageCount, let page = doc.page(at: currentStart) {
+                    doc.removePage(at: currentStart)
+                    pagesToRestore.append(page)
+                }
+            }
+            let sortedOriginal = originalIndices.enumerated().sorted { $0.element < $1.element }
+            for (i, originalIdx) in sortedOriginal {
+                let page = pagesToRestore[i]
+                doc.insert(page, at: originalIdx)
+            }
+            onThumbnailUpdate(-1)
+            onPageChange(originalIndices.first ?? 0)
+            // Reorder Redo is too complex to invert symmetrically easily, we just clear redo stack to be safe.
+            batchStack.removeAll()
         }
         
         pdfView?.setPlatformNeedsDisplay()
@@ -439,6 +562,7 @@ final class AnnotationManager: ObservableObject {
                 // [防崩溃保护]：系统 Markup 产生的外部标注在被移除后，若强行重新 addAnnotation 会触发 PDFKit 的底层 C++ 崩溃。
                 // 按照用户的合理逻辑：外部手绘被删除后直接视为永久删除，不纳入撤销回退栈。
                 batchStack.append(.deleteAnnotation(annotations: deletedAnnots, pageIndices: pageIndices))
+                redoStack.removeAll()
             }
         } else {
             return false

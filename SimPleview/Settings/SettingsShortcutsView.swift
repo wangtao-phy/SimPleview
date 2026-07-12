@@ -72,6 +72,15 @@ struct ShortcutsSettingsView: View {
                         labelView(LS("none"))
                         recorderView($shortcutManager.none)
                     }
+                    
+                    // 第 5 行
+                    GridRow {
+                        labelView(LS("Redo"))
+                        recorderView($shortcutManager.redo)
+                        
+                        Color.clear; Color.clear
+                        Color.clear; Color.clear
+                    }
                 }
                 .padding(.vertical, 40)
                 .frame(maxWidth: .infinity, minHeight: 350, alignment: .center)

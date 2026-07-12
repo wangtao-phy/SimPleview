@@ -164,7 +164,13 @@ final class AppState: NSObject, ObservableObject, PDFViewDelegate {
         get { annotationManager.batchStack }
         set { annotationManager.batchStack = newValue }
     }
+    
+    var redoStack: [UndoAction] {
+        get { annotationManager.redoStack }
+        set { annotationManager.redoStack = newValue }
+    }
     var canUndo: Bool { annotationManager.canUndo }
+    var canRedo: Bool { annotationManager.canRedo }
     
     var underlineColor: PlatformColor {
         get { annotationManager.underlineColor }

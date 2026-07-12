@@ -135,6 +135,7 @@ extension CustomPDFView {
         DispatchQueue.main.async { [weak self] in
             guard let self = self else { return }
             self.manager?.batchStack.append(.annotation(batchID: batchID, pageIndices: Set(indices)))
+            self.manager?.redoStack.removeAll()
             self.manager?.refreshAnnotations(in: self.document)
             self.manager?.pendingColorOverride = nil
             NotificationCenter.default.post(name: NSNotification.Name("PDFRefreshAnnotations"), object: nil)

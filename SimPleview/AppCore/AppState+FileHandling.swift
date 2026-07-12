@@ -189,14 +189,14 @@ extension AppState {
                 // [防内存泄漏与崩溃] 热重载时底层 PDFDocument 实例已换新，必须清空撤销栈，
                 // 否则旧的 PDFPage/PDFAnnotation 被强引用会导致内存泄漏，且 Undo 会崩溃。
                 self.annotationManager.batchStack.removeAll()
+                self.annotationManager.redoStack.removeAll()
             }
             
         } else {
             // 这是全新打开文件：重置历史、清空缓存、强迫 UI 重绘
             self.navigationHistory.removeAll()
             self.annotationManager.batchStack.removeAll() // 换了新文件，肯定要清空上个文件的撤销栈
-            
-
+            self.annotationManager.redoStack.removeAll()
             
             let savedPage = UserDefaults.standard.integer(forKey: "PDFLastPage_" + url.lastPathComponent)
             self.goToPage(max(0, min(savedPage, max(0, doc.pageCount - 1))))
@@ -223,6 +223,7 @@ extension AppState {
         self.navigationManager.navigationHistory = model.navigationHistory
         self.allAnnotations = model.allAnnotations
         self.batchStack = model.batchStack
+        self.redoStack = model.redoStack
         
         self.setupDocument(model.document, url: model.url)
         self.refreshAnnotations()
@@ -289,6 +290,7 @@ extension AppState {
             activeDocumentIndex = 0
             allAnnotations = []
             batchStack = []
+            redoStack = []
             navigationManager.clearHistory()
         } else {
             // 如果还剩有标签，自动跳到左边那个标签
@@ -320,6 +322,7 @@ extension AppState {
         documentManager.documents[activeDocumentIndex].navigationHistory = self.navigationHistory
         documentManager.documents[activeDocumentIndex].allAnnotations = self.allAnnotations
         documentManager.documents[activeDocumentIndex].batchStack = self.batchStack
+        documentManager.documents[activeDocumentIndex].redoStack = self.redoStack
         documentManager.persistiOSDocuments()
     }
     #endif

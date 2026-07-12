@@ -94,24 +94,26 @@ struct SimpleViewApp: App {
 
         // 替换“编辑 -> 撤销”组，这里我们放标注工具快捷键
         CommandGroup(replacing: .undoRedo) {
-            Button(LS("Undo")) { focusedState?.undo() }
+            Button(LS("Undo")) { NotificationCenter.default.post(name: NSNotification.Name("GlobalUndo"), object: nil) }
                 .keyboardShortcut(shortcutManager.undo.keyEquivalent, modifiers: shortcutManager.undo.modifiers)
+            Button(LS("Redo")) { NotificationCenter.default.post(name: NSNotification.Name("GlobalRedo"), object: nil) }
+                .keyboardShortcut(shortcutManager.redo.keyEquivalent, modifiers: shortcutManager.redo.modifiers)
             
             Divider()
             
-            Button(LS("highlight")) { focusedState?.activeType = .highlight }
+            Button(LS("highlight")) { NotificationCenter.default.post(name: NSNotification.Name("GlobalHighlight"), object: nil) }
                 .keyboardShortcut(shortcutManager.highlight.keyEquivalent, modifiers: shortcutManager.highlight.modifiers)
-            Button(LS("underline")) { focusedState?.activeType = .underline }
+            Button(LS("underline")) { NotificationCenter.default.post(name: NSNotification.Name("GlobalUnderline"), object: nil) }
                 .keyboardShortcut(shortcutManager.underline.keyEquivalent, modifiers: shortcutManager.underline.modifiers)
-            Button(LS("strikeout")) { focusedState?.activeType = .strikeout }
+            Button(LS("strikeout")) { NotificationCenter.default.post(name: NSNotification.Name("GlobalStrikeout"), object: nil) }
                 .keyboardShortcut(shortcutManager.strikeout.keyEquivalent, modifiers: shortcutManager.strikeout.modifiers)
-            Button(LS("none")) { focusedState?.activeType = .none }
+            Button(LS("none")) { NotificationCenter.default.post(name: NSNotification.Name("GlobalNone"), object: nil) }
                 .keyboardShortcut(shortcutManager.none.keyEquivalent, modifiers: shortcutManager.none.modifiers)
         }
         
         // 替换“文件 -> 保存”逻辑
         CommandGroup(replacing: .saveItem) {
-            Button(LS("Save")) { focusedState?.save(immediate: true) }
+            Button(LS("Save")) { NotificationCenter.default.post(name: NSNotification.Name("GlobalSave"), object: nil) }
                 .keyboardShortcut(shortcutManager.save.keyEquivalent, modifiers: shortcutManager.save.modifiers)
             #if os(macOS)
             Button(LS("Burn-in Annotations...")) { NotificationCenter.default.post(name: NSNotification.Name("TriggerBurnIn"), object: nil) }

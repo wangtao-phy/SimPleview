@@ -35,8 +35,6 @@ final class ThumbnailManager: ObservableObject {
     
     // 记录正在执行的请求，方便随时精准取消
     private var operations = [Int: (id: UUID, operation: Operation)]()
-    /// 仅保存当前文档的一份不可变数据快照；不能让每个排队缩略图各自复制整份 PDF。
-    private var documentSnapshot: (id: ObjectIdentifier, data: Data)?
     
     // 用来通知 UI 某张图画好了的信号发射器
     let thumbnailUpdateSubject = PassthroughSubject<Int, Never>()
@@ -154,7 +152,6 @@ final class ThumbnailManager: ObservableObject {
         nscache.removeAllObjects()
         lock.lock()
         operations.removeAll()
-        documentSnapshot = nil
         strongCache.removeAll()
         strongKeys.removeAll()
         strongKeySet.removeAll()
@@ -191,20 +188,13 @@ final class ThumbnailManager: ObservableObject {
         }
         lock.unlock()
         
-        // PDFView 正在使用原文档。后台只能渲染主线程生成的数据快照，不能共享 PDFPage。
-        let documentID = ObjectIdentifier(doc)
-        lock.lock()
-        let cachedSnapshot = documentSnapshot.flatMap { $0.id == documentID ? $0.data : nil }
-        lock.unlock()
-        guard let documentData = cachedSnapshot ?? doc.dataRepresentation() else {
+        // [极致原子化和性能优化]：不再拷贝整本 PDF 导致巨大开销和标注不同步！
+        // 只提取当前发生变化的单页数据，极低内存消耗，并且能完美包含最新画上去的批注！
+        guard let page = doc.page(at: index), let pageData = page.dataRepresentation else {
             markAsFinished(index, id: nil)
             return
         }
-        lock.lock()
-        if documentSnapshot?.id != documentID {
-            documentSnapshot = (documentID, documentData)
-        }
-        lock.unlock()
+        
         let safeCurrentDocChecker = currentDocChecker
         let maxEdge = currentMemoryMode.policy.thumbnailMaxEdge
         
@@ -216,8 +206,9 @@ final class ThumbnailManager: ObservableObject {
                 return
             }
             
-            guard let safeDoc = PDFDocument(data: documentData),
-                  let safePage = safeDoc.page(at: index) else {
+            // 数据里只有这一页，因此必定是索引 0
+            guard let safeDoc = PDFDocument(data: pageData),
+                  let safePage = safeDoc.page(at: 0) else {
                 DispatchQueue.main.async { self.markAsFinished(index, id: operationID) }
                 return
             }

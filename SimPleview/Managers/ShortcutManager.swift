@@ -61,6 +61,7 @@ final class ShortcutManager: ObservableObject {
     @Published var toggleLeftSidebar = AppShortcut(key: "[", modifiers: .control)
     @Published var toggleRightSidebar = AppShortcut(key: "]", modifiers: .control)
     @Published var undo = AppShortcut(key: "z", modifiers: .command)
+    @Published var redo = AppShortcut(key: "z", modifiers: [.command, .shift])
     
     // 工具快捷键
     @Published var highlight = AppShortcut(key: "i", modifiers: .control)
@@ -91,6 +92,7 @@ final class ShortcutManager: ObservableObject {
             if let v = dict["toggleLeftSidebar"] { toggleLeftSidebar = v }
             if let v = dict["toggleRightSidebar"] { toggleRightSidebar = v }
             if let v = dict["undo"] { undo = v }
+            if let v = dict["redo"] { redo = v }
             if let v = dict["highlight"] { highlight = v }
             if let v = dict["underline"] { underline = v }
             if let v = dict["strikeout"] { strikeout = v }
@@ -112,6 +114,7 @@ final class ShortcutManager: ObservableObject {
             "toggleLeftSidebar": toggleLeftSidebar,
             "toggleRightSidebar": toggleRightSidebar,
             "undo": undo,
+            "redo": redo,
             "highlight": highlight,
             "underline": underline,
             "strikeout": strikeout,
@@ -137,6 +140,7 @@ final class ShortcutManager: ObservableObject {
         toggleLeftSidebar = AppShortcut(key: "[", modifiers: .control)
         toggleRightSidebar = AppShortcut(key: "]", modifiers: .control)
         undo = AppShortcut(key: "z", modifiers: .command)
+        redo = AppShortcut(key: "z", modifiers: [.command, .shift])
         highlight = AppShortcut(key: "i", modifiers: .control)
         underline = AppShortcut(key: "o", modifiers: .control)
         strikeout = AppShortcut(key: "p", modifiers: .control)

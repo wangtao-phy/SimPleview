@@ -63,6 +63,14 @@ struct ContentView: View {
         _state = StateObject(wrappedValue: state)
     }
     
+    private func executeIfActive(_ action: @escaping () -> Void) {
+        #if os(macOS)
+        if hostingWindow?.isKeyWindow == true { action() }
+        #else
+        action()
+        #endif
+    }
+    
     // MARK: - Core Application View Structure
     
     var body: some View {
@@ -234,6 +242,13 @@ struct ContentView: View {
             }
             #endif
         }
+        .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("GlobalUndo"))) { _ in executeIfActive { state.undo() } }
+        .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("GlobalRedo"))) { _ in executeIfActive { state.redo() } }
+        .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("GlobalSave"))) { _ in executeIfActive { state.save(immediate: true) } }
+        .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("GlobalHighlight"))) { _ in executeIfActive { state.activeType = .highlight } }
+        .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("GlobalUnderline"))) { _ in executeIfActive { state.activeType = .underline } }
+        .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("GlobalStrikeout"))) { _ in executeIfActive { state.activeType = .strikeout } }
+        .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("GlobalNone"))) { _ in executeIfActive { state.activeType = .none } }
         .onDisappear {
             state.cleanup()
         }
