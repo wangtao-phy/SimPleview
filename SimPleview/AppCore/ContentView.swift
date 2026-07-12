@@ -163,7 +163,9 @@ struct ContentView: View {
         .focusedSceneValue(\.uiState, uiState)
         
         // 监听外部应用（如文件管家）调用的 "在 App 中打开此文件" 事件。
+        #if os(iOS)
         .onOpenURL { state.loadPDF(url: $0) }
+        #endif
         .onChange(of: uiState.isSlideshowActive) { _, isActive in
             if isActive {
                 state.enterPresentationMode(uiState: uiState)

@@ -66,7 +66,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         let _ = PDFAnnotation.swizzleDrawMethod
         
         NotificationCenter.default.addObserver(forName: NSNotification.Name("GlobalNewDocument"), object: nil, queue: .main) { _ in
-            self.openNewDocumentDialog()
+            Task { @MainActor in
+                self.openNewDocumentDialog()
+            }
         }
         
         // [逻辑流程]
