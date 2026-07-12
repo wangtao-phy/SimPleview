@@ -221,7 +221,7 @@ final class AppState: NSObject, ObservableObject, PDFViewDelegate {
     var savedDisplayMode: PDFDisplayMode = .singlePageContinuous
     var savedBackgroundColor: PlatformColor = .clear
 #if os(macOS)
-    var savedStyleMask: NSWindow.StyleMask?
+    var savedTabbingMode: NSWindow.TabbingMode = .automatic
 #endif
     // 静态全局变量池
     static var hasAttemptedRestore = false
