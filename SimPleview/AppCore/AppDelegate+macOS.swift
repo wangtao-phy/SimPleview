@@ -57,6 +57,9 @@ struct WindowAccessor: NSViewRepresentable {
 
 class AppDelegate: NSObject, NSApplicationDelegate {
     
+    // 新增：保持对新建窗口的强引用，防止闪退或自动销毁异常
+    var newDocumentWindowController: NSWindowController?
+    
     // App 完全启动后的回调
     func applicationDidFinishLaunching(_ notification: Notification) {
         // [静态挂载 Method Swizzling]
@@ -119,17 +122,19 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     // 打开“新建文档”弹窗
     func openNewDocumentDialog() {
         // 防止打开多个
-        for window in NSApp.windows {
-            if window.title == SimPleview.L.s("New Blank Document", UserDefaults.standard.string(forKey: "appLanguage") == "en" ? .en : .zh) {
-                window.makeKeyAndOrderFront(nil)
-                return
-            }
+        if let wc = newDocumentWindowController, let window = wc.window, window.isVisible {
+            window.makeKeyAndOrderFront(nil)
+            return
         }
         
-        let newDocView = NewDocumentWindow()
+        let newDocView = NewDocumentWindow(onClose: { [weak self] in
+            self?.newDocumentWindowController?.close()
+            self?.newDocumentWindowController = nil
+        })
+        
         let hostingController = NSHostingController(rootView: newDocView)
         let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 400, height: 350),
+            contentRect: NSRect(x: 0, y: 0, width: 450, height: 380),
             styleMask: [.titled, .closable, .fullSizeContentView],
             backing: .buffered,
             defer: false
@@ -138,8 +143,12 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         window.title = SimPleview.L.s("New Blank Document", UserDefaults.standard.string(forKey: "appLanguage") == "en" ? .en : .zh)
         window.contentViewController = hostingController
         window.center()
-        window.isReleasedWhenClosed = true
-        window.makeKeyAndOrderFront(nil)
+        // 交由 Controller 和闭包来管理释放，不依赖底层的隐式机制，解决闪退 Bug
+        window.isReleasedWhenClosed = false 
+        
+        let wc = NSWindowController(window: window)
+        self.newDocumentWindowController = wc
+        wc.showWindow(nil)
     }
     
     // 拦截通过 Finder 双击 PDF 文件启动的事件

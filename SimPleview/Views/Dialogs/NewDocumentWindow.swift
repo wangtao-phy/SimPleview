@@ -34,7 +34,7 @@ struct NewDocumentWindow: View {
     
     @State private var saveDirectory: URL = FileManager.default.urls(for: .downloadsDirectory, in: .userDomainMask).first ?? URL(fileURLWithPath: NSHomeDirectory())
     
-    @Environment(\.presentationMode) var presentationMode
+    var onClose: () -> Void
     
     private func updateDimensions(for size: PaperSize) {
         if let dim = size.dimensions {
@@ -44,59 +44,75 @@ struct NewDocumentWindow: View {
     }
     
     var body: some View {
-        Form {
-            Section(header: Text("Document Properties").font(.headline)) {
-                Picker("File Type:", selection: $selectedType) {
-                    ForEach(DocumentGenerator.DocumentType.allCases) { type in
-                        Text(type.rawValue).tag(type)
+        VStack(spacing: 0) {
+            Form {
+                Section(header: Text("Document Properties").font(.headline)) {
+                    Picker("File Type:", selection: $selectedType) {
+                        ForEach(DocumentGenerator.DocumentType.allCases) { type in
+                            Text(type.rawValue).tag(type)
+                        }
                     }
+                    .pickerStyle(.menu)
+                    .frame(width: 200)
+                    
+                    Picker("Paper Size:", selection: $selectedPaperSize) {
+                        ForEach(PaperSize.allCases) { size in
+                            Text(size.rawValue).tag(size)
+                        }
+                    }
+                    .pickerStyle(.menu)
+                    .frame(width: 200)
+                    .onChange(of: selectedPaperSize) { newValue in
+                        updateDimensions(for: newValue)
+                    }
+                    
+                    HStack {
+                        TextField("Width", text: $customWidth)
+                            .textFieldStyle(.roundedBorder)
+                            .disabled(selectedPaperSize != .custom)
+                            .frame(width: 80)
+                        
+                        Text("x")
+                            .foregroundColor(.secondary)
+                        
+                        TextField("Height", text: $customHeight)
+                            .textFieldStyle(.roundedBorder)
+                            .disabled(selectedPaperSize != .custom)
+                            .frame(width: 80)
+                        
+                        Text("px/pt").foregroundColor(.secondary)
+                    }
+                    .padding(.leading, 75) // 对齐标签
                 }
                 
-                Picker("Paper Size:", selection: $selectedPaperSize) {
-                    ForEach(PaperSize.allCases) { size in
-                        Text(size.rawValue).tag(size)
-                    }
-                }
-                .onChange(of: selectedPaperSize) { newValue in
-                    updateDimensions(for: newValue)
-                }
+                Divider().padding(.vertical, 8)
                 
-                HStack {
-                    Text("Width:")
-                    TextField("Width", text: $customWidth)
-                        .disabled(selectedPaperSize != .custom)
-                    Text("Height:")
-                    TextField("Height", text: $customHeight)
-                        .disabled(selectedPaperSize != .custom)
+                Section(header: Text("Save Options").font(.headline)) {
+                    TextField("File Name:", text: $fileName)
+                        .textFieldStyle(.roundedBorder)
+                    
+                    HStack {
+                        Text("Save To:")
+                        Text(saveDirectory.path)
+                            .truncationMode(.middle)
+                            .foregroundColor(.secondary)
+                            .lineLimit(1)
+                            .frame(maxWidth: 200, alignment: .leading)
+                        Spacer()
+                        Button("Browse...") {
+                            selectDirectory()
+                        }
+                    }
                 }
             }
+            .padding(20)
             
-            Divider().padding(.vertical, 5)
-            
-            Section(header: Text("Save Options").font(.headline)) {
-                TextField("File Name:", text: $fileName)
-                
-                HStack {
-                    Text("Save To:")
-                    Text(saveDirectory.path)
-                        .truncationMode(.middle)
-                        .foregroundColor(.secondary)
-                        .lineLimit(1)
-                    Spacer()
-                    Button("Browse...") {
-                        selectDirectory()
-                    }
-                }
-            }
-            
-            Divider().padding(.vertical, 5)
+            Divider()
             
             HStack {
                 Spacer()
                 Button("Cancel") {
-                    if let window = NSApp.keyWindow, window.title == SimPleview.L.s("New Blank Document", UserDefaults.standard.string(forKey: "appLanguage") == "en" ? .en : .zh) {
-                        window.close()
-                    }
+                    onClose()
                 }
                 .keyboardShortcut(.cancelAction)
                 
@@ -104,11 +120,12 @@ struct NewDocumentWindow: View {
                     createDocument()
                 }
                 .keyboardShortcut(.defaultAction)
-                .buttonStyle(BorderedProminentButtonStyle())
+                .buttonStyle(.borderedProminent)
             }
+            .padding(16)
+            .background(Color(NSColor.windowBackgroundColor))
         }
-        .padding()
-        .frame(width: 400, height: 350)
+        .frame(width: 450, height: 380)
     }
     
     private func selectDirectory() {
@@ -141,10 +158,8 @@ struct NewDocumentWindow: View {
             // 自动打开生成的文件
             NSApp.openSwiftUIWindow(for: targetURL)
             
-            // 关闭当前弹窗
-            if let window = NSApp.keyWindow, window.title == SimPleview.L.s("New Blank Document", UserDefaults.standard.string(forKey: "appLanguage") == "en" ? .en : .zh) {
-                window.close()
-            }
+            // 使用回调安全关闭弹窗，避免操作丢失的引用
+            onClose()
         } catch {
             let alert = NSAlert(error: error)
             alert.runModal()
