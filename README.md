@@ -6,6 +6,10 @@ SimPleview 是一款完全通过 AI 辅助编程构建的 macOS PDF 阅读器。
 
 ---
 
+![界面1](https://raw.githubusercontent.com/wangtao-phy/pic/master/uPic/win1.png)
+![界面2](https://raw.githubusercontent.com/wangtao-phy/pic/master/uPic/win2.png)
+![界面3](https://raw.githubusercontent.com/wangtao-phy/pic/master/uPic/win3.png)
+
 ##  Features vs. Apple Preview / 相比自带“预览”的优势功能
 
 - **Background Memory Hibernation**: Apple's Preview keeps all open PDFs fully loaded in memory. SimPleview automatically detects background windows that have been inactive for a long time and puts them into a hibernation state to save RAM.
