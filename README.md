@@ -17,7 +17,8 @@ SimPleview 是一款完全通过 AI 辅助编程构建的 macOS PDF 阅读器。
 - **Side-by-Side Comparison**: You can easily pop out individual pages of the current PDF into a separate window to conveniently compare different sections of the same document.
 - **Open in Browser**: Instead of building heavy AI features into the reader itself, it provides a one-click "Open in Browser" button. Since most modern browsers now feature built-in AI reading assistants, you can directly leverage them for AI-assisted reading.
 - **Reveal in Finder**: A small but highly convenient feature to instantly locate your file.
-
+- **Hover to View Hyperlinks**: Quickly preview target URLs by simply hovering over links in the PDF without having to click.
+- **Eye-Protection Background**: Provides a comfortable background color mode to reduce eye strain during long reading sessions.
 
 - **后台内存休眠**：自带的“预览”会将所有打开的 PDF 完整驻留在内存中。而 SimPleview 会自动侦测长期在后台静置的窗口，将其进入休眠状态以节省资源。
 - **标注自由切换颜色**：这个 app 的初衷便是解放自带“预览”中定死的下划线颜色，实现真正的自由标色。
@@ -28,7 +29,8 @@ SimPleview 是一款完全通过 AI 辅助编程构建的 macOS PDF 阅读器。
 - **对比查看**：可以单独弹出当前 PDF 的特定页面，方便在同一个 PDF 文件内进行跨页对比查看。
 - **浏览器打开**：阅读器本身不提供臃肿的 AI 功能，而是提供“一键在浏览器打开”。如今各大主流浏览器都已经内置了强大的 AI 阅读助手，您可以直接借用浏览器来辅助阅读。
 - **当前文件所在文件夹**：一个极为方便的小功能，一键直达文件所在目录。
-
+- **悬浮查看超链接**：在 PDF 中只需将鼠标悬浮在链接上方即可快速预览目标网址，无需点击跳转。
+- **护眼背景色**：提供舒适的背景色模式，有效缓解长时间阅读带来的视觉疲劳。
 ---
 
 ## 📥 Installation & Usage / 安装与使用指南
