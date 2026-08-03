@@ -46,6 +46,13 @@ class CustomPDFView: PDFView {
     nonisolated(unsafe) var colorObserver: NSKeyValueObservation?
     var currentPopover: NSPopover?
     
+    // Link Hover Preview State
+    var trackingArea: NSTrackingArea?
+    var hoverTimer: Timer?
+    var hoverHideTimer: Timer?
+    var hoverPopover: NSPopover?
+    var currentHoveredLink: PDFAnnotation?
+    
     // macOS 原生手绘的实时状态缓存
     var currentDrawingPath: NSBezierPath?
     var currentDrawingPage: PDFPage?

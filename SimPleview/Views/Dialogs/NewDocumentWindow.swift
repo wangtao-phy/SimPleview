@@ -87,7 +87,7 @@ struct NewDocumentWindow: View {
                             .labelsHidden()
                             .pickerStyle(.menu)
                             .frame(width: 150)
-                            .onChange(of: selectedPaperSize) { newValue in
+                            .onChange(of: selectedPaperSize) { _, newValue in
                                 updateDimensions(for: newValue)
                             }
                         }

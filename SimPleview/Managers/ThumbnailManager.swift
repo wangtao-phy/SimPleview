@@ -1,5 +1,5 @@
 import SwiftUI
-import PDFKit
+@preconcurrency import PDFKit
 import Combine
 
 /// [教程注释：极速缩略图引擎 (ThumbnailManager)]
@@ -198,6 +198,7 @@ final class ThumbnailManager: ObservableObject {
         let safeCurrentDocChecker = currentDocChecker
         let maxEdge = currentMemoryMode.policy.thumbnailMaxEdge
         
+        nonisolated(unsafe) let safePageForOp = page
         let operationID = UUID()
         let operation = BlockOperation()
         operation.addExecutionBlock { [weak self, weak operation] in
@@ -209,7 +210,7 @@ final class ThumbnailManager: ObservableObject {
             // [极其关键的卡顿修复]
             // 将耗时几百毫秒的 page.dataRepresentation 放入后台线程执行！
             // 这彻底解决了滑动和初次加载缩略图时的严重掉帧问题。
-            guard let pageData = page.dataRepresentation,
+            guard let pageData = safePageForOp.dataRepresentation,
                   let safeDoc = PDFDocument(data: pageData),
                   let safePage = safeDoc.page(at: 0) else {
                 DispatchQueue.main.async { self.markAsFinished(index, id: operationID) }

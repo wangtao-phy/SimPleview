@@ -1,6 +1,6 @@
 #if os(macOS)
 import SwiftUI
-import PDFKit
+@preconcurrency import PDFKit
 import Combine
 
 extension CustomPDFView {
@@ -213,6 +213,100 @@ extension CustomPDFView {
     override func mouseDragged(with event: NSEvent) {
         // 自定义模式下已经被 mouseDown 循环彻底拦截了，来到这里的一定是 PDFKit 原生的选择事件
         super.mouseDragged(with: event)
+    }
+
+    override func mouseMoved(with event: NSEvent) {
+        super.mouseMoved(with: event)
+        
+        let viewPoint = convert(event.locationInWindow, from: nil)
+        
+        // Optimize: skip if dragging or if view is not active
+        guard let page = page(for: viewPoint, nearest: false) else {
+            handleMouseLeaveLink()
+            return
+        }
+        
+        let pagePoint = convert(viewPoint, to: page)
+        let annotation = page.annotation(at: pagePoint)
+        
+        // Link type check
+        if let linkAnnot = annotation, (linkAnnot.type ?? "").lowercased() == "link" {
+            // Ignore external links (Web URLs)
+            let isExternal = linkAnnot.url != nil || (linkAnnot.action as? PDFActionURL) != nil
+            if isExternal {
+                handleMouseLeaveLink()
+                return
+            }
+            
+            // Cancel any pending hide
+            self.hoverHideTimer?.invalidate()
+            self.hoverHideTimer = nil
+            
+            // Check if it's actually a different link (compare bounds and page since instances might vary)
+            let isDifferentLink = self.currentHoveredLink == nil ||
+                linkAnnot.bounds != self.currentHoveredLink?.bounds ||
+                linkAnnot.page != self.currentHoveredLink?.page
+                
+            if isDifferentLink {
+                // New link hovered
+                // Clear old state but without immediately closing the popover to avoid flicker
+                self.currentHoveredLink = linkAnnot
+                self.hoverTimer?.invalidate()
+                
+                // Start a timer
+                nonisolated(unsafe) let safeLinkAnnot = linkAnnot
+                self.hoverTimer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: false) { [weak self] _ in
+                    Task { @MainActor in
+                        guard let self = self, self.currentHoveredLink == safeLinkAnnot else { return }
+                        self.showLinkPreviewPopover(for: safeLinkAnnot, at: viewPoint, in: self)
+                    }
+                }
+            }
+        } else {
+            handleMouseLeaveLink()
+        }
+    }
+    
+    func handleMouseLeaveLink() {
+        // Only trigger hide if we have something tracked
+        guard self.currentHoveredLink != nil || self.hoverPopover != nil else { return }
+        
+        self.hoverTimer?.invalidate()
+        self.hoverTimer = nil
+        
+        // Use a debounce timer to avoid flickering when crossing the 1px gaps between PDF text characters
+        if self.hoverHideTimer == nil {
+            self.hoverHideTimer = Timer.scheduledTimer(withTimeInterval: 0.3, repeats: false) { [weak self] _ in
+                Task { @MainActor in
+                    self?.currentHoveredLink = nil
+                    self?.hoverPopover?.close()
+                    self?.hoverPopover = nil
+                    self?.hoverHideTimer = nil
+                }
+            }
+        }
+    }
+    
+    private func showLinkPreviewPopover(for linkAnnot: PDFAnnotation, at viewPoint: NSPoint, in view: NSView) {
+        guard let page = linkAnnot.page else { return }
+        self.hoverPopover?.close()
+        
+        // Create SwiftUI View
+        let popoverView = LinkPreviewPopoverView(annotation: linkAnnot)
+        
+        let popover = NSPopover()
+        popover.behavior = .transient
+        popover.animates = false // Prevent animation delays from causing tracking issues
+        
+        let host = NSHostingController(rootView: popoverView)
+        popover.contentViewController = host
+        // Explicitly set the initial content size so NSPopover correctly calculates screen edge collisions BEFORE it appears
+        popover.contentSize = NSSize(width: 900, height: 350)
+        
+        self.hoverPopover = popover
+        
+        let linkRect = self.convert(linkAnnot.bounds, from: page)
+        popover.show(relativeTo: linkRect, of: view, preferredEdge: .minY)
     }
 
     override func mouseUp(with event: NSEvent) { 

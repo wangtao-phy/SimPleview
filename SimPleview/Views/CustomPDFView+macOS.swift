@@ -26,6 +26,11 @@ extension CustomPDFView {
         }
         currentPopover?.close()
         currentPopover = nil
+        
+        hoverTimer?.invalidate()
+        hoverTimer = nil
+        hoverPopover?.close()
+        hoverPopover = nil
     }
     
     override func viewWillMove(toSuperview newSuperview: NSView?) {
@@ -33,6 +38,30 @@ extension CustomPDFView {
         if newSuperview == nil {
             cleanupMenuObservers()
         }
+    }
+    
+    // MARK: - Mouse Tracking (Hover)
+    
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        
+        if let existing = trackingArea {
+            removeTrackingArea(existing)
+        }
+        
+        // We only care about tracking when mouse moves or exits within our visible bounds.
+        // We track activeInActiveApp so hover works while app is active.
+        let options: NSTrackingArea.Options = [.mouseMoved, .mouseEnteredAndExited, .activeInActiveApp, .inVisibleRect]
+        trackingArea = NSTrackingArea(rect: self.bounds, options: options, owner: self, userInfo: nil)
+        
+        if let area = trackingArea {
+            addTrackingArea(area)
+        }
+    }
+    
+    override func mouseExited(with event: NSEvent) {
+        super.mouseExited(with: event)
+        handleMouseLeaveLink()
     }
     
     // MARK: - Native Rendering Engine (macOS)
