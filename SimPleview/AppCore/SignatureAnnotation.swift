@@ -19,10 +19,9 @@ class VectorSignatureAnnotation: PDFAnnotation {
         super.init(bounds: bounds, forType: .stamp, withProperties: nil)
         self.color = color
         
-        // [核心黑科技]
-        // 1. 关闭 shouldDisplay：防止 PDFKit 在屏幕上渲染出基于缓存的低清模糊版本
+        // 1. 开启 shouldDisplay：允许 PDFKit 原生渲染
         // 2. 开启 shouldPrint：确保导出/保存/打印 PDF 时，原生的纯矢量外观能够写入文件
-        self.shouldDisplay = false
+        self.shouldDisplay = true
         self.shouldPrint = true
         
         // 序列化 CGPath 为字符串，保存到 PDF 底层字典中，实现永久无损保存

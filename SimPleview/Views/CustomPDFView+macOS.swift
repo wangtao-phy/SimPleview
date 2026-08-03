@@ -341,31 +341,6 @@ extension CustomPDFView {
             
             NSGraphicsContext.restoreGraphicsState()
         }
-
-        // 4. [核心黑科技] 强制拦截 VectorSignatureAnnotation 进行原生高清渲染！
-        // 绕过 PDFKit 内部可能存在的低清晰度位图缓存机制
-        for annot in allAnnotations {
-            if let vectorAnnot = annot as? VectorSignatureAnnotation {
-                NSGraphicsContext.saveGraphicsState()
-                NSGraphicsContext.current = NSGraphicsContext(cgContext: context, flipped: false)
-                // 移除 applyRotation(to: context)，修复签名随页面旋转的 Bug
-                
-                context.saveGState()
-                context.interpolationQuality = .high
-                context.setShouldAntialias(true)
-                
-                context.translateBy(x: vectorAnnot.bounds.minX, y: vectorAnnot.bounds.minY)
-                context.scaleBy(x: vectorAnnot.bounds.width, y: vectorAnnot.bounds.height)
-                
-                context.setFillColor(vectorAnnot.themeColor.cgColor)
-                context.addPath(vectorAnnot.vectorPath)
-                context.fillPath()
-                
-                context.restoreGState()
-                NSGraphicsContext.restoreGraphicsState()
-            }
-        }
-
         NSGraphicsContext.restoreGraphicsState()
     }
     

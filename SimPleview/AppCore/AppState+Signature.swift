@@ -24,12 +24,23 @@ extension AppState {
             
             // 优化：针对极高分辨率的图片(如4000x3000)，不能写死 200，否则插入后会显得极其微小
             // 默认占据页面宽度的 25%，但为了避免在普通 PDF (约 600 points) 上太大，我们取一个合理的平衡值
-            let adaptiveWidth = max(200.0, pageBounds.width * 0.25)
+            // 注意：宽度基准使用旋转后的实际显示宽度
+            let isRotated = page.rotation == 90 || page.rotation == 270
+            let effectiveWidth = isRotated ? pageBounds.height : pageBounds.width
+            
+            let adaptiveWidth = max(200.0, effectiveWidth * 0.25)
             let targetWidth: CGFloat = min(adaptiveWidth, cgWidth)
             let targetHeight = cgHeight * (targetWidth / cgWidth)
             
-            let x = pageBounds.midX - targetWidth / 2
-            let y = pageBounds.midY - targetHeight / 2
+            // [修复] 将签名插入到用户当前屏幕可视区域的中心，而不是整个页面的物理中心
+            let visibleRectOnPage = self.pdfView.convert(self.pdfView.bounds, to: page)
+            let intersection = visibleRectOnPage.intersection(pageBounds)
+            
+            let centerX = intersection.isEmpty ? pageBounds.midX : intersection.midX
+            let centerY = intersection.isEmpty ? pageBounds.midY : intersection.midY
+            
+            let x = centerX - targetWidth / 2
+            let y = centerY - targetHeight / 2
             let bounds = NSRect(x: x, y: y, width: targetWidth, height: targetHeight)
             
             // [Vision 极客黑科技] 将位图提取为矢量路径
