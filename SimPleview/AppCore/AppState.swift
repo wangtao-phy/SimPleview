@@ -110,7 +110,12 @@ final class AppState: NSObject, ObservableObject, PDFViewDelegate {
     }
     
     @AppStorage("appLanguage") var appLanguage: AppLanguage = .zh
-    
+    @AppStorage("pdfPageBackgroundColor") var pageBackgroundColor: PDFPageBackgroundColor = .default {
+        didSet {
+            pdfView._threadSafePageBackgroundColor = pageBackgroundColor
+            pdfView.setPlatformNeedsDisplay()
+        }
+    }
     func L(_ key: String) -> String {
         return SimPleview.L.s(key, appLanguage)
     }
@@ -245,6 +250,7 @@ final class AppState: NSObject, ObservableObject, PDFViewDelegate {
         let savedWidth = UserDefaults.standard.value(forKey: "defaultLineWidth") as? CGFloat ?? 3.0
         self.currentLineWidth = savedWidth
         super.init()
+        self.pdfView._threadSafePageBackgroundColor = self.pageBackgroundColor
         // 设置自己作为各个组件的事件代理人
         self.pdfView.manager = self.annotationManager
         pdfView.delegate = self
@@ -283,6 +289,7 @@ final class AppState: NSObject, ObservableObject, PDFViewDelegate {
         // 【终极防漏】：直接替换为全新的空壳实例！如果仅仅置 nil，底层的某些 PDFKit 视图层级可能依旧互相引用。
         // 用全新的实例替换，旧的 PDF 视图堆栈会被彻底废弃并进入系统级垃圾回收。
         pdfView = CustomPDFView()
+        pdfView._threadSafePageBackgroundColor = self.pageBackgroundColor
         
         documentManager.closeAll()
         historyTimerTask?.cancel()

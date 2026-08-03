@@ -166,9 +166,7 @@ struct ColorPickerMenu: View {
     private func colorMenuOption(_ name: String, _ color: PlatformColor) -> some View {
         Button(action: { state.currentColor = color }) {
             #if os(macOS)
-            Label { Text(name) } icon: {
-                Image(nsImage: NSImage.flatColorDot(color: color))
-            }
+            colorMenuText(name: name, color: color)
             #else
             Label { Text(name) } icon: {
                 Image(systemName: "circle.fill").foregroundStyle(Color(color))
@@ -176,6 +174,15 @@ struct ColorPickerMenu: View {
             #endif
         }
     }
+    
+    #if os(macOS)
+    private func colorMenuText(name: String, color: NSColor) -> Text {
+        var dot = AttributedString("● ")
+        dot.foregroundColor = Color(nsColor: color)
+        let text = AttributedString(name)
+        return Text(dot + text)
+    }
+    #endif
 }
 
 // MARK: - 独立原生手绘按钮（带滑块下拉）

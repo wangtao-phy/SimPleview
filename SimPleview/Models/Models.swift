@@ -72,6 +72,14 @@ enum AnnotationType: String, CaseIterable {
     case none, highlight, underline, strikeout, ink
 }
 
+/// PDF 页面护眼背景色枚举
+enum PDFPageBackgroundColor: Int, CaseIterable, Codable {
+    case `default` = 0
+    case green = 1
+    case yellow = 2
+    case black = 3
+}
+
 /// [教程注释：多语言简易实现]
 /// 结构体 `L` (Localization) 提供了一个硬编码的多语言词典方案。
 /// 对于小型独立 App 来说，这比配置官方的 Localizable.strings 更加直观和容易修改。

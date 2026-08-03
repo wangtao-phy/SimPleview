@@ -208,6 +208,8 @@ class CustomPDFView: PDFView {
     }
     nonisolated(unsafe) var _threadSafeLineWidth: CGFloat = 3.0
 
+    // [护眼背景色状态]
+    nonisolated(unsafe) var _threadSafePageBackgroundColor: PDFPageBackgroundColor = .default
 
     
     // [颜色批次同步]

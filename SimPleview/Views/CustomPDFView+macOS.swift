@@ -54,6 +54,39 @@ extension CustomPDFView {
         let drawFunc = unsafeBitCast(imp, to: DrawFunc.self)
         drawFunc(self, sel, page, context)
         
+        // [核心功能：护眼背景色滤镜]
+        let bgColor = self._threadSafePageBackgroundColor
+        if bgColor != .default {
+            context.saveGState()
+            
+            // 为了安全获取 displayBox，由于 Swift 6 @MainActor 隔离，通过 ObjC 机制获取
+            let boxGetter = class_getInstanceMethod(PDFView.self, #selector(getter: PDFView.displayBox))!
+            let boxImp = method_getImplementation(boxGetter)
+            typealias BoxGetterType = @convention(c) (AnyObject, Selector) -> PDFDisplayBox
+            let getBox = unsafeBitCast(boxImp, to: BoxGetterType.self)
+            let box = getBox(self, #selector(getter: PDFView.displayBox))
+            
+            let bounds = page.bounds(for: box)
+            
+            switch bgColor {
+            case .green:
+                context.setFillColor(NSColor(red: 0.78, green: 0.93, blue: 0.8, alpha: 1.0).cgColor)
+                context.setBlendMode(.multiply)
+                context.fill(bounds)
+            case .yellow:
+                context.setFillColor(NSColor(red: 0.96, green: 0.9, blue: 0.75, alpha: 1.0).cgColor)
+                context.setBlendMode(.multiply)
+                context.fill(bounds)
+            case .black:
+                context.setFillColor(NSColor.white.cgColor)
+                context.setBlendMode(.difference)
+                context.fill(bounds)
+            default:
+                break
+            }
+            context.restoreGState()
+        }
+        
         // 【性能优化】：将主题色获取提取到循环外
         let accentColor: NSColor
         if #available(macOS 10.14, *) {
