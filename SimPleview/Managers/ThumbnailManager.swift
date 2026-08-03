@@ -124,7 +124,9 @@ final class ThumbnailManager: ObservableObject {
             targetSize = CGSize(width: effectiveWidth * scale, height: maxEdge)
         }
         
-        let thumb = page.platformThumbnail(of: targetSize, for: .cropBox)
+        // [清晰度修复] 乘以视网膜像素倍率，解决原生 thumbnail 接口默认输出 1x 导致模糊的问题
+        let retinaSize = CGSize(width: targetSize.width * 2.5, height: targetSize.height * 2.5)
+        let thumb = page.platformThumbnail(of: retinaSize, for: .cropBox)
         
         nscache.setObject(thumb, forKey: NSNumber(value: index))
         
@@ -188,17 +190,13 @@ final class ThumbnailManager: ObservableObject {
         }
         lock.unlock()
         
-        // [极致原子化和性能优化]：不再拷贝整本 PDF 导致巨大开销和标注不同步！
-        // 传递单页对象的引用，将耗时的 dataRepresentation 完全剥离到后台队列中去执行
-        guard let page = doc.page(at: index) else {
-            markAsFinished(index, id: nil)
-            return
-        }
-        
         let safeCurrentDocChecker = currentDocChecker
         let maxEdge = currentMemoryMode.policy.thumbnailMaxEdge
         
-        nonisolated(unsafe) let safePageForOp = page
+        // Use nonisolated(unsafe) to safely pass doc reference across thread boundaries.
+        // PDFDocument is thread-safe for fetching pages.
+        nonisolated(unsafe) let safeDoc = doc
+        
         let operationID = UUID()
         let operation = BlockOperation()
         operation.addExecutionBlock { [weak self, weak operation] in
@@ -207,19 +205,14 @@ final class ThumbnailManager: ObservableObject {
                 return
             }
             
-            // [极其关键的卡顿修复]
-            // 将耗时几百毫秒的 page.dataRepresentation 放入后台线程执行！
-            // 这彻底解决了滑动和初次加载缩略图时的严重掉帧问题。
-            guard let pageData = safePageForOp.dataRepresentation,
-                  let safeDoc = PDFDocument(data: pageData),
-                  let safePage = safeDoc.page(at: 0) else {
-                DispatchQueue.main.async { self.markAsFinished(index, id: operationID) }
-                return
-            }
-            
             // 3. 及时释放内存 (极其重要)
-            // CoreGraphics 渲染图像会产生巨大的临时内存堆积，autoreleasepool 保证每画完一张图瞬间把垃圾扔掉。
             autoreleasepool {
+                // [极其关键的卡顿修复]
+                // 在后台线程提取 page，彻底消除主线程因为初次解析 PDF 页面对象引发的严重掉帧！
+                guard let safePage = safeDoc.page(at: index) else {
+                    DispatchQueue.main.async { self.markAsFinished(index, id: operationID) }
+                    return
+                }
                 
                 // 4. 执行高性能渲染，按页面原始比例动态计算目标尺寸
                 let pageBounds = safePage.bounds(for: .cropBox)
@@ -240,7 +233,11 @@ final class ThumbnailManager: ObservableObject {
                     targetSize = CGSize(width: effectiveWidth * scale, height: maxEdge)
                 }
                 
-                let thumb = safePage.platformThumbnail(of: targetSize, for: .cropBox)
+                // [清晰度修复] 乘以视网膜像素倍率，解决原生 thumbnail 接口默认输出 1x 导致模糊的问题
+                let retinaSize = CGSize(width: targetSize.width * 2.5, height: targetSize.height * 2.5)
+                
+                // 抛弃低效且会导致休眠唤醒崩溃的 dataRepresentation 黑客写法，直接使用安全的 platformThumbnail
+                let thumb = safePage.platformThumbnail(of: retinaSize, for: .cropBox)
                 
                 guard !operation.isCancelled else {
                     DispatchQueue.main.async { self.markAsFinished(index, id: operationID) }

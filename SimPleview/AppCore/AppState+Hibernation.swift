@@ -124,6 +124,11 @@ extension AppState {
         }
         // [性能模式]：底层视图和缩略图在此期间毫发无损，仅仅是撤掉了黑屏蒙版，瞬间回归，没有任何复杂的重新挂载逻辑，极其稳健！
         
+        // [极速修复]：不管是什么内存模式，休眠唤醒时都强制清空缩略图引擎的所有底层缓存。
+        // 因为 macOS 可能会在长时间休眠时悄悄杀掉 NSImage 内部的位图数据（Zombie Cache）。
+        // 这样可以确保后续的 hotReloadSubject 必然触发真实的后台再渲染。
+        thumbnailManager.clearCache()
+        
         thumbnailManager.hotReloadSubject.send()
         
         cancelHibernation()

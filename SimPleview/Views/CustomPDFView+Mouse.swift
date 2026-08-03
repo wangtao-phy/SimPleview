@@ -385,9 +385,11 @@ extension CustomPDFView {
         // 边框向外扩张了 4 像素
         let box = annotationBounds.insetBy(dx: -4, dy: -4)
         
-        // 判断是否点中了右下角的便签图标 (向外扩展)
-        let iconRect = NSRect(x: box.maxX - 6, y: box.minY - 14, width: 20, height: 20)
-        if iconRect.insetBy(dx: -1, dy: -1).contains(clickPoint) {
+        // 匹配实际绘制位置：x: maxX - 20, y: minY - 20, w: 20, h: 20
+        let iconRect = NSRect(x: box.maxX - 20, y: box.minY - 20, width: 20, height: 20)
+        
+        // 放大点击热区，覆盖整个图标并向外延伸 10 像素，方便用户点击
+        if iconRect.insetBy(dx: -10, dy: -10).contains(clickPoint) {
             return true
         }
         

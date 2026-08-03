@@ -95,62 +95,10 @@ extension PDFPage {
     // 统一各个平台提取 PDF 页面缩略图的方法。虽然目前名字一样，但有时候两个平台的 API 会有细微的参数差别，
     // 把它们包裹在一个自定义函数里能有效隔离风险。
     nonisolated func platformThumbnail(of size: CGSize, for box: PDFDisplayBox) -> PlatformImage {
-        // 节约模式：手动使用底层的 CGContext 绘制缩略图，避免原生 thumbnail() 产生的底层缓存
-        if MemoryMode.current == .saving {
-            #if os(macOS)
-            let img = NSImage(size: size)
-            img.lockFocus()
-            guard let context = NSGraphicsContext.current?.cgContext else {
-                img.unlockFocus()
-                return self.thumbnail(of: size, for: box)
-            }
-            // 填充白底，防止没背景的 PDF 显示黑底
-            context.setFillColor(NSColor.white.cgColor)
-            context.fill(CGRect(origin: .zero, size: size))
-            
-            let pageRect = self.bounds(for: box)
-            let scaleX = size.width / pageRect.width
-            let scaleY = size.height / pageRect.height
-            let scale = min(scaleX, scaleY)
-            
-            context.scaleBy(x: scale, y: scale)
-            context.translateBy(x: -pageRect.origin.x, y: -pageRect.origin.y)
-            
-            self.draw(with: box, to: context)
-            img.unlockFocus()
-            return img
-            #else
-            let format = UIGraphicsImageRendererFormat()
-            format.opaque = true
-            let renderer = UIGraphicsImageRenderer(size: size, format: format)
-            return renderer.image { ctx in
-                let cgContext = ctx.cgContext
-                cgContext.setFillColor(UIColor.white.cgColor)
-                cgContext.fill(CGRect(origin: .zero, size: size))
-                
-                let pageRect = self.bounds(for: box)
-                let scaleX = size.width / pageRect.width
-                let scaleY = size.height / pageRect.height
-                let scale = min(scaleX, scaleY)
-                
-                // iOS 的 CoreGraphics 坐标系翻转
-                cgContext.translateBy(x: 0, y: size.height)
-                cgContext.scaleBy(x: 1.0, y: -1.0)
-                
-                cgContext.scaleBy(x: scale, y: scale)
-                cgContext.translateBy(x: -pageRect.origin.x, y: -pageRect.origin.y)
-                
-                self.draw(with: box, to: cgContext)
-            }
-            #endif
-        } else {
-            // 性能模式下，我们依赖系统的极限缓存来保证最高顺滑度
-            #if os(macOS)
-            return self.thumbnail(of: size, for: box)
-            #else
-            return self.thumbnail(of: size, for: box)
-            #endif
-        }
+        // [极速修复]：原有的 Saving 模式下为了节约内存，使用了手动 CGContext 绘制，
+        // 但该方法未处理复杂的 PDFPage.rotation 和 cropBox 偏移，导致页面内容漂移和显示不全。
+        // 原生 thumbnail(of:for:) 已经非常成熟且完美处理旋转，在 autoreleasepool 的保护下不会内存泄漏。
+        return self.thumbnail(of: size, for: box)
     }
 }
 
