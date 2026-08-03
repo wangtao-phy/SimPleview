@@ -160,6 +160,9 @@ extension CustomPDFView {
         
         let isSignature = batchID.hasPrefix("S-")
         
+        context.saveGState()
+        context.concatenate(page.transform(for: .cropBox))
+        
         // 第二次遍历：绘制所有线框
         for a in allAnnotations where a.userName == batchID {
             let generousBounds = a.bounds.insetBy(dx: -4, dy: -4)
@@ -223,6 +226,7 @@ extension CustomPDFView {
                 }
             }
         }
+        context.restoreGState()
         
 
         // 2. 实时渲染当前正在拖拽产生的、还没有被 PDFDocument 真正收录为 Annotation 的平滑手绘轨迹
@@ -233,12 +237,18 @@ extension CustomPDFView {
             NSGraphicsContext.saveGraphicsState()
             NSGraphicsContext.current = NSGraphicsContext(cgContext: context, flipped: false)
             
+            context.saveGState()
+            context.concatenate(page.transform(for: .cropBox))
+            
             self._threadSafeInkColor.setStroke()
             path.lineWidth = self._threadSafeLineWidth
             path.lineCapStyle = .round
             path.lineJoinStyle = .round
             path.stroke()
             
+            context.restoreGState()
+            
+            context.restoreGState()
             NSGraphicsContext.restoreGraphicsState()
         }
         
@@ -250,6 +260,9 @@ extension CustomPDFView {
             NSGraphicsContext.saveGraphicsState()
             NSGraphicsContext.current = NSGraphicsContext(cgContext: context, flipped: false)
             
+            context.saveGState()
+            context.concatenate(page.transform(for: .cropBox))
+            
             self._threadSafeInkColor.setStroke()
             for draftPath in self._threadSafeDraftInkPaths {
                 draftPath.lineWidth = self._threadSafeLineWidth
@@ -257,6 +270,8 @@ extension CustomPDFView {
                 draftPath.lineJoinStyle = .round
                 draftPath.stroke()
             }
+            
+            context.restoreGState()
             
             NSGraphicsContext.restoreGraphicsState()
         }
@@ -315,6 +330,9 @@ extension CustomPDFView {
             NSGraphicsContext.saveGraphicsState()
             NSGraphicsContext.current = NSGraphicsContext(cgContext: context, flipped: false)
             
+            context.saveGState()
+            context.concatenate(page.transform(for: .cropBox))
+            
             if isLoadedSignature {
                 // 恢复原生高清抗锯齿
                 context.saveGState()
@@ -338,6 +356,8 @@ extension CustomPDFView {
                 bPath.lineJoinStyle = .round
                 bPath.stroke()
             }
+            
+            context.restoreGState()
             
             NSGraphicsContext.restoreGraphicsState()
         }
