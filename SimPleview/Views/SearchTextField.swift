@@ -40,6 +40,7 @@ struct SearchTextField: NSViewRepresentable {
         
         // 焦点同步
         if let customTextField = nsView as? CustomNSTextField {
+            customTextField.isFocusBinding = isFocused
             customTextField.syncFocusState(isFocused: isFocused.wrappedValue)
         }
     }
@@ -51,10 +52,23 @@ struct SearchTextField: NSViewRepresentable {
     class CustomNSTextField: NSTextField {
         var onFocusRequested: (() -> Void)?
         private var pendingFocusRequest = false
+        var isFocusBinding: Binding<Bool>?
+        
+        override func becomeFirstResponder() -> Bool {
+            let success = super.becomeFirstResponder()
+            if success {
+                DispatchQueue.main.async { [weak self] in
+                    if self?.isFocusBinding?.wrappedValue == false {
+                        self?.isFocusBinding?.wrappedValue = true
+                    }
+                }
+            }
+            return success
+        }
         
         func syncFocusState(isFocused: Bool) {
             if isFocused {
-                if window?.firstResponder != self.currentEditor() {
+                if window?.firstResponder != self.currentEditor() && window?.firstResponder != self {
                     if window != nil {
                         window?.makeFirstResponder(self)
                     } else {
@@ -63,9 +77,10 @@ struct SearchTextField: NSViewRepresentable {
                 }
             } else {
                 pendingFocusRequest = false
-                if window?.firstResponder == self.currentEditor() {
-                    window?.makeFirstResponder(nil)
-                }
+                // [修复焦点窃取 Bug] 
+                // 我们不再强制调用 window?.makeFirstResponder(nil)。
+                // 强制辞去焦点会导致当 SwiftUI 状态与 AppKit 底层短暂不同步时，
+                // 用户刚点击输入框准备打字，焦点就被暴力夺走，从而产生“无法输入”的玄学 Bug。
             }
         }
         
