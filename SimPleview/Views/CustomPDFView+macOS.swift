@@ -341,6 +341,39 @@ extension CustomPDFView {
             
             NSGraphicsContext.restoreGraphicsState()
         }
+
+        // 4. [核心黑科技] 强制拦截 VectorSignatureAnnotation 进行原生高清渲染！
+        // 绕过 PDFKit 内部可能存在的低清晰度位图缓存机制
+        for annot in allAnnotations {
+            if let vectorAnnot = annot as? VectorSignatureAnnotation {
+                NSGraphicsContext.saveGraphicsState()
+                NSGraphicsContext.current = NSGraphicsContext(cgContext: context, flipped: false)
+                // 移除 applyRotation(to: context)，修复签名随页面旋转的 Bug
+                
+                context.saveGState()
+                context.interpolationQuality = .high
+                context.setShouldAntialias(true)
+                
+                // [修复]: 必须应用页面的 cropBox transform，否则在页面旋转或带有 cropBox 时会导致坐标系漂移！
+                if let page = annot.page {
+                    let transform = page.transform(for: .cropBox)
+                    // 由于 macOS 上的 CoreGraphics API 需要使用 CGAffineTransform，而 page.transform 返回的是 NSAffineTransform (或者已经是 CGAffineTransform，在 Swift 5 中两者可以混用，但在某些旧 macOS 上可能需要转换，PDFKit 在 Swift 中直接返回 CGAffineTransform)
+                    // 实际上在 Swift 中 PDFPage.transform(for:) 返回的是 CGAffineTransform
+                    context.concatenate(transform)
+                }
+                
+                context.translateBy(x: vectorAnnot.bounds.minX, y: vectorAnnot.bounds.minY)
+                context.scaleBy(x: vectorAnnot.bounds.width, y: vectorAnnot.bounds.height)
+                
+                context.setFillColor(vectorAnnot.themeColor.cgColor)
+                context.addPath(vectorAnnot.vectorPath)
+                context.fillPath()
+                
+                context.restoreGState()
+                NSGraphicsContext.restoreGraphicsState()
+            }
+        }
+
         NSGraphicsContext.restoreGraphicsState()
     }
     
