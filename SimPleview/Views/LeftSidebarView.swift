@@ -17,11 +17,24 @@ struct LeftSidebarView: View {
     var body: some View {
         VStack(spacing: 0) {
             // [顶部分段选择器]
-            Picker("", selection: $uiState.leftSidebarTab) {
-                Text(state.L("Thumbnails")).tag(0)
-                Text(state.L("Outline")).tag(1)
+            HStack(spacing: 8) {
+                #if os(macOS)
+                Button(action: { uiState.isShowingTabGroupsPopover.toggle() }) {
+                    Image(systemName: "square.grid.2x2")
+                        .foregroundColor(.primary)
+                }
+                .buttonStyle(.plain)
+                .popover(isPresented: $uiState.isShowingTabGroupsPopover, arrowEdge: .bottom) {
+                    TabGroupsPopoverView()
+                }
+                #endif
+                
+                Picker("", selection: $uiState.leftSidebarTab) {
+                    Text(state.L("Thumbnails")).tag(0)
+                    Text(state.L("Outline")).tag(1)
+                }
+                .pickerStyle(.segmented)
             }
-            .pickerStyle(.segmented)
             .padding(.horizontal, 10)
             .padding(.vertical, 8)
             
