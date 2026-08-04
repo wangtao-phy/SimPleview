@@ -44,7 +44,8 @@ struct TabGroupsPopoverView: View {
         VStack(alignment: .leading, spacing: 0) {
             Text("标签页分组")
                 .font(.headline)
-                .padding()
+                .padding(.vertical, 16)
+                .padding(.horizontal, 24)
             
             Divider()
             

@@ -35,7 +35,8 @@ struct LeftSidebarView: View {
                 }
                 .pickerStyle(.segmented)
             }
-            .padding(.horizontal, 10)
+            .padding(.leading, 6)
+            .padding(.trailing, 10)
             .padding(.vertical, 8)
             
             Divider()
