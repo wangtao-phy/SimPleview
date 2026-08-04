@@ -8,6 +8,7 @@ import UniformTypeIdentifiers
 struct TabGroupsPopoverView: View {
     @ObservedObject var registry = WindowRegistry.shared
     @State private var emptyGroups: [EmptyGroup] = []
+    @State private var contentHeight: CGFloat = 100
     
     // 我们需要将分散的 controllers 按它们的 tabbedWindows 分组
     // 由于 tabbedWindows 返回的数组对于同一个 tab 组内的所有窗口都是相同的（包含它们自己），
@@ -69,8 +70,16 @@ struct TabGroupsPopoverView: View {
                         }
                     }
                     .padding()
+                    .background(
+                        GeometryReader { geo in
+                            Color.clear.preference(key: ViewHeightKey.self, value: geo.size.height)
+                        }
+                    )
                 }
-                .frame(maxHeight: 800)
+                .onPreferenceChange(ViewHeightKey.self) { height in
+                    contentHeight = height
+                }
+                .frame(width: 320, height: min(contentHeight, 700))
             }
             
             Divider()
@@ -388,5 +397,12 @@ struct EmptyGroupSection: View {
 class DragDropManager {
     static let shared = DragDropManager()
     var draggingWindow: NSWindow?
+}
+
+struct ViewHeightKey: PreferenceKey {
+    static var defaultValue: CGFloat = 100
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = max(value, nextValue())
+    }
 }
 #endif
