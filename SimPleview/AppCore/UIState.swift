@@ -35,6 +35,7 @@ class UIState: ObservableObject {
     @Published var focusSearchTrigger = UUID()
     
     /// 控制是否显示 iPad 样式的手写工具栏面板 / 自定义工具栏
+    @Published var isShowingTabGroupsPopover = false
     @Published var isShowingToolbarCustomizer = false
     @Published var isShowingAnnotationEditor = false
 

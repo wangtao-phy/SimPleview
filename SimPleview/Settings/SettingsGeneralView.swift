@@ -11,7 +11,7 @@ struct GeneralSettingsView: View {
     @AppStorage("appLanguage") var appLanguage: AppLanguage = .zh
     @AppStorage("memoryMode") var memoryMode: MemoryMode = .saving
     @AppStorage("hibernationTimeoutStr") var hibernationTimeoutStr: String = "20"
-    @AppStorage("openInTab") var openInTab: Bool = false
+
     @AppStorage("externalBrowser") var externalBrowser: ExternalBrowser = .defaultBrowser
     @AppStorage("customBrowserPath") var customBrowserPath: String = ""
     @AppStorage("enableReadingRecord") var enableReadingRecord: Bool = false
@@ -74,20 +74,6 @@ struct GeneralSettingsView: View {
             }
             
             Section {
-                // [设置项 3：新文档开启方式]
-                HStack {
-                    Text(LS("New File Opens In") + ":")
-                    Spacer()
-                    Picker("", selection: $openInTab) {
-                        Text(LS("New Window")).tag(false)
-                        Text(LS("New Tab")).tag(true)
-                    }
-                    .labelsHidden()
-                    .pickerStyle(.segmented)
-                    .id(appLanguage)
-                }
-                .padding(.vertical, 4)
-                
                 // [设置项 4：外部跳转的浏览器]
                 VStack(alignment: .leading, spacing: 4) {
                     Picker(selection: $externalBrowser) {

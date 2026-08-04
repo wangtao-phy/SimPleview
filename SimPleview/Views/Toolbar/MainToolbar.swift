@@ -9,7 +9,7 @@ struct MainToolbar: ViewModifier {
     func body(content: Content) -> some View {
         content
             .toolbar(id: "MainToolbar") {
-                NavigationToolbarGroup(state: state, pageNumberInput: pageNumberInput)
+                NavigationToolbarGroup(state: state, uiState: uiState, pageNumberInput: pageNumberInput)
                 AnnotationToolbarGroup(state: state, uiState: uiState)
                 DocumentToolbarGroup(state: state, uiState: uiState)
             }

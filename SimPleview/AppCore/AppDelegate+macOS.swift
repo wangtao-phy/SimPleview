@@ -1,6 +1,7 @@
 import UniformTypeIdentifiers
 
 import SwiftUI
+import Combine
 import PDFKit
 
 #if os(macOS)
@@ -210,9 +211,9 @@ class AppWindowController: NSWindowController {
 /// 在 SwiftUI 结合 AppKit 时，由于 ARC（自动引用计数）的存在，
 /// 自己创建的窗口一旦没有强引用就会被系统立马销毁。
 /// 所以我们需要一个静态单例来“死死抱住”这些窗口。
-class WindowRegistry: NSObject, NSWindowDelegate {
+class WindowRegistry: NSObject, NSWindowDelegate, ObservableObject {
     static let shared = WindowRegistry()
-    var controllers: [NSWindowController] = []
+    @Published var controllers: [NSWindowController] = []
     
     func add(_ controller: NSWindowController) {
         controllers.append(controller)
@@ -221,37 +222,33 @@ class WindowRegistry: NSObject, NSWindowDelegate {
     
     // [新特性：拦截窗口/标签页关闭，未保存提示]
     func windowShouldClose(_ sender: NSWindow) -> Bool {
-        // 提取该窗口的底层引擎
         if let wc = sender.windowController as? AppWindowController, let state = wc.appState {
-            // 如果内容有变动，跳出原生警告对话框
             if state.isDirty {
                 let alert = NSAlert()
-                // 使用极其优雅的 Mac 原生提示语
                 alert.messageText = "是否保存对文档的更改？"
                 alert.informativeText = "如果不保存，您的更改将会丢失。"
                 alert.addButton(withTitle: "保存")
                 alert.addButton(withTitle: "取消")
                 alert.addButton(withTitle: "不保存")
                 
-                // 为了完美兼容多窗口并发情况，我们将 Alert 作为 Sheet 挂载在当前窗口上
-                // 但如果嫌麻烦，直接 runModal 也是标准做法，会阻塞当前 UI 线程等待用户选择
                 let response = alert.runModal()
                 
                 if response == .alertFirstButtonReturn {
-                    // 用户选择“保存”
-                    // 窗口随后会销毁 PDFView；必须在允许关闭前完成写入。
                     state.save(sync: true)
-                    return true
                 } else if response == .alertSecondButtonReturn {
-                    // 用户选择“取消”，阻止关闭
                     return false
-                } else if response == .alertThirdButtonReturn {
-                    // 用户选择“不保存”，不作处理直接放行
-                    return true
                 }
             }
         }
-        return true
+        
+        let groupAlert = NSAlert()
+        groupAlert.messageText = "确认要删除这个分组吗？"
+        groupAlert.informativeText = "关闭窗口将移除该分组及其包含的所有标签页。"
+        groupAlert.addButton(withTitle: "确认删除")
+        groupAlert.addButton(withTitle: "取消")
+        
+        let response = groupAlert.runModal()
+        return response == .alertFirstButtonReturn
     }
     
     // 监听窗口被点击红叉关闭的事件
@@ -288,10 +285,10 @@ class WindowRegistry: NSObject, NSWindowDelegate {
 
 /// [教程注释：手动把 SwiftUI 的 View 包裹进 macOS 原生窗口]
 extension NSApplication {
-    func openSwiftUIWindow(for url: URL) {
+    @discardableResult
+    func openSwiftUIWindow(for url: URL, independent: Bool = false) -> NSWindow {
         let contentView = ContentView(url: url)
         
-        // 使用 NSHostingController 作为 SwiftUI 和原生 AppKit 的“桥梁”
         let hostingController = NSHostingController(rootView: contentView)
         let window = NSWindow(
             contentRect: NSRect(x: 0, y: 0, width: 1200, height: 800),
@@ -300,12 +297,8 @@ extension NSApplication {
             defer: false
         )
         
-        // 关键修复：恢复 AppKit 默认的闭窗即释放行为
-        // 之前设置为 false 是怕跟 WindowRegistry 冲突，但 false 会导致即使我们移除了引用，
-        // 底层 NSApp.windows 仍有可能扣留它作为隐藏窗口。设为 true 能确保内存层面的彻底销毁！
         window.isReleasedWhenClosed = true
         
-        // UI 魔法：透明标题栏，让应用看起来极度现代化
         window.titleVisibility = .visible
         window.titlebarAppearsTransparent = true
         if #available(macOS 11.0, *) {
@@ -315,15 +308,14 @@ extension NSApplication {
         window.title = url.lastPathComponent
         window.contentViewController = hostingController
         
-        // 多标签页行为支持（是否在同一个窗口内以 Tab 形式打开新 PDF）
-        let useTab = UserDefaults.standard.bool(forKey: "openInTab")
-        window.tabbingMode = useTab ? .preferred : .disallowed
+        if independent {
+            window.tabbingMode = .disallowed
+        } else {
+            window.tabbingMode = .preferred
+        }
         
-        // 防止用户把窗口缩得太小导致 UI 崩溃错位
         window.minSize = NSSize(width: 800, height: 600)
         
-        // [逻辑流程：记忆窗口位置]
-        // 每次我们都把文件的完整路径作为窗口的“存档名字”。系统下次打开这个文件时，会自动恢复到上次放置的屏幕坐标。
         let autosaveName = url.path
         window.setFrameAutosaveName(autosaveName)
         if window.setFrameUsingName(autosaveName) == false {
@@ -336,8 +328,12 @@ extension NSApplication {
         
         windowController.showWindow(nil)
         
-        // 把这个文件加入到苹果原生的“最近打开”历史列表中
+        if independent {
+            window.tabbingMode = .preferred
+        }
+        
         NSDocumentController.shared.noteNewRecentDocumentURL(url)
+        return window
     }
 }
 #endif
