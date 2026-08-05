@@ -57,27 +57,13 @@ struct LinkPreviewPopoverView: View {
             let point = safeDest.point
             let pageBounds = safePage.bounds(for: .cropBox)
             
-            // We use the full page width to preserve left and right margins exactly as they appear in the PDF.
-            // 1. Calculate the ORIGINAL perfect Y math so we know the EXACT center we want
-            let originalCropWidth = pageBounds.width
-            let originalCropHeight = originalCropWidth * (300.0 / 900.0)
-            let originalMinY = point.y - originalCropHeight + 40
-            let originalCenterY = originalMinY + (originalCropHeight / 2.0)
-            
-            // 2. Define the NEW width that the user requested (adding 100 for margins)
-            let padding: CGFloat = 100.0
-            let cropWidth = originalCropWidth + padding
-            
-            // 3. Calculate NEW height to strictly maintain 3:1 aspect ratio so it fits 900x300 perfectly
+            let cropWidth = pageBounds.width
             let cropHeight = cropWidth * (300.0 / 900.0)
-            
-            // 4. Position the new box so its center EXACTLY matches the original center!
-            let newMinX = pageBounds.minX - (padding / 2.0)
-            let newMinY = originalCenterY - (cropHeight / 2.0)
+            let targetY = point.y
             
             var cropRect = NSRect(
-                x: newMinX, 
-                y: newMinY, 
+                x: pageBounds.minX, 
+                y: targetY - cropHeight + 40, 
                 width: cropWidth, 
                 height: cropHeight
             )
