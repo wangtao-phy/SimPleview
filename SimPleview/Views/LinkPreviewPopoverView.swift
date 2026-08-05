@@ -5,6 +5,7 @@ import AppKit
 
 struct LinkPreviewPopoverView: View {
     let annotation: PDFAnnotation
+    var onHoverStateChanged: ((Bool) -> Void)?
     
     @State private var previewImage: NSImage?
     
@@ -20,11 +21,8 @@ struct LinkPreviewPopoverView: View {
             if resolvedDestination != nil {
                 // Internal Document Destination Preview (Equation, Reference)
                 if let img = previewImage {
-                    Image(nsImage: img)
-                        .interpolation(.high)
-                        .resizable()
-                        .scaledToFit()
-                        .frame(width: 900)
+                    SelectableImageView(image: img)
+                        .frame(width: 900, height: 200) // Ensure exact frame to prevent VisionKit from squishing
                         .padding(8)
                         // A nice subtle border/shadow effect to look like a mini page
                         .background(Color(NSColor.windowBackgroundColor))
@@ -40,6 +38,9 @@ struct LinkPreviewPopoverView: View {
                     .foregroundColor(.secondary)
                     .padding()
             }
+        }
+        .onHover { hovering in
+            onHoverStateChanged?(hovering)
         }
         .onAppear {
             generateThumbnail()
@@ -103,4 +104,64 @@ struct LinkPreviewPopoverView: View {
         }
     }
 }
+
+#if os(macOS)
+import VisionKit
+
+struct SelectableImageView: NSViewRepresentable {
+    let image: NSImage
+    
+    func makeNSView(context: Context) -> NSView {
+        let container = NSView()
+        
+        let imageView = NSImageView()
+        imageView.image = image
+        imageView.imageScaling = .scaleProportionallyUpOrDown
+        imageView.translatesAutoresizingMaskIntoConstraints = false
+        
+        container.addSubview(imageView)
+        NSLayoutConstraint.activate([
+            imageView.leadingAnchor.constraint(equalTo: container.leadingAnchor),
+            imageView.trailingAnchor.constraint(equalTo: container.trailingAnchor),
+            imageView.topAnchor.constraint(equalTo: container.topAnchor),
+            imageView.bottomAnchor.constraint(equalTo: container.bottomAnchor)
+        ])
+        
+        if #available(macOS 13.0, *) {
+            let overlay = ImageAnalysisOverlayView()
+            overlay.translatesAutoresizingMaskIntoConstraints = false
+            // Allow selecting text and copying
+            overlay.preferredInteractionTypes = .textSelection
+            overlay.trackingImageView = imageView
+            container.addSubview(overlay)
+            
+            NSLayoutConstraint.activate([
+                overlay.leadingAnchor.constraint(equalTo: imageView.leadingAnchor),
+                overlay.trailingAnchor.constraint(equalTo: imageView.trailingAnchor),
+                overlay.topAnchor.constraint(equalTo: imageView.topAnchor),
+                overlay.bottomAnchor.constraint(equalTo: imageView.bottomAnchor)
+            ])
+            
+            let analyzer = ImageAnalyzer()
+            Task {
+                if let cgImage = image.cgImage(forProposedRect: nil, context: nil, hints: nil) {
+                    do {
+                        let configuration = ImageAnalyzer.Configuration([.text])
+                        let analysis = try await analyzer.analyze(cgImage, orientation: .up, configuration: configuration)
+                        overlay.analysis = analysis
+                    } catch {
+                        print("VisionKit analysis failed: \(error)")
+                    }
+                }
+            }
+        }
+        
+        return container
+    }
+    
+    func updateNSView(_ nsView: NSView, context: Context) {
+        // If image is static, no update needed.
+    }
+}
 #endif
+

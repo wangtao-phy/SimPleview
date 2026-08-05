@@ -275,8 +275,9 @@ extension CustomPDFView {
         self.hoverTimer = nil
         
         // Use a debounce timer to avoid flickering when crossing the 1px gaps between PDF text characters
+        // [用户体验升级]: 从 0.3s 延长到 0.5s，给予用户充足的时间将鼠标移入悬浮窗内
         if self.hoverHideTimer == nil {
-            self.hoverHideTimer = Timer.scheduledTimer(withTimeInterval: 0.3, repeats: false) { [weak self] _ in
+            self.hoverHideTimer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: false) { [weak self] _ in
                 Task { @MainActor in
                     self?.currentHoveredLink = nil
                     self?.hoverPopover?.close()
@@ -291,8 +292,19 @@ extension CustomPDFView {
         guard let page = linkAnnot.page else { return }
         self.hoverPopover?.close()
         
-        // Create SwiftUI View
-        let popoverView = LinkPreviewPopoverView(annotation: linkAnnot)
+        // Create SwiftUI View with hover state callback
+        let popoverView = LinkPreviewPopoverView(annotation: linkAnnot) { [weak self] isHovering in
+            Task { @MainActor in
+                if isHovering {
+                    // 如果鼠标进入了悬浮窗，立刻取消隐藏计时器，保持悬浮窗显示
+                    self?.hoverHideTimer?.invalidate()
+                    self?.hoverHideTimer = nil
+                } else {
+                    // 如果鼠标离开了悬浮窗，触发隐藏逻辑
+                    self?.handleMouseLeaveLink()
+                }
+            }
+        }
         
         let popover = NSPopover()
         popover.behavior = .transient
