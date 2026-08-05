@@ -220,6 +220,30 @@ extension AppState {
         nc.publisher(for: NSWindow.didExitFullScreenNotification)
             .sink { [weak self] _ in self?.pdfView.autoScales = false }
             .store(in: &cancellables)
+            
+        // [稳健性修复：从后台返回时自动刷新缩略图]
+        // 防止用户短暂离开应用导致底层 NSImage 缓存被系统回收，回来时缩略图变白板
+        nc.publisher(for: NSApplication.didBecomeActiveNotification)
+            .sink { [weak self] _ in
+                // 仅在非深度休眠状态下强制刷新，因为深度休眠在 wakeUp 时已经处理过了
+                guard let self = self, !self.isHibernating else { return }
+                
+                // 【稳健性核心】：必须先彻底清空可能已经变成 Zombie (丢失位图数据) 的底层缓存
+                // 否则 hotReloadSubject 触发 generateThumbnail 时会命中缓存并直接返回，导致视图永久变白！
+                self.thumbnailManager.clearCache()
+                self.thumbnailManager.hotReloadSubject.send()
+            }
+            .store(in: &cancellables)
+        #else
+        // iOS 对应的前台激活通知
+        nc.publisher(for: UIApplication.didBecomeActiveNotification)
+            .sink { [weak self] _ in
+                guard let self = self, !self.isHibernating else { return }
+                
+                self.thumbnailManager.clearCache()
+                self.thumbnailManager.hotReloadSubject.send()
+            }
+            .store(in: &cancellables)
         #endif
         
         nc.publisher(for: NSNotification.Name("PDFRefreshAnnotations"))
