@@ -164,4 +164,5 @@ struct SelectableImageView: NSViewRepresentable {
     }
 }
 #endif
+#endif
 
