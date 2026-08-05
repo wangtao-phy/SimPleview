@@ -336,8 +336,8 @@ extension CustomPDFView {
         
         let dest = linkAnnot.destination ?? (linkAnnot.action as? PDFActionGoTo)?.destination
         let a = dest?.page?.bounds(for: .cropBox).width ?? 800.0
-        let innerWidth = a * 0.8
-        let innerHeight = (a / 3.0) * 0.8
+        let innerWidth = a * 0.9
+        let innerHeight = (a / 3.0) * 0.9
         let outerWidth = innerWidth + 100.0
         let outerHeight = innerHeight
         
