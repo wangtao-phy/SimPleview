@@ -341,7 +341,7 @@ extension CustomPDFView {
         let host = NSHostingController(rootView: popoverView)
         popover.contentViewController = host
         // Explicitly set the initial content size so NSPopover correctly calculates screen edge collisions BEFORE it appears
-        // Expanded to 800x320 to provide 50px left and right margins for the 700x320 content
+        // Scaled to 800x320
         popover.contentSize = NSSize(width: 800, height: 320)
         
         self.hoverPopover = popover

@@ -19,17 +19,17 @@ struct LinkPreviewPopoverView: View {
     var body: some View {
         VStack(spacing: 0) {
             if resolvedDestination != nil {
-                // Internal Document Destination Preview
+                // Internal Document Destination Preview (Equation, Reference)
                 if let img = previewImage {
                     SelectableImageView(image: img)
-                        // The image itself now contains the margins, so it fills the entire 800x320 popover
-                        .frame(width: 800, height: 320)
+                        // Proportionally scaled down from 900x300 to 720x240 (keeping the exact 3:1 aspect ratio)
+                        .frame(width: 720, height: 240) 
                 } else {
                     VStack {
                         ProgressView()
                             .scaleEffect(0.8)
                     }
-                    .frame(width: 800, height: 320)
+                    .frame(width: 720, height: 240) 
                 }
             } else {
                 Text("Unknown Link")
@@ -37,8 +37,10 @@ struct LinkPreviewPopoverView: View {
                     .padding()
             }
         }
-        .frame(width: 800, height: 320)
-        .background(Color(NSColor.windowBackgroundColor))
+        // Scaled down outer container to the requested 800x320. 
+        // This gives 40px margins left/right and 40px margins top/bottom.
+        .frame(width: 800, height: 320) 
+        .background(Color(NSColor.windowBackgroundColor)) 
         .cornerRadius(8)
         .onHover { hovering in
             onHoverStateChanged?(hovering)
@@ -48,9 +50,6 @@ struct LinkPreviewPopoverView: View {
         }
     }
     
-    /// Generates a perfectly proportioned crop of the PDF destination.
-    /// The logic relies on maintaining the original page width and calculating height strictly, 
-    /// ensuring the Y-axis location is exact without arbitrary scaling.
     private func generateThumbnail() {
         guard let dest = resolvedDestination, let page = dest.page else { return }
         
@@ -61,28 +60,20 @@ struct LinkPreviewPopoverView: View {
             let point = safeDest.point
             let pageBounds = safePage.bounds(for: .cropBox)
             
-            // 1. Expand the cropWidth by 100 points to create a guaranteed 50px margin on both sides INSIDE the image.
-            let cropWidth = pageBounds.width + 100
-            // 2. Calculate cropHeight to perfectly match the 800x320 UI frame ratio, preventing any VisionKit squishing.
-            let cropHeight = cropWidth * (320.0 / 800.0)
-            
-            // 3. The Y-coordinate provided by the destination is positioned 40 points 
-            // below the top edge of our crop box, ensuring the target text is visible.
+            let cropWidth = pageBounds.width
+            let cropHeight = cropWidth * (300.0 / 900.0)
             let targetY = point.y
             
             var cropRect = NSRect(
-                x: pageBounds.minX - 50, // Shift X left by 50 to center the PDF inside the wider crop box
-                y: targetY - cropHeight + 40,
-                width: cropWidth,
+                x: pageBounds.minX, 
+                y: targetY - cropHeight + 40, 
+                width: cropWidth, 
                 height: cropHeight
             )
             
-            // Prevent cropping outside the bottom edge of the page
-            if cropRect.minY < pageBounds.minY { 
-                cropRect.origin.y = pageBounds.minY 
-            }
+            if cropRect.minY < pageBounds.minY { cropRect.origin.y = pageBounds.minY }
             
-            // 4. Render at @2x scale for Retina displays
+            // High-resolution rendering scale factor
             let scale: CGFloat = 2.0
             
             let pixelSize = NSSize(width: cropRect.width * scale, height: cropRect.height * scale)
@@ -94,12 +85,13 @@ struct LinkPreviewPopoverView: View {
                 return
             }
             
-            // 4. Paint a white background because some PDFs are transparent
+            // White background (PDFs are often transparent)
             NSColor.white.setFill()
             NSRect(origin: .zero, size: pixelSize).fill()
             
-            // 5. Transform context to draw the cropped region filling the image
+            // Apply scale
             context.scaleBy(x: scale, y: scale)
+            // Shift context so cropRect.origin aligns to (0,0)
             context.translateBy(x: -cropRect.minX, y: -cropRect.minY)
             
             safePage.draw(with: .cropBox, to: context)
