@@ -22,16 +22,16 @@ struct LinkPreviewPopoverView: View {
                 // Internal Document Destination Preview
                 if let img = previewImage {
                     SelectableImageView(image: img)
-                        // Keep the image exactly 900x300. 
-                        // Because the parent container is 1000x300, 
+                        // Keep the image exactly 700x320. 
+                        // Because the parent container is 800x320, 
                         // this naturally centers the image and leaves 50px margins on both sides.
-                        .frame(width: 900, height: 300) 
+                        .frame(width: 700, height: 320)
                 } else {
                     VStack {
                         ProgressView()
                             .scaleEffect(0.8)
                     }
-                    .frame(width: 900, height: 300) 
+                    .frame(width: 700, height: 320)
                 }
             } else {
                 Text("Unknown Link")
@@ -39,10 +39,10 @@ struct LinkPreviewPopoverView: View {
                     .padding()
             }
         }
-        // The expanded outer container (1000x300) guarantees a safe 50px margin
-        // for the 900x300 image, preventing text from touching the popover edge.
-        .frame(width: 1000, height: 300) 
-        .background(Color(NSColor.windowBackgroundColor)) 
+        // The expanded outer container (800x320) guarantees a safe 50px margin
+        // for the 700x320 image, preventing text from touching the popover edge.
+        .frame(width: 800, height: 320)
+        .background(Color(NSColor.windowBackgroundColor))
         .cornerRadius(8)
         .onHover { hovering in
             onHoverStateChanged?(hovering)
@@ -52,7 +52,7 @@ struct LinkPreviewPopoverView: View {
         }
     }
     
-    /// Generates a perfectly proportioned 3:1 crop of the PDF destination.
+    /// Generates a perfectly proportioned crop of the PDF destination.
     /// The logic relies on maintaining the original page width and calculating height strictly, 
     /// ensuring the Y-axis location is exact without arbitrary scaling.
     private func generateThumbnail() {
@@ -65,10 +65,10 @@ struct LinkPreviewPopoverView: View {
             let point = safeDest.point
             let pageBounds = safePage.bounds(for: .cropBox)
             
-            // 1. Maintain the pure 3:1 aspect ratio math.
+            // 1. Maintain the pure aspect ratio math for 700x320.
             // By keeping the width exact to the PDF bounds, we avoid arbitrary scale changes.
             let cropWidth = pageBounds.width
-            let cropHeight = cropWidth * (300.0 / 900.0)
+            let cropHeight = cropWidth * (320.0 / 700.0)
             
             // 2. The Y-coordinate provided by the destination is positioned 40 points 
             // below the top edge of our crop box, ensuring the target text is visible.
@@ -76,8 +76,8 @@ struct LinkPreviewPopoverView: View {
             
             var cropRect = NSRect(
                 x: pageBounds.minX, 
-                y: targetY - cropHeight + 40, 
-                width: cropWidth, 
+                y: targetY - cropHeight + 40,
+                width: cropWidth,
                 height: cropHeight
             )
             
