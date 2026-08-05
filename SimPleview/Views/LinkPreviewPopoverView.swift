@@ -22,16 +22,14 @@ struct LinkPreviewPopoverView: View {
                 // Internal Document Destination Preview (Equation, Reference)
                 if let img = previewImage {
                     SelectableImageView(image: img)
-                        .frame(width: 900, height: 300) // Ensure exact frame to prevent VisionKit from squishing
-                        .padding(8)
-                        // A nice subtle border/shadow effect to look like a mini page
-                        .background(Color(NSColor.windowBackgroundColor))
+                        .frame(width: 900, height: 300) // Keep the original image size exactly the same to preserve text scale
+                        // Removed padding here so the image itself is strictly 900x300
                 } else {
                     VStack {
                         ProgressView()
                             .scaleEffect(0.8)
                     }
-                    .frame(width: 900, height: 300) // Match the EXACT width and height of the final image to prevent flashing
+                    .frame(width: 900, height: 300) 
                 }
             } else {
                 Text("Unknown Link")
@@ -39,6 +37,9 @@ struct LinkPreviewPopoverView: View {
                     .padding()
             }
         }
+        .frame(width: 1000, height: 300) // Expanded the outer container by 100px to force 50px margins on both sides
+        .background(Color(NSColor.windowBackgroundColor)) // Ensure the margins match the popover background
+        .cornerRadius(8)
         .onHover { hovering in
             onHoverStateChanged?(hovering)
         }
