@@ -295,13 +295,26 @@ extension CustomPDFView {
         // Create SwiftUI View with hover state callback
         let popoverView = LinkPreviewPopoverView(annotation: linkAnnot) { [weak self] isHovering in
             Task { @MainActor in
+                guard let self = self else { return }
                 if isHovering {
                     // 如果鼠标进入了悬浮窗，立刻取消隐藏计时器，保持悬浮窗显示
-                    self?.hoverHideTimer?.invalidate()
-                    self?.hoverHideTimer = nil
+                    self.hoverHideTimer?.invalidate()
+                    self.hoverHideTimer = nil
                 } else {
-                    // 如果鼠标离开了悬浮窗，触发隐藏逻辑
-                    self?.handleMouseLeaveLink()
+                    // 如果鼠标离开了悬浮窗，先检查鼠标是否刚好还在 PDF 的那个链接上
+                    if let window = self.window {
+                        let mouseLoc = window.mouseLocationOutsideOfEventStream
+                        let viewPoint = self.convert(mouseLoc, from: nil)
+                        if let page = self.page(for: viewPoint, nearest: false) {
+                            let pagePoint = self.convert(viewPoint, to: page)
+                            if let annot = page.annotation(at: pagePoint), annot == self.currentHoveredLink {
+                                // 鼠标又回到了原来的链接上，不需要触发隐藏
+                                return
+                            }
+                        }
+                    }
+                    // 如果鼠标既不在悬浮窗，也不在链接上，触发隐藏逻辑
+                    self.handleMouseLeaveLink()
                 }
             }
         }

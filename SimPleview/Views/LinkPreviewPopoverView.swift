@@ -57,45 +57,56 @@ struct LinkPreviewPopoverView: View {
             let point = safeDest.point
             let pageBounds = safePage.bounds(for: .cropBox)
             
-            // 使用完整的页面宽度，保留 PDF 原本的左右页边距，避免文字直接顶满屏幕边缘
-            let cropWidth = pageBounds.width
-            // 严格匹配 UI 比例 (900x300，即宽高比 3:1)
+            // 1. Calculate visual size based on rotation
+            let rotation = safePage.rotation
+            let visualSize: NSSize
+            if rotation == 90 || rotation == 270 {
+                visualSize = NSSize(width: pageBounds.height, height: pageBounds.width)
+            } else {
+                visualSize = pageBounds.size
+            }
+            
+            // 2. Map target point to visual coordinates (bottom-left origin)
+            let nx = point.x - pageBounds.minX
+            let ny = point.y - pageBounds.minY
+            let w = pageBounds.width
+            let h = pageBounds.height
+            
+            let visualY: CGFloat
+            switch rotation {
+            case 90:  visualY = w - nx
+            case 180: visualY = h - ny
+            case 270: visualY = nx
+            default:  visualY = ny
+            }
+            
+            // 3. Define the visual crop rect (3:1 aspect ratio)
+            let cropWidth = visualSize.width
             let cropHeight = cropWidth * (300.0 / 900.0)
             
-            let targetY = point.y
-            // 目标点是内容的顶部。为了留出充足的上下文，我们让截取框顶部高出目标点 40 个单位
-            var cropRect = NSRect(x: pageBounds.minX, y: targetY + 40 - cropHeight, width: cropWidth, height: cropHeight)
+            // Target point should be near the top of the crop (40 units padding)
+            var cropRect = NSRect(x: 0, y: visualY + 40 - cropHeight, width: cropWidth, height: cropHeight)
+            if cropRect.minY < 0 { cropRect.origin.y = 0 }
             
-            if cropRect.minY < pageBounds.minY { cropRect.origin.y = pageBounds.minY }
-            if cropRect.maxX > pageBounds.maxX { cropRect.size.width = pageBounds.maxX - cropRect.minX }
-            
-            // High-resolution rendering scale factor
+            // 4. Generate full high-res visual thumbnail
             let scale: CGFloat = 2.0
-            
-            // Get thumbnail of the FULL page at high resolution.
-            // PDFPage.thumbnail handles rotation and page transforms perfectly!
-            let targetSize = NSSize(width: pageBounds.width * scale, height: pageBounds.height * scale)
+            let targetSize = NSSize(width: visualSize.width * scale, height: visualSize.height * scale)
             let fullImage = safePage.thumbnail(of: targetSize, for: .cropBox)
             
-            // Calculate the exact crop rect in the scaled image coordinates
+            // 5. Crop the exact region
             let imageCropRect = NSRect(
-                x: (cropRect.minX - pageBounds.minX) * scale,
-                y: (cropRect.minY - pageBounds.minY) * scale,
+                x: cropRect.minX * scale,
+                y: cropRect.minY * scale,
                 width: cropRect.width * scale,
                 height: cropRect.height * scale
             )
             
-            // Create the final cropped image
             let croppedImage = NSImage(size: imageCropRect.size)
             croppedImage.lockFocus()
-            
-            // White background (PDFs are often transparent)
             NSColor.white.setFill()
             NSRect(origin: .zero, size: imageCropRect.size).fill()
-            
-            // Draw the portion of the full image
-            fullImage.draw(at: .zero, from: imageCropRect, operation: .copy, fraction: 1.0)
-            
+            // Using .sourceOver to properly blend the PDF over the white background in case of transparency
+            fullImage.draw(at: .zero, from: imageCropRect, operation: .sourceOver, fraction: 1.0)
             croppedImage.unlockFocus()
             
             DispatchQueue.main.async {
