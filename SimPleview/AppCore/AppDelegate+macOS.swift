@@ -78,18 +78,42 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         DispatchQueue.main.async {
             let hasDocumentWindows = NSApp.windows.contains { $0.titleVisibility == .hidden }
             
-            // [新特性：恢复上次强退或正常退出前打开的窗口]
-            if let savedURLs = UserDefaults.standard.stringArray(forKey: "SavedOpenWindows"), !savedURLs.isEmpty {
+            // [新特性：恢复上次强退或正常退出前打开的窗口组]
+            if let savedData = UserDefaults.standard.data(forKey: "SavedWindowGroups"),
+               let savedGroups = try? JSONDecoder().decode([SavedGroup].self, from: savedData) {
                 var restoredAny = false
-                for path in savedURLs {
-                    let url = URL(fileURLWithPath: path)
-                    if FileManager.default.fileExists(atPath: path) {
-                        NSApp.openSwiftUIWindow(for: url)
+                
+                for group in savedGroups {
+                    if group.urls.isEmpty {
+                        // 空分组
+                        let emptyGroup = EmptyGroup(name: group.name)
+                        WindowRegistry.shared.emptyGroups.append(emptyGroup)
                         restoredAny = true
+                    } else {
+                        // 实体分组
+                        var firstWindow: NSWindow? = nil
+                        for (index, path) in group.urls.enumerated() {
+                            let url = URL(fileURLWithPath: path)
+                            if FileManager.default.fileExists(atPath: path) {
+                                // 第一个文件独立打开（创建新分组），后续文件跟随打开（加入该分组）
+                                let isFirst = (index == 0)
+                                let window = NSApp.openSwiftUIWindow(for: url, independent: isFirst)
+                                if isFirst {
+                                    firstWindow = window
+                                }
+                                restoredAny = true
+                            }
+                        }
+                        // 恢复自定义分组名称
+                        if let first = firstWindow, group.name != "未命名分组" {
+                            let key = "CustomGroupName_\(first.windowNumber)"
+                            UserDefaults.standard.set(group.name, forKey: key)
+                        }
                     }
                 }
+                
                 // 恢复完毕后清空，避免干扰下次正常打开
-                UserDefaults.standard.removeObject(forKey: "SavedOpenWindows")
+                UserDefaults.standard.removeObject(forKey: "SavedWindowGroups")
                 if restoredAny {
                     return // 成功恢复了老窗口，不再弹出空文件选择器
                 }
@@ -175,21 +199,44 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         // 清理由于打开 PDF 产生的临时缓存权限签标
         UserDefaults.standard.removeObject(forKey: "OpenedPDFBookmarks")
         
-        // [新特性：Cmd+Q 强制落盘所有未保存文档，并持久化记录当前打开的窗口]
-        var openURLs: [String] = []
-        for controller in WindowRegistry.shared.controllers {
-            if let wc = controller as? AppWindowController, let state = wc.appState {
-                if state.isDirty {
-                    state.save(sync: true) // 强制同步保存
+        // [新特性：Cmd+Q 强制落盘所有未保存文档，并持久化记录当前打开的窗口组]
+        var savedGroups: [SavedGroup] = []
+        var processedWindowIDs = Set<ObjectIdentifier>()
+        let appWindows = WindowRegistry.shared.controllers.compactMap { $0.window }
+        
+        for window in appWindows {
+            // 首先保存脏数据
+            if let wc = window.windowController as? AppWindowController, let state = wc.appState, state.isDirty {
+                state.save(sync: true)
+            }
+            
+            let winID = ObjectIdentifier(window)
+            if processedWindowIDs.contains(winID) { continue }
+            
+            let tabs = window.tabbedWindows ?? [window]
+            var urls: [String] = []
+            
+            for w in tabs {
+                processedWindowIDs.insert(ObjectIdentifier(w))
+                if let wc = w.windowController as? AppWindowController, let url = wc.appState?.fileURL {
+                    urls.append(url.path)
                 }
-                if let url = state.fileURL {
-                    openURLs.append(url.path)
-                }
+            }
+            
+            if !urls.isEmpty {
+                let savedName = UserDefaults.standard.string(forKey: "CustomGroupName_\(tabs.first!.windowNumber)") ?? "未命名分组"
+                savedGroups.append(SavedGroup(name: savedName, urls: urls))
             }
         }
         
-        // 将最后还在看的文件路径持久化到磁盘，以便下次启动满血复活
-        UserDefaults.standard.set(openURLs, forKey: "SavedOpenWindows")
+        // 把空分组也存进去
+        for emptyGroup in WindowRegistry.shared.emptyGroups {
+            savedGroups.append(SavedGroup(name: emptyGroup.name, urls: []))
+        }
+        
+        if let data = try? JSONEncoder().encode(savedGroups) {
+            UserDefaults.standard.set(data, forKey: "SavedWindowGroups")
+        }
         // 这些数据此前是纯异步写入，terminateNow 会让尚未开始的任务直接丢失。
         ReadingTracker.shared.saveAllRecords(sync: true)
         GlobalAuthorManager.shared.saveAuthors(sync: true)
@@ -207,6 +254,16 @@ class AppWindowController: NSWindowController {
     var appState: AppState?
 }
 
+struct EmptyGroup: Identifiable, Codable {
+    var id = UUID()
+    var name: String = "未命名分组"
+}
+
+struct SavedGroup: Codable {
+    let name: String
+    let urls: [String]
+}
+
 /// [教程注释：自定义窗口池管理者]
 /// 在 SwiftUI 结合 AppKit 时，由于 ARC（自动引用计数）的存在，
 /// 自己创建的窗口一旦没有强引用就会被系统立马销毁。
@@ -214,6 +271,7 @@ class AppWindowController: NSWindowController {
 class WindowRegistry: NSObject, NSWindowDelegate, ObservableObject {
     static let shared = WindowRegistry()
     @Published var controllers: [NSWindowController] = []
+    @Published var emptyGroups: [EmptyGroup] = []
     
     func add(_ controller: NSWindowController) {
         controllers.append(controller)

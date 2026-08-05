@@ -7,7 +7,6 @@ import UniformTypeIdentifiers
 /// 在 Popover 中展示当前的窗口/标签页分组
 struct TabGroupsPopoverView: View {
     @ObservedObject var registry = WindowRegistry.shared
-    @State private var emptyGroups: [EmptyGroup] = []
     @State private var contentHeight: CGFloat = 100
     
     // 我们需要将分散的 controllers 按它们的 tabbedWindows 分组
@@ -49,7 +48,7 @@ struct TabGroupsPopoverView: View {
             
             Divider()
             
-            if windowGroups.isEmpty && emptyGroups.isEmpty {
+            if windowGroups.isEmpty && registry.emptyGroups.isEmpty {
                 Text("暂无打开的文档")
                     .foregroundColor(.gray)
                     .padding()
@@ -57,16 +56,16 @@ struct TabGroupsPopoverView: View {
                 ScrollView {
                     VStack(spacing: 12) {
                         ForEach(Array(windowGroups.enumerated()), id: \.element.first!.hashValue) { index, group in
-                            WindowGroupSection(windows: group, groupIndex: index + 1)
+                            WindowGroupSection(windows: group, groupIndex: index + 1, allGroups: windowGroups)
                         }
                         
-                        ForEach(Array(emptyGroups.enumerated()), id: \.element.id) { index, emptyGroup in
+                        ForEach(Array(registry.emptyGroups.enumerated()), id: \.element.id) { index, emptyGroup in
                             EmptyGroupSection(emptyGroup: emptyGroup, groupIndex: windowGroups.count + index + 1) { updatedGroup in
-                                if let idx = emptyGroups.firstIndex(where: { $0.id == updatedGroup.id }) {
-                                    emptyGroups[idx] = updatedGroup
+                                if let idx = registry.emptyGroups.firstIndex(where: { $0.id == updatedGroup.id }) {
+                                    registry.emptyGroups[idx] = updatedGroup
                                 }
                             } onRemove: {
-                                emptyGroups.removeAll { $0.id == emptyGroup.id }
+                                registry.emptyGroups.removeAll { $0.id == emptyGroup.id }
                             }
                         }
                     }
@@ -86,7 +85,7 @@ struct TabGroupsPopoverView: View {
             Divider()
             
             Button(action: {
-                emptyGroups.append(EmptyGroup())
+                registry.emptyGroups.append(EmptyGroup())
             }) {
                 HStack {
                     Spacer()
@@ -114,6 +113,7 @@ struct TabGroupsPopoverView: View {
 struct WindowGroupSection: View {
     let windows: [NSWindow]
     let groupIndex: Int
+    let allGroups: [[NSWindow]]
     @State private var customGroupName: String = ""
     @State private var isEditingName: Bool = false
     
@@ -161,17 +161,28 @@ struct WindowGroupSection: View {
                         }
                 }
                 
+                
                 Spacer()
                 
                 if !isEditingName {
-                    Button(action: {
-                        customGroupName = groupTitle == defaultGroupTitle ? "" : groupTitle
-                        isEditingName = true
-                    }) {
-                        Image(systemName: "pencil")
-                            .foregroundColor(.gray)
+                    HStack(spacing: 12) {
+                        Button(action: {
+                            deleteGroupAndMerge()
+                        }) {
+                            Image(systemName: "trash")
+                                .foregroundColor(.red.opacity(0.8))
+                        }
+                        .buttonStyle(.plain)
+                        
+                        Button(action: {
+                            customGroupName = groupTitle == defaultGroupTitle ? "" : groupTitle
+                            isEditingName = true
+                        }) {
+                            Image(systemName: "pencil")
+                                .foregroundColor(.gray)
+                        }
+                        .buttonStyle(.plain)
                     }
-                    .buttonStyle(.plain)
                 }
             }
             .padding(.horizontal, 8)
@@ -208,6 +219,30 @@ struct WindowGroupSection: View {
             WindowRegistry.shared.objectWillChange.send()
         }
     }
+    
+    private func deleteGroupAndMerge() {
+        guard let currentIndex = allGroups.firstIndex(where: { $0.first == windows.first }) else { return }
+        
+        let targetGroup: [NSWindow]?
+        if currentIndex > 0 {
+            targetGroup = allGroups[currentIndex - 1]
+        } else if currentIndex + 1 < allGroups.count {
+            targetGroup = allGroups[currentIndex + 1]
+        } else {
+            targetGroup = nil
+        }
+        
+        guard let targetWindow = targetGroup?.first else {
+            return
+        }
+        
+        DispatchQueue.main.async {
+            for w in windows {
+                targetWindow.addTabbedWindow(w, ordered: .above)
+            }
+            WindowRegistry.shared.objectWillChange.send()
+        }
+    }
 }
 
 struct TabItemView: View {
@@ -222,6 +257,16 @@ struct TabItemView: View {
                 .lineLimit(1)
                 .truncationMode(.tail)
             Spacer()
+            
+            if isHovering {
+                Button(action: {
+                    window.close()
+                }) {
+                    Image(systemName: "xmark")
+                        .foregroundColor(.gray)
+                }
+                .buttonStyle(.plain)
+            }
         }
         .padding(.vertical, 6)
         .padding(.horizontal, 12)
@@ -262,10 +307,7 @@ struct TabItemView: View {
     }
 }
 
-struct EmptyGroup: Identifiable {
-    let id = UUID()
-    var name: String = "未命名分组"
-}
+
 
 struct EmptyGroupSection: View {
     var emptyGroup: EmptyGroup
@@ -281,6 +323,9 @@ struct EmptyGroupSection: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
             HStack {
+                Image(systemName: "square.grid.2x2")
+                    .foregroundColor(.accentColor)
+                
                 if isEditing {
                     TextField("", text: $editingName, onCommit: {
                         finishEditing()
@@ -294,16 +339,26 @@ struct EmptyGroupSection: View {
                 } else {
                     Text(displayTitle)
                         .font(.subheadline)
-                        .fontWeight(.semibold)
-                        .foregroundColor(.primary)
+                        .fontWeight(.bold)
+                        .lineLimit(1)
                         .onTapGesture(count: 2) {
                             startEditing()
                         }
-                    
-                    if isHovering {
+                }
+                
+                Spacer()
+                
+                if !isEditing {
+                    HStack(spacing: 12) {
+                        Button(action: { onRemove() }) {
+                            Image(systemName: "trash")
+                                .foregroundColor(.red.opacity(0.8))
+                        }
+                        .buttonStyle(.plain)
+                        
                         Button(action: { startEditing() }) {
                             Image(systemName: "pencil")
-                                .foregroundColor(.secondary)
+                                .foregroundColor(.gray)
                         }
                         .buttonStyle(.plain)
                     }
