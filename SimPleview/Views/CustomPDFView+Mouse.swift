@@ -334,12 +334,10 @@ extension CustomPDFView {
             }
         }
         
-        let dest = linkAnnot.destination ?? (linkAnnot.action as? PDFActionGoTo)?.destination
-        let baseWidth = dest?.page?.bounds(for: .cropBox).width ?? 800.0
-        let innerWidth = baseWidth * 0.8
-        let innerHeight = innerWidth / 3.0
-        let outerWidth = innerWidth + 100.0
-        let outerHeight = innerHeight
+        let innerWidth: CGFloat = 720
+        let innerHeight: CGFloat = 240
+        let outerWidth: CGFloat = innerWidth + 100
+        let outerHeight: CGFloat = innerHeight
         
         let popover = NSPopover()
         popover.behavior = .transient

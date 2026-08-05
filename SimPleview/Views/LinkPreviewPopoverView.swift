@@ -16,15 +16,15 @@ struct LinkPreviewPopoverView: View {
         return nil
     }
     
-    var baseWidth: CGFloat {
-        resolvedDestination?.page?.bounds(for: .cropBox).width ?? 800.0
-    }
-    var innerWidth: CGFloat { baseWidth * 0.8 }
-    var innerHeight: CGFloat { innerWidth / 3.0 }
-    var outerWidth: CGFloat { innerWidth + 100.0 }
-    var outerHeight: CGFloat { innerHeight }
-    
     var body: some View {
+        // Original inner size was 900x300.
+        // User requested 0.8x scale: 900 * 0.8 = 720, 300 * 0.8 = 240.
+        let innerWidth: CGFloat = 720
+        let innerHeight: CGFloat = 240
+        // Outer box width is inner + 100 for 50px margins left and right.
+        let outerWidth: CGFloat = innerWidth + 100
+        let outerHeight: CGFloat = innerHeight
+        
         VStack(spacing: 0) {
             if resolvedDestination != nil {
                 // Internal Document Destination Preview (Equation, Reference)
