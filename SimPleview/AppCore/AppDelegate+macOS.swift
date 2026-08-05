@@ -105,7 +105,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                             }
                         }
                         // 恢复自定义分组名称
-                        if let first = firstWindow, group.name != "未命名分组" {
+                        if let first = firstWindow, group.name != "未命名分组" && group.name != "Untitled Group" {
                             let key = "CustomGroupName_\(first.windowNumber)"
                             UserDefaults.standard.set(group.name, forKey: key)
                         }

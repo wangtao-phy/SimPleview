@@ -61,7 +61,7 @@ struct TabGroupsPopoverView: View {
             } else {
                 ScrollView {
                     VStack(spacing: 12) {
-                        ForEach(Array(windowGroups.enumerated()), id: \.element.first!.hashValue) { index, group in
+                        ForEach(Array(windowGroups.enumerated()), id: \.offset) { index, group in
                             WindowGroupSection(windows: group, groupIndex: index + 1, allGroups: windowGroups)
                         }
                         
@@ -412,7 +412,7 @@ struct EmptyGroupSection: View {
             .onDrop(of: [.text], isTargeted: nil) { providers in
                 if let draggedWindow = DragDropManager.shared.draggingWindow {
                     draggedWindow.moveTabToNewWindow(nil)
-                    if emptyGroup.name != "未命名分组" {
+                    if emptyGroup.name != LS("Untitled Group") && emptyGroup.name != "未命名分组" {
                         let key = "CustomGroupName_\(draggedWindow.windowNumber)"
                         UserDefaults.standard.set(emptyGroup.name, forKey: key)
                     }
@@ -435,7 +435,7 @@ struct EmptyGroupSection: View {
     }
     
     private var displayTitle: String {
-        emptyGroup.name == "未命名分组" ? "未命名分组 \(groupIndex)" : emptyGroup.name
+        (emptyGroup.name == LS("Untitled Group") || emptyGroup.name == "未命名分组") ? "\(LS("Group")) \(groupIndex)" : emptyGroup.name
     }
     
     private func startEditing() {
@@ -459,7 +459,7 @@ struct EmptyGroupSection: View {
         panel.canChooseDirectories = false
         if panel.runModal() == .OK, let url = panel.url {
             let window = NSApp.openSwiftUIWindow(for: url, independent: true)
-            if emptyGroup.name != "未命名分组" {
+            if emptyGroup.name != LS("Untitled Group") && emptyGroup.name != "未命名分组" {
                 let key = "CustomGroupName_\(window.windowNumber)"
                 UserDefaults.standard.set(emptyGroup.name, forKey: key)
             }

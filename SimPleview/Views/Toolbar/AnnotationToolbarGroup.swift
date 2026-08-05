@@ -27,34 +27,34 @@ struct AnnotationToolbarGroup: CustomizableToolbarContent {
             Menu {
                 Button(action: { state.pageBackgroundColor = .default }) {
                     #if os(macOS)
-                    colorMenuText(name: state.L("Default Background") != "Default Background" ? state.L("Default Background") : "默认背景", color: .white)
+                    colorMenuText(name: state.L("Default Background"), color: .white)
                     #else
-                    Label(state.L("Default Background") != "Default Background" ? state.L("Default Background") : "默认背景", systemImage: "doc")
+                    Label(state.L("Default Background"), systemImage: "doc")
                     #endif
                 }
                 Button(action: { state.pageBackgroundColor = .green }) {
                     #if os(macOS)
-                    colorMenuText(name: state.L("Eye-care Green") != "Eye-care Green" ? state.L("Eye-care Green") : "护眼绿", color: NSColor(red: 0.78, green: 0.93, blue: 0.8, alpha: 1.0))
+                    colorMenuText(name: state.L("Eye-care Green"), color: NSColor(red: 0.78, green: 0.93, blue: 0.8, alpha: 1.0))
                     #else
-                    Label(state.L("Eye-care Green") != "Eye-care Green" ? state.L("Eye-care Green") : "护眼绿", systemImage: "leaf")
+                    Label(state.L("Eye-care Green"), systemImage: "leaf")
                     #endif
                 }
                 Button(action: { state.pageBackgroundColor = .yellow }) {
                     #if os(macOS)
-                    colorMenuText(name: state.L("Soft Yellow") != "Soft Yellow" ? state.L("Soft Yellow") : "柔和黄", color: NSColor(red: 0.96, green: 0.9, blue: 0.75, alpha: 1.0))
+                    colorMenuText(name: state.L("Soft Yellow"), color: NSColor(red: 0.96, green: 0.9, blue: 0.75, alpha: 1.0))
                     #else
-                    Label(state.L("Soft Yellow") != "Soft Yellow" ? state.L("Soft Yellow") : "柔和黄", systemImage: "sun.max")
+                    Label(state.L("Soft Yellow"), systemImage: "sun.max")
                     #endif
                 }
                 Button(action: { state.pageBackgroundColor = .black }) {
                     #if os(macOS)
-                    colorMenuText(name: state.L("Dark Mode") != "Dark Mode" ? state.L("Dark Mode") : "暗黑模式", color: .black)
+                    colorMenuText(name: state.L("Dark Mode"), color: .black)
                     #else
-                    Label(state.L("Dark Mode") != "Dark Mode" ? state.L("Dark Mode") : "暗黑模式", systemImage: "moon")
+                    Label(state.L("Dark Mode"), systemImage: "moon")
                     #endif
                 }
             } label: {
-                Label(state.L("Background Color") != "Background Color" ? state.L("Background Color") : "背景颜色", systemImage: "circle.lefthalf.filled")
+                Label(state.L("Background Color"), systemImage: "circle.lefthalf.filled")
             }
             .disabled(state.fileURL == nil)
         }
