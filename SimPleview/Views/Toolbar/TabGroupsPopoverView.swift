@@ -167,19 +167,19 @@ struct WindowGroupSection: View {
                 if !isEditingName {
                     HStack(spacing: 12) {
                         Button(action: {
-                            deleteGroupAndMerge()
-                        }) {
-                            Image(systemName: "trash")
-                                .foregroundColor(.red.opacity(0.8))
-                        }
-                        .buttonStyle(.plain)
-                        
-                        Button(action: {
                             customGroupName = groupTitle == defaultGroupTitle ? "" : groupTitle
                             isEditingName = true
                         }) {
                             Image(systemName: "pencil")
                                 .foregroundColor(.gray)
+                        }
+                        .buttonStyle(.plain)
+                        
+                        Button(action: {
+                            deleteGroupAndMerge()
+                        }) {
+                            Image(systemName: "trash")
+                                .foregroundColor(.red.opacity(0.8))
                         }
                         .buttonStyle(.plain)
                     }
@@ -350,20 +350,19 @@ struct EmptyGroupSection: View {
                 
                 if !isEditing {
                     HStack(spacing: 12) {
-                        Button(action: { onRemove() }) {
-                            Image(systemName: "trash")
-                                .foregroundColor(.red.opacity(0.8))
-                        }
-                        .buttonStyle(.plain)
-                        
                         Button(action: { startEditing() }) {
                             Image(systemName: "pencil")
                                 .foregroundColor(.gray)
                         }
                         .buttonStyle(.plain)
+                        
+                        Button(action: { onRemove() }) {
+                            Image(systemName: "trash")
+                                .foregroundColor(.red.opacity(0.8))
+                        }
+                        .buttonStyle(.plain)
                     }
                 }
-                Spacer()
             }
             .padding(.horizontal, 8)
             .padding(.top, 4)
