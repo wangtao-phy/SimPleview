@@ -22,7 +22,7 @@ struct LinkPreviewPopoverView: View {
                 // Internal Document Destination Preview (Equation, Reference)
                 if let img = previewImage {
                     SelectableImageView(image: img)
-                        .frame(width: 900, height: 300) // Restore 900 width
+                        .frame(width: 900, height: 300) // Ensure exact frame to prevent VisionKit from squishing
                         .padding(8)
                         // A nice subtle border/shadow effect to look like a mini page
                         .background(Color(NSColor.windowBackgroundColor))
@@ -31,7 +31,7 @@ struct LinkPreviewPopoverView: View {
                         ProgressView()
                             .scaleEffect(0.8)
                     }
-                    .frame(width: 900, height: 300) // Ensure exact same size during loading
+                    .frame(width: 900, height: 300) // Match the EXACT width and height of the final image to prevent flashing
                 }
             } else {
                 Text("Unknown Link")
@@ -57,60 +57,46 @@ struct LinkPreviewPopoverView: View {
             let point = safeDest.point
             let pageBounds = safePage.bounds(for: .cropBox)
             
-            // 1. Calculate visual size based on rotation
-            let rotation = safePage.rotation
-            let visualSize: NSSize
-            if rotation == 90 || rotation == 270 {
-                visualSize = NSSize(width: pageBounds.height, height: pageBounds.width)
-            } else {
-                visualSize = pageBounds.size
-            }
+            // We use the full page width to preserve left and right margins exactly as they appear in the PDF.
+            let cropWidth = pageBounds.width
             
-            // 2. Map target point to visual coordinates (bottom-left origin)
-            let nx = point.x - pageBounds.minX
-            let ny = point.y - pageBounds.minY
-            let w = pageBounds.width
-            let h = pageBounds.height
+            // Calculate height to perfectly match the 900x300 UI aspect ratio (3:1)
+            let cropHeight: CGFloat = cropWidth * (300.0 / 900.0)
             
-            let visualY: CGFloat
-            switch rotation {
-            case 90:  visualY = w - nx
-            case 180: visualY = h - ny
-            case 270: visualY = nx
-            default:  visualY = ny
-            }
+            let targetY = point.y
+            // Start the crop box slightly above the destination point (40 pts) and go down.
+            var cropRect = NSRect(x: pageBounds.minX, y: targetY - cropHeight + 40, width: cropWidth, height: cropHeight)
             
-            // 3. Define the visual crop rect (3:1 aspect ratio)
-            let cropWidth = visualSize.width
-            let cropHeight = cropWidth * (300.0 / 900.0)
+            if cropRect.minY < pageBounds.minY { cropRect.origin.y = pageBounds.minY }
+            if cropRect.maxX > pageBounds.maxX { cropRect.size.width = pageBounds.maxX - cropRect.minX }
             
-            // Target point should be near the top of the crop (40 units padding)
-            var cropRect = NSRect(x: 0, y: visualY + 40 - cropHeight, width: cropWidth, height: cropHeight)
-            if cropRect.minY < 0 { cropRect.origin.y = 0 }
-            
-            // 4. Generate full high-res visual thumbnail
+            // High-resolution rendering scale factor
             let scale: CGFloat = 2.0
-            let targetSize = NSSize(width: visualSize.width * scale, height: visualSize.height * scale)
-            let fullImage = safePage.thumbnail(of: targetSize, for: .cropBox)
             
-            // 5. Crop the exact region
-            let imageCropRect = NSRect(
-                x: cropRect.minX * scale,
-                y: cropRect.minY * scale,
-                width: cropRect.width * scale,
-                height: cropRect.height * scale
-            )
+            let pixelSize = NSSize(width: cropRect.width * scale, height: cropRect.height * scale)
+            let image = NSImage(size: pixelSize)
             
-            let croppedImage = NSImage(size: imageCropRect.size)
-            croppedImage.lockFocus()
+            image.lockFocus()
+            guard let context = NSGraphicsContext.current?.cgContext else {
+                image.unlockFocus()
+                return
+            }
+            
+            // White background (PDFs are often transparent)
             NSColor.white.setFill()
-            NSRect(origin: .zero, size: imageCropRect.size).fill()
-            // Using .sourceOver to properly blend the PDF over the white background in case of transparency
-            fullImage.draw(at: .zero, from: imageCropRect, operation: .sourceOver, fraction: 1.0)
-            croppedImage.unlockFocus()
+            NSRect(origin: .zero, size: pixelSize).fill()
+            
+            // Apply scale
+            context.scaleBy(x: scale, y: scale)
+            // Shift context so cropRect.origin aligns to (0,0)
+            context.translateBy(x: -cropRect.minX, y: -cropRect.minY)
+            
+            safePage.draw(with: .cropBox, to: context)
+            
+            image.unlockFocus()
             
             DispatchQueue.main.async {
-                self.previewImage = croppedImage
+                self.previewImage = image
             }
         }
     }
