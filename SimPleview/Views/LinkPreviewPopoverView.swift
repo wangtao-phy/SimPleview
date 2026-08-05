@@ -22,7 +22,7 @@ struct LinkPreviewPopoverView: View {
                 // Internal Document Destination Preview (Equation, Reference)
                 if let img = previewImage {
                     SelectableImageView(image: img)
-                        .frame(width: 500, height: 250) // Match exact popover size to prevent layout flicker
+                        .frame(width: 900, height: 300) // Restore 900 width
                         .padding(8)
                         // A nice subtle border/shadow effect to look like a mini page
                         .background(Color(NSColor.windowBackgroundColor))
@@ -31,7 +31,7 @@ struct LinkPreviewPopoverView: View {
                         ProgressView()
                             .scaleEffect(0.8)
                     }
-                    .frame(width: 500, height: 250) // Ensure exact same size during loading
+                    .frame(width: 900, height: 300) // Ensure exact same size during loading
                 }
             } else {
                 Text("Unknown Link")
@@ -57,15 +57,14 @@ struct LinkPreviewPopoverView: View {
             let point = safeDest.point
             let pageBounds = safePage.bounds(for: .cropBox)
             
-            // 使用完整的页面宽度，避免左右被强行拉伸导致顶满屏幕
+            // 使用完整的页面宽度，保留 PDF 原本的左右页边距，避免文字直接顶满屏幕边缘
             let cropWidth = pageBounds.width
-            // 高度严格匹配 UI 比例 (500x250) 以实现完美贴合
-            let cropHeight = cropWidth * (250.0 / 500.0)
+            // 严格匹配 UI 比例 (900x300，即宽高比 3:1)
+            let cropHeight = cropWidth * (300.0 / 900.0)
             
             let targetY = point.y
-            // 目标点是内容的顶部。我们让截取框顶部高出目标点 30 个单位（留出一些上下文），
-            // 然后往下截取 cropHeight。注意 PDF 坐标系 (0,0) 在左下角。
-            var cropRect = NSRect(x: pageBounds.minX, y: targetY + 30 - cropHeight, width: cropWidth, height: cropHeight)
+            // 目标点是内容的顶部。为了留出充足的上下文，我们让截取框顶部高出目标点 40 个单位
+            var cropRect = NSRect(x: pageBounds.minX, y: targetY + 40 - cropHeight, width: cropWidth, height: cropHeight)
             
             if cropRect.minY < pageBounds.minY { cropRect.origin.y = pageBounds.minY }
             if cropRect.maxX > pageBounds.maxX { cropRect.size.width = pageBounds.maxX - cropRect.minX }
