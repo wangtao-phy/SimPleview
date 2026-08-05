@@ -106,6 +106,10 @@ struct LinkPreviewPopoverView: View {
             
             image.unlockFocus()
             
+            // Set the logical size to match the exact 0.8x display size.
+            // This guarantees the image scales down properly and its intrinsic size matches the UI frame.
+            image.size = NSSize(width: cropWidth * 0.8, height: cropHeight * 0.8)
+            
             DispatchQueue.main.async {
                 self.previewImage = image
             }
@@ -126,6 +130,12 @@ struct SelectableImageView: NSViewRepresentable {
         imageView.image = image
         imageView.imageScaling = .scaleProportionallyUpOrDown
         imageView.translatesAutoresizingMaskIntoConstraints = false
+        
+        // Prevent imageView from pushing its frame beyond the SwiftUI specified bounds
+        imageView.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        imageView.setContentCompressionResistancePriority(.defaultLow, for: .vertical)
+        imageView.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        imageView.setContentHuggingPriority(.defaultLow, for: .vertical)
         
         container.addSubview(imageView)
         NSLayoutConstraint.activate([
