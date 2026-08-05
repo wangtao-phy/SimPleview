@@ -58,17 +58,31 @@ struct LinkPreviewPopoverView: View {
             let pageBounds = safePage.bounds(for: .cropBox)
             
             // We use the full page width to preserve left and right margins exactly as they appear in the PDF.
-            let cropWidth = pageBounds.width
+            // 1. Calculate the ORIGINAL perfect Y math so we know the EXACT center we want
+            let originalCropWidth = pageBounds.width
+            let originalCropHeight = originalCropWidth * (300.0 / 900.0)
+            let originalMinY = point.y - originalCropHeight + 40
+            let originalCenterY = originalMinY + (originalCropHeight / 2.0)
             
-            // Calculate height to perfectly match the 900x300 UI aspect ratio (3:1)
-            let cropHeight: CGFloat = cropWidth * (300.0 / 900.0)
+            // 2. Define the NEW width that the user requested (adding 100 for margins)
+            let padding: CGFloat = 100.0
+            let cropWidth = originalCropWidth + padding
             
-            let targetY = point.y
-            // Start the crop box slightly above the destination point (40 pts) and go down.
-            var cropRect = NSRect(x: pageBounds.minX, y: targetY - cropHeight + 40, width: cropWidth, height: cropHeight)
+            // 3. Calculate NEW height to strictly maintain 3:1 aspect ratio so it fits 900x300 perfectly
+            let cropHeight = cropWidth * (300.0 / 900.0)
+            
+            // 4. Position the new box so its center EXACTLY matches the original center!
+            let newMinX = pageBounds.minX - (padding / 2.0)
+            let newMinY = originalCenterY - (cropHeight / 2.0)
+            
+            var cropRect = NSRect(
+                x: newMinX, 
+                y: newMinY, 
+                width: cropWidth, 
+                height: cropHeight
+            )
             
             if cropRect.minY < pageBounds.minY { cropRect.origin.y = pageBounds.minY }
-            if cropRect.maxX > pageBounds.maxX { cropRect.size.width = pageBounds.maxX - cropRect.minX }
             
             // High-resolution rendering scale factor
             let scale: CGFloat = 2.0

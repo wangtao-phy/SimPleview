@@ -220,7 +220,19 @@ extension CustomPDFView {
         
         let viewPoint = convert(event.locationInWindow, from: nil)
         
-        // Optimize: skip if dragging or if view is not active
+        // Optimization: don't restart everything if we are still hovering the exact same link
+        if let currentLink = self.currentHoveredLink,
+           let currentPage = currentLink.page {
+            let pointInPage = self.convert(viewPoint, to: currentPage)
+            let expandedBounds = currentLink.bounds.insetBy(dx: -15, dy: -15)
+            if expandedBounds.contains(pointInPage) {
+                // If we have a popover showing or timer running for this link, don't do anything
+                if self.hoverPopover?.isShown == true || self.hoverTimer != nil {
+                    return
+                }
+            }
+        }
+        
         guard let page = page(for: viewPoint, nearest: false) else {
             handleMouseLeaveLink()
             return
@@ -307,9 +319,12 @@ extension CustomPDFView {
                         let viewPoint = self.convert(mouseLoc, from: nil)
                         if let page = self.page(for: viewPoint, nearest: false) {
                             let pagePoint = self.convert(viewPoint, to: page)
-                            if let annot = page.annotation(at: pagePoint), annot == self.currentHoveredLink {
-                                // 鼠标又回到了原来的链接上，不需要触发隐藏
-                                return
+                            // Re-check with expanded bounds to prevent immediate hide when moving slightly off link
+                            if let annot = self.currentHoveredLink {
+                                let expandedBounds = annot.bounds.insetBy(dx: -15, dy: -15)
+                                if expandedBounds.contains(pagePoint) {
+                                    return
+                                }
                             }
                         }
                     }
