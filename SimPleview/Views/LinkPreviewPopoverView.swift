@@ -19,11 +19,13 @@ struct LinkPreviewPopoverView: View {
     var body: some View {
         VStack(spacing: 0) {
             if resolvedDestination != nil {
-                // Internal Document Destination Preview (Equation, Reference)
+                // Internal Document Destination Preview
                 if let img = previewImage {
                     SelectableImageView(image: img)
-                        .frame(width: 900, height: 300) // Keep the original image size exactly the same to preserve text scale
-                        // Removed padding here so the image itself is strictly 900x300
+                        // Keep the image exactly 900x300. 
+                        // Because the parent container is 1000x300, 
+                        // this naturally centers the image and leaves 50px margins on both sides.
+                        .frame(width: 900, height: 300) 
                 } else {
                     VStack {
                         ProgressView()
@@ -37,8 +39,10 @@ struct LinkPreviewPopoverView: View {
                     .padding()
             }
         }
-        .frame(width: 1000, height: 300) // Expanded the outer container by 100px to force 50px margins on both sides
-        .background(Color(NSColor.windowBackgroundColor)) // Ensure the margins match the popover background
+        // The expanded outer container (1000x300) guarantees a safe 50px margin
+        // for the 900x300 image, preventing text from touching the popover edge.
+        .frame(width: 1000, height: 300) 
+        .background(Color(NSColor.windowBackgroundColor)) 
         .cornerRadius(8)
         .onHover { hovering in
             onHoverStateChanged?(hovering)
@@ -48,6 +52,9 @@ struct LinkPreviewPopoverView: View {
         }
     }
     
+    /// Generates a perfectly proportioned 3:1 crop of the PDF destination.
+    /// The logic relies on maintaining the original page width and calculating height strictly, 
+    /// ensuring the Y-axis location is exact without arbitrary scaling.
     private func generateThumbnail() {
         guard let dest = resolvedDestination, let page = dest.page else { return }
         
@@ -58,8 +65,13 @@ struct LinkPreviewPopoverView: View {
             let point = safeDest.point
             let pageBounds = safePage.bounds(for: .cropBox)
             
+            // 1. Maintain the pure 3:1 aspect ratio math.
+            // By keeping the width exact to the PDF bounds, we avoid arbitrary scale changes.
             let cropWidth = pageBounds.width
             let cropHeight = cropWidth * (300.0 / 900.0)
+            
+            // 2. The Y-coordinate provided by the destination is positioned 40 points 
+            // below the top edge of our crop box, ensuring the target text is visible.
             let targetY = point.y
             
             var cropRect = NSRect(
@@ -69,9 +81,12 @@ struct LinkPreviewPopoverView: View {
                 height: cropHeight
             )
             
-            if cropRect.minY < pageBounds.minY { cropRect.origin.y = pageBounds.minY }
+            // Prevent cropping outside the bottom edge of the page
+            if cropRect.minY < pageBounds.minY { 
+                cropRect.origin.y = pageBounds.minY 
+            }
             
-            // High-resolution rendering scale factor
+            // 3. Render at @2x scale for Retina displays
             let scale: CGFloat = 2.0
             
             let pixelSize = NSSize(width: cropRect.width * scale, height: cropRect.height * scale)
@@ -83,13 +98,12 @@ struct LinkPreviewPopoverView: View {
                 return
             }
             
-            // White background (PDFs are often transparent)
+            // 4. Paint a white background because some PDFs are transparent
             NSColor.white.setFill()
             NSRect(origin: .zero, size: pixelSize).fill()
             
-            // Apply scale
+            // 5. Transform context to draw the cropped region filling the image
             context.scaleBy(x: scale, y: scale)
-            // Shift context so cropRect.origin aligns to (0,0)
             context.translateBy(x: -cropRect.minX, y: -cropRect.minY)
             
             safePage.draw(with: .cropBox, to: context)
