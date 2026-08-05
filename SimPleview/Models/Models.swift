@@ -234,7 +234,18 @@ struct L {
             "Save To:": [.zh: "保存至:", .en: "Save To:"],
             "Browse...": [.zh: "浏览...", .en: "Browse..."],
             "Cancel": [.zh: "取消", .en: "Cancel"],
-            "Create": [.zh: "创建", .en: "Create"]
+            "Create": [.zh: "创建", .en: "Create"],
+            "Default Background": [.zh: "默认背景", .en: "Default Background"],
+            "Eye-care Green": [.zh: "护眼绿", .en: "Eye-care Green"],
+            "Soft Yellow": [.zh: "柔和黄", .en: "Soft Yellow"],
+            "Dark Mode": [.zh: "暗黑模式", .en: "Dark Mode"],
+            "Background Color": [.zh: "背景颜色", .en: "Background Color"],
+            "Untitled Document": [.zh: "未命名文档", .en: "Untitled Document"],
+            "Untitled Group": [.zh: "未命名分组", .en: "Untitled Group"],
+            "No open documents": [.zh: "暂无打开的文档", .en: "No open documents"],
+            "New Group": [.zh: "新建分组", .en: "New Group"],
+            "Tab Groups": [.zh: "标签页分组", .en: "Tab Groups"],
+            "Group": [.zh: "分组", .en: "Group"]
     ]
     static func s(_ key: String, _ lang: AppLanguage) -> String {
         return dict[key]?[lang] ?? key

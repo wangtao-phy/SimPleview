@@ -8,6 +8,11 @@ import UniformTypeIdentifiers
 struct TabGroupsPopoverView: View {
     @ObservedObject var registry = WindowRegistry.shared
     @State private var contentHeight: CGFloat = 100
+    @AppStorage("appLanguage") var appLanguage: AppLanguage = .zh
+    
+    private func LS(_ key: String) -> String {
+        return SimPleview.L.s(key, appLanguage)
+    }
     
     // 我们需要将分散的 controllers 按它们的 tabbedWindows 分组
     // 由于 tabbedWindows 返回的数组对于同一个 tab 组内的所有窗口都是相同的（包含它们自己），
@@ -41,15 +46,16 @@ struct TabGroupsPopoverView: View {
     
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            Text("标签页分组")
+            Text(LS("Tab Groups"))
                 .font(.headline)
                 .padding(.vertical, 16)
-                .padding(.horizontal, 24)
+                .padding(.leading, 32)
+                .padding(.trailing, 24)
             
             Divider()
             
             if windowGroups.isEmpty && registry.emptyGroups.isEmpty {
-                Text("暂无打开的文档")
+                Text(LS("No open documents"))
                     .foregroundColor(.gray)
                     .padding()
             } else {
@@ -85,12 +91,12 @@ struct TabGroupsPopoverView: View {
             Divider()
             
             Button(action: {
-                registry.emptyGroups.append(EmptyGroup())
+                registry.emptyGroups.append(EmptyGroup(name: LS("Untitled Group")))
             }) {
                 HStack {
                     Spacer()
                     Image(systemName: "plus")
-                    Text("新建分组")
+                    Text(LS("New Group"))
                     Spacer()
                 }
                 .padding(.vertical, 12)
@@ -116,6 +122,11 @@ struct WindowGroupSection: View {
     let allGroups: [[NSWindow]]
     @State private var customGroupName: String = ""
     @State private var isEditingName: Bool = false
+    @AppStorage("appLanguage") var appLanguage: AppLanguage = .zh
+    
+    private func LS(_ key: String) -> String {
+        return SimPleview.L.s(key, appLanguage)
+    }
     
     // 我们用 UserDefaults 来保存自定义分组名称，键是窗口的某个特征
     // 但因为每次拖拽导致窗口组合可能变动，我们需要一个稳定的 Key。
@@ -128,7 +139,7 @@ struct WindowGroupSection: View {
     }
     
     private var defaultGroupTitle: String {
-        "未命名分组 \(groupIndex)"
+        "\(LS("Group")) \(groupIndex)"
     }
     
     var groupTitle: String {
@@ -248,12 +259,17 @@ struct WindowGroupSection: View {
 struct TabItemView: View {
     let window: NSWindow
     @State private var isHovering = false
+    @AppStorage("appLanguage") var appLanguage: AppLanguage = .zh
+    
+    private func LS(_ key: String) -> String {
+        return SimPleview.L.s(key, appLanguage)
+    }
     
     var body: some View {
         HStack {
             Image(systemName: "doc.text")
                 .foregroundColor(.gray)
-            Text(window.title.isEmpty ? "未命名文档" : window.title)
+            Text(window.title.isEmpty ? LS("Untitled Document") : window.title)
                 .lineLimit(1)
                 .truncationMode(.tail)
             Spacer()
@@ -319,6 +335,11 @@ struct EmptyGroupSection: View {
     @State private var isEditing = false
     @State private var editingName = ""
     @FocusState private var isFocused: Bool
+    @AppStorage("appLanguage") var appLanguage: AppLanguage = .zh
+    
+    private func LS(_ key: String) -> String {
+        return SimPleview.L.s(key, appLanguage)
+    }
     
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {

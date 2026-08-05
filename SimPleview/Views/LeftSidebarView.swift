@@ -22,6 +22,8 @@ struct LeftSidebarView: View {
                 Button(action: { uiState.isShowingTabGroupsPopover.toggle() }) {
                     Image(systemName: "square.grid.2x2")
                         .foregroundColor(.primary)
+                        .padding(4)
+                        .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
                 .popover(isPresented: $uiState.isShowingTabGroupsPopover, arrowEdge: .bottom) {
