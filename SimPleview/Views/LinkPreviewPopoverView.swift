@@ -72,30 +72,34 @@ struct LinkPreviewPopoverView: View {
             // High-resolution rendering scale factor
             let scale: CGFloat = 2.0
             
-            let pixelSize = NSSize(width: cropRect.width * scale, height: cropRect.height * scale)
-            let image = NSImage(size: pixelSize)
+            // Get thumbnail of the FULL page at high resolution.
+            // PDFPage.thumbnail handles rotation and page transforms perfectly!
+            let targetSize = NSSize(width: pageBounds.width * scale, height: pageBounds.height * scale)
+            let fullImage = safePage.thumbnail(of: targetSize, for: .cropBox)
             
-            image.lockFocus()
-            guard let context = NSGraphicsContext.current?.cgContext else {
-                image.unlockFocus()
-                return
-            }
+            // Calculate the exact crop rect in the scaled image coordinates
+            let imageCropRect = NSRect(
+                x: (cropRect.minX - pageBounds.minX) * scale,
+                y: (cropRect.minY - pageBounds.minY) * scale,
+                width: cropRect.width * scale,
+                height: cropRect.height * scale
+            )
+            
+            // Create the final cropped image
+            let croppedImage = NSImage(size: imageCropRect.size)
+            croppedImage.lockFocus()
             
             // White background (PDFs are often transparent)
             NSColor.white.setFill()
-            NSRect(origin: .zero, size: pixelSize).fill()
+            NSRect(origin: .zero, size: imageCropRect.size).fill()
             
-            // Apply scale
-            context.scaleBy(x: scale, y: scale)
-            // Shift context so cropRect.origin aligns to (0,0)
-            context.translateBy(x: -cropRect.minX, y: -cropRect.minY)
+            // Draw the portion of the full image
+            fullImage.draw(at: .zero, from: imageCropRect, operation: .copy, fraction: 1.0)
             
-            safePage.draw(with: .cropBox, to: context)
-            
-            image.unlockFocus()
+            croppedImage.unlockFocus()
             
             DispatchQueue.main.async {
-                self.previewImage = image
+                self.previewImage = croppedImage
             }
         }
     }
