@@ -22,7 +22,7 @@ struct LinkPreviewPopoverView: View {
                 // Internal Document Destination Preview (Equation, Reference)
                 if let img = previewImage {
                     SelectableImageView(image: img)
-                        .frame(width: 900, height: 200) // Ensure exact frame to prevent VisionKit from squishing
+                        .frame(width: 500, height: 250) // Match exact popover size to prevent layout flicker
                         .padding(8)
                         // A nice subtle border/shadow effect to look like a mini page
                         .background(Color(NSColor.windowBackgroundColor))
@@ -31,7 +31,7 @@ struct LinkPreviewPopoverView: View {
                         ProgressView()
                             .scaleEffect(0.8)
                     }
-                    .frame(width: 900, height: 350) // Match the width of the final image to ensure NSPopover calculates screen bounds correctly BEFORE showing
+                    .frame(width: 500, height: 250) // Ensure exact same size during loading
                 }
             } else {
                 Text("Unknown Link")
@@ -57,18 +57,15 @@ struct LinkPreviewPopoverView: View {
             let point = safeDest.point
             let pageBounds = safePage.bounds(for: .cropBox)
             
-            // Formulas usually span the center, but the link destination is often at the equation number on the right.
-            // Cut off standard page margins (e.g., 50 points) to zoom in more on the actual content, making it larger in the UI.
-            let margin: CGFloat = 50
-            let startX = pageBounds.minX + margin
-            let cropWidth = max(pageBounds.width - margin * 2, 300)
-            
-            // Set height to 200 to capture enough context without getting too tall.
-            let cropHeight: CGFloat = 200
+            // 使用完整的页面宽度，避免左右被强行拉伸导致顶满屏幕
+            let cropWidth = pageBounds.width
+            // 高度严格匹配 UI 比例 (500x250) 以实现完美贴合
+            let cropHeight = cropWidth * (250.0 / 500.0)
             
             let targetY = point.y
-            // Start the crop box slightly above the destination point (20 pts) and go down.
-            var cropRect = NSRect(x: startX, y: targetY - cropHeight + 20, width: cropWidth, height: cropHeight)
+            // 目标点是内容的顶部。我们让截取框顶部高出目标点 30 个单位（留出一些上下文），
+            // 然后往下截取 cropHeight。注意 PDF 坐标系 (0,0) 在左下角。
+            var cropRect = NSRect(x: pageBounds.minX, y: targetY + 30 - cropHeight, width: cropWidth, height: cropHeight)
             
             if cropRect.minY < pageBounds.minY { cropRect.origin.y = pageBounds.minY }
             if cropRect.maxX > pageBounds.maxX { cropRect.size.width = pageBounds.maxX - cropRect.minX }
