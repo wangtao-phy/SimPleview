@@ -22,16 +22,14 @@ struct LinkPreviewPopoverView: View {
                 // Internal Document Destination Preview
                 if let img = previewImage {
                     SelectableImageView(image: img)
-                        // Keep the image exactly 700x320. 
-                        // Because the parent container is 800x320, 
-                        // this naturally centers the image and leaves 50px margins on both sides.
-                        .frame(width: 700, height: 320)
+                        // The image itself now contains the margins, so it fills the entire 800x320 popover
+                        .frame(width: 800, height: 320)
                 } else {
                     VStack {
                         ProgressView()
                             .scaleEffect(0.8)
                     }
-                    .frame(width: 700, height: 320)
+                    .frame(width: 800, height: 320)
                 }
             } else {
                 Text("Unknown Link")
@@ -39,8 +37,6 @@ struct LinkPreviewPopoverView: View {
                     .padding()
             }
         }
-        // The expanded outer container (800x320) guarantees a safe 50px margin
-        // for the 700x320 image, preventing text from touching the popover edge.
         .frame(width: 800, height: 320)
         .background(Color(NSColor.windowBackgroundColor))
         .cornerRadius(8)
@@ -65,17 +61,17 @@ struct LinkPreviewPopoverView: View {
             let point = safeDest.point
             let pageBounds = safePage.bounds(for: .cropBox)
             
-            // 1. Maintain the pure aspect ratio math for 700x320.
-            // By keeping the width exact to the PDF bounds, we avoid arbitrary scale changes.
-            let cropWidth = pageBounds.width
-            let cropHeight = cropWidth * (320.0 / 700.0)
+            // 1. Expand the cropWidth by 100 points to create a guaranteed 50px margin on both sides INSIDE the image.
+            let cropWidth = pageBounds.width + 100
+            // 2. Calculate cropHeight to perfectly match the 800x320 UI frame ratio, preventing any VisionKit squishing.
+            let cropHeight = cropWidth * (320.0 / 800.0)
             
-            // 2. The Y-coordinate provided by the destination is positioned 40 points 
+            // 3. The Y-coordinate provided by the destination is positioned 40 points 
             // below the top edge of our crop box, ensuring the target text is visible.
             let targetY = point.y
             
             var cropRect = NSRect(
-                x: pageBounds.minX, 
+                x: pageBounds.minX - 50, // Shift X left by 50 to center the PDF inside the wider crop box
                 y: targetY - cropHeight + 40,
                 width: cropWidth,
                 height: cropHeight
@@ -86,7 +82,7 @@ struct LinkPreviewPopoverView: View {
                 cropRect.origin.y = pageBounds.minY 
             }
             
-            // 3. Render at @2x scale for Retina displays
+            // 4. Render at @2x scale for Retina displays
             let scale: CGFloat = 2.0
             
             let pixelSize = NSSize(width: cropRect.width * scale, height: cropRect.height * scale)
