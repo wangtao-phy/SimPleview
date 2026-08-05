@@ -260,7 +260,7 @@ struct TabItemView: View {
             
             if isHovering {
                 Button(action: {
-                    window.close()
+                    window.performClose(nil)
                 }) {
                     Image(systemName: "xmark")
                         .foregroundColor(.gray)
