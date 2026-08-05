@@ -20,9 +20,9 @@ struct LinkPreviewPopoverView: View {
         resolvedDestination?.page?.bounds(for: .cropBox).width ?? 800.0
     }
     
-    var innerWidth: CGFloat { a * 1.2 }
-    // cropHeight was a / 3.0, so innerHeight is (a / 3.0) * 1.2
-    var innerHeight: CGFloat { (a / 3.0) * 1.2 }
+    var innerWidth: CGFloat { a * 1.5 }
+    // cropHeight was a / 3.0, so innerHeight is (a / 3.0) * 1.5
+    var innerHeight: CGFloat { (a / 3.0) * 1.5 }
     
     var outerWidth: CGFloat { innerWidth + 100.0 }
     var outerHeight: CGFloat { innerHeight }
@@ -106,9 +106,9 @@ struct LinkPreviewPopoverView: View {
             
             image.unlockFocus()
             
-            // Set the logical size to match the exact 1.2x display size.
+            // Set the logical size to match the exact 1.5x display size.
             // This guarantees the image scales down properly and its intrinsic size matches the UI frame.
-            image.size = NSSize(width: cropWidth * 1.2, height: cropHeight * 1.2)
+            image.size = NSSize(width: cropWidth * 1.5, height: cropHeight * 1.5)
             
             DispatchQueue.main.async {
                 self.previewImage = image
