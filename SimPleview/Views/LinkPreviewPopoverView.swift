@@ -16,20 +16,27 @@ struct LinkPreviewPopoverView: View {
         return nil
     }
     
+    var baseWidth: CGFloat {
+        resolvedDestination?.page?.bounds(for: .cropBox).width ?? 800.0
+    }
+    var innerWidth: CGFloat { baseWidth * 0.8 }
+    var innerHeight: CGFloat { innerWidth / 3.0 }
+    var outerWidth: CGFloat { innerWidth + 100.0 }
+    var outerHeight: CGFloat { innerHeight }
+    
     var body: some View {
         VStack(spacing: 0) {
             if resolvedDestination != nil {
                 // Internal Document Destination Preview (Equation, Reference)
                 if let img = previewImage {
                     SelectableImageView(image: img)
-                        // Proportionally scaled down from 900x300 to 720x240 (keeping the exact 3:1 aspect ratio)
-                        .frame(width: 720, height: 240) 
+                        .frame(width: innerWidth, height: innerHeight)
                 } else {
                     VStack {
                         ProgressView()
                             .scaleEffect(0.8)
                     }
-                    .frame(width: 720, height: 240) 
+                    .frame(width: innerWidth, height: innerHeight) 
                 }
             } else {
                 Text("Unknown Link")
@@ -37,9 +44,7 @@ struct LinkPreviewPopoverView: View {
                     .padding()
             }
         }
-        // Scaled down outer container to the requested 800x320. 
-        // This gives 40px margins left/right and 40px margins top/bottom.
-        .frame(width: 800, height: 320) 
+        .frame(width: outerWidth, height: outerHeight) 
         .background(Color(NSColor.windowBackgroundColor)) 
         .cornerRadius(8)
         .onHover { hovering in

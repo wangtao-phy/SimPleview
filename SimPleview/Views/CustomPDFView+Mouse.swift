@@ -334,15 +334,21 @@ extension CustomPDFView {
             }
         }
         
+        let dest = linkAnnot.destination ?? (linkAnnot.action as? PDFActionGoTo)?.destination
+        let baseWidth = dest?.page?.bounds(for: .cropBox).width ?? 800.0
+        let innerWidth = baseWidth * 0.8
+        let innerHeight = innerWidth / 3.0
+        let outerWidth = innerWidth + 100.0
+        let outerHeight = innerHeight
+        
         let popover = NSPopover()
         popover.behavior = .transient
         popover.animates = false // Prevent animation delays from causing tracking issues
         
         let host = NSHostingController(rootView: popoverView)
         popover.contentViewController = host
-        // Explicitly set the initial content size so NSPopover correctly calculates screen edge collisions BEFORE it appears
-        // Scaled to 800x320
-        popover.contentSize = NSSize(width: 800, height: 320)
+        // Explicitly set the initial content size dynamically so NSPopover correctly calculates screen edge collisions BEFORE it appears
+        popover.contentSize = NSSize(width: outerWidth, height: outerHeight)
         
         self.hoverPopover = popover
         
