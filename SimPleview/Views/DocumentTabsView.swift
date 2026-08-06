@@ -21,7 +21,8 @@ struct DocumentTabsView: View {
                     }
                 }
                 .padding(.horizontal, 12)
-                .padding(.vertical, 10)
+                .padding(.top, 8)
+                .padding(.bottom, 4)
             }
             // 监听：如果当前活跃的文档索引发生了变化（比如用户新建了一个标签，或者删了一个跳转到了下一个）
             .onChange(of: state.activeDocumentIndex) { _, index in

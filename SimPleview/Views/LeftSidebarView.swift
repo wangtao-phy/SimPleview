@@ -37,7 +37,8 @@ struct LeftSidebarView: View {
             }
             .padding(.leading, 6)
             .padding(.trailing, 10)
-            .padding(.vertical, 8)
+            .padding(.top, 8)
+            .padding(.bottom, 4)
             
             Divider()
             
@@ -97,7 +98,8 @@ struct ThumbnailListView: View {
                     DropInsertLine(index: state.totalPageCount, state: state)
                 }
                 .id(state.documentVersion) // [黑魔法] 强行绑定 UUID。当页面发生大规模新增或删除时，改变 UUID 让整个列表彻底重建
-                .padding(.vertical, 10)
+                .padding(.bottom, 10)
+                .padding(.top, 2)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .contentShape(Rectangle())
                 .onTapGesture { isThumbnailFocused = true }
