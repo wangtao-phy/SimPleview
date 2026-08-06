@@ -271,14 +271,13 @@ extension CustomPDFView {
                 self._threadSafeHoveredLinkPage = linkAnnot.page
                 self.setNeedsDisplay(self.bounds)
                 
-                self.hoverTimer?.invalidate()
+                self.hoverTask?.cancel()
                 
-                // Start a timer
-                self.hoverTimer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: false) { [weak self] _ in
-                    Task { @MainActor in
-                        guard let self = self, self.currentHoveredLink == linkAnnot else { return }
-                        self.showLinkPreviewPopover(for: linkAnnot, at: viewPoint, in: self)
-                    }
+                // Start a task to show popover
+                self.hoverTask = Task { @MainActor [weak self] in
+                    try? await Task.sleep(nanoseconds: 500_000_000)
+                    guard !Task.isCancelled, let self = self, self.currentHoveredLink == linkAnnot else { return }
+                    self.showLinkPreviewPopover(for: linkAnnot, at: viewPoint, in: self)
                 }
             }
         } else {
@@ -290,23 +289,19 @@ extension CustomPDFView {
         // Only trigger hide if we have something tracked
         guard self.currentHoveredLink != nil || self.hoverPopover != nil else { return }
         
-        self.hoverTimer?.invalidate()
-        self.hoverTimer = nil
+        self.hoverTask?.cancel()
         
-        // Use a debounce timer to avoid flickering when crossing the 1px gaps between PDF text characters
+        // Use a debounce task to avoid flickering when crossing the 1px gaps between PDF text characters
         // [用户体验升级]: 从 0.3s 延长到 0.5s，给予用户充足的时间将鼠标移入悬浮窗内
-        if self.hoverHideTimer == nil {
-            self.hoverHideTimer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: false) { [weak self] _ in
-                Task { @MainActor in
-                    self?.setNeedsDisplay(self?.bounds ?? .zero)
-                    self?.currentHoveredLink = nil
-                    self?._threadSafeHoveredLinkBounds = nil
-                    self?._threadSafeHoveredLinkPage = nil
-                    self?.hoverPopover?.close()
-                    self?.hoverPopover = nil
-                    self?.hoverHideTimer = nil
-                }
-            }
+        self.hoverTask = Task { @MainActor [weak self] in
+            try? await Task.sleep(nanoseconds: 500_000_000)
+            guard !Task.isCancelled else { return }
+            self?.setNeedsDisplay(self?.bounds ?? .zero)
+            self?.currentHoveredLink = nil
+            self?._threadSafeHoveredLinkBounds = nil
+            self?._threadSafeHoveredLinkPage = nil
+            self?.hoverPopover?.close()
+            self?.hoverPopover = nil
         }
     }
     
@@ -320,8 +315,7 @@ extension CustomPDFView {
                 guard let self = self else { return }
                 if isHovering {
                     // 如果鼠标进入了悬浮窗，立刻取消隐藏计时器，保持悬浮窗显示
-                    self.hoverHideTimer?.invalidate()
-                    self.hoverHideTimer = nil
+                    self.hoverTask?.cancel()
                 } else {
                     // 如果鼠标离开了悬浮窗，先检查鼠标是否刚好还在 PDF 的那个链接上
                     if let window = self.window {

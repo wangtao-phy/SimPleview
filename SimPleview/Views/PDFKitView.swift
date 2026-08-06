@@ -48,8 +48,7 @@ class CustomPDFView: PDFView {
     
     // Link Hover Preview State
     var trackingArea: NSTrackingArea?
-    var hoverTimer: Timer?
-    var hoverHideTimer: Timer?
+    var hoverTask: Task<Void, Never>?
     var hoverPopover: NSPopover?
     var currentHoveredLink: PDFAnnotation?
     nonisolated(unsafe) var _threadSafeHoveredLinkBounds: CGRect?
