@@ -27,8 +27,8 @@ extension CustomPDFView {
         currentPopover?.close()
         currentPopover = nil
         
-        hoverTimer?.invalidate()
-        hoverTimer = nil
+        hoverTask?.cancel()
+        hoverTask = nil
         hoverPopover?.close()
         hoverPopover = nil
     }

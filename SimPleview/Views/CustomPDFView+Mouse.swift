@@ -227,7 +227,7 @@ extension CustomPDFView {
             let expandedBounds = currentLink.bounds.insetBy(dx: -15, dy: -15)
             if expandedBounds.contains(pointInPage) {
                 // If we have a popover showing or timer running for this link, don't do anything
-                if self.hoverPopover?.isShown == true || self.hoverTimer != nil {
+                if self.hoverPopover?.isShown == true || self.hoverTask != nil {
                     return
                 }
             }
@@ -251,8 +251,7 @@ extension CustomPDFView {
             }
             
             // Cancel any pending hide
-            self.hoverHideTimer?.invalidate()
-            self.hoverHideTimer = nil
+            self.hoverTask?.cancel()
             
             // Check if it's actually a different link (compare bounds and page since instances might vary)
             let isDifferentLink = self.currentHoveredLink == nil ||

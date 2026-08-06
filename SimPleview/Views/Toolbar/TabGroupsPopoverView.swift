@@ -83,7 +83,9 @@ struct TabGroupsPopoverView: View {
                     )
                 }
                 .onPreferenceChange(ViewHeightKey.self) { height in
-                    contentHeight = height
+                    DispatchQueue.main.async {
+                        self.contentHeight = height
+                    }
                 }
                 .frame(width: 320, height: min(contentHeight, 700))
             }
