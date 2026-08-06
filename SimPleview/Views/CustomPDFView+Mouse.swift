@@ -262,7 +262,17 @@ extension CustomPDFView {
             if isDifferentLink {
                 // New link hovered
                 // Clear old state but without immediately closing the popover to avoid flicker
+                if let oldPage = self.currentHoveredLink?.page {
+                    self.setNeedsDisplay(for: oldPage)
+                }
+                
                 self.currentHoveredLink = linkAnnot
+                self._threadSafeHoveredLinkBounds = linkAnnot.bounds
+                self._threadSafeHoveredLinkPage = linkAnnot.page
+                if let newPage = linkAnnot.page {
+                    self.setNeedsDisplay(for: newPage)
+                }
+                
                 self.hoverTimer?.invalidate()
                 
                 // Start a timer
@@ -291,7 +301,12 @@ extension CustomPDFView {
         if self.hoverHideTimer == nil {
             self.hoverHideTimer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: false) { [weak self] _ in
                 Task { @MainActor in
+                    if let oldPage = self?.currentHoveredLink?.page {
+                        self?.setNeedsDisplay(for: oldPage)
+                    }
                     self?.currentHoveredLink = nil
+                    self?._threadSafeHoveredLinkBounds = nil
+                    self?._threadSafeHoveredLinkPage = nil
                     self?.hoverPopover?.close()
                     self?.hoverPopover = nil
                     self?.hoverHideTimer = nil

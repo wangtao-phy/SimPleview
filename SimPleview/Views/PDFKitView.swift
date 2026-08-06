@@ -52,6 +52,8 @@ class CustomPDFView: PDFView {
     var hoverHideTimer: Timer?
     var hoverPopover: NSPopover?
     var currentHoveredLink: PDFAnnotation?
+    nonisolated(unsafe) var _threadSafeHoveredLinkBounds: CGRect?
+    nonisolated(unsafe) var _threadSafeHoveredLinkPage: PDFPage?
     
     // macOS 原生手绘的实时状态缓存
     var currentDrawingPath: NSBezierPath?

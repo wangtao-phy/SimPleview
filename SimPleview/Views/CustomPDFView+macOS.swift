@@ -228,6 +228,28 @@ extension CustomPDFView {
         }
         context.restoreGState()
         
+        // 1.5 绘制鼠标悬停的内部链接阴影/高亮
+        if let hoverBounds = self._threadSafeHoveredLinkBounds,
+           let hoverPage = self._threadSafeHoveredLinkPage,
+           hoverPage == page {
+            context.saveGState()
+            context.concatenate(page.transform(for: .cropBox))
+            
+            let path = NSBezierPath(roundedRect: hoverBounds.insetBy(dx: -2, dy: -2), xRadius: 4, yRadius: 4)
+            
+            let shadow = NSShadow()
+            shadow.shadowColor = accentColor.withAlphaComponent(0.5)
+            shadow.shadowOffset = .zero
+            shadow.shadowBlurRadius = 6.0
+            shadow.set()
+            
+            accentColor.withAlphaComponent(0.1).setFill()
+            path.fill()
+            
+            context.restoreGState()
+        }
+        
+        
 
         // 2. 实时渲染当前正在拖拽产生的、还没有被 PDFDocument 真正收录为 Annotation 的平滑手绘轨迹
         if self._threadSafeActiveType == .ink,
