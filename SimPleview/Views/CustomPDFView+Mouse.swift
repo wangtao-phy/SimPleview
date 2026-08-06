@@ -291,9 +291,9 @@ extension CustomPDFView {
         self.hoverTask?.cancel()
         
         // Use a debounce task to avoid flickering when crossing the 1px gaps between PDF text characters
-        // [用户体验升级]: 从 0.3s 延长到 0.5s，给予用户充足的时间将鼠标移入悬浮窗内
+        // [用户体验升级]: 设置为 0.25s，既避免闪烁，又不会让用户觉得滞留太久
         self.hoverTask = Task { @MainActor [weak self] in
-            try? await Task.sleep(nanoseconds: 500_000_000)
+            try? await Task.sleep(nanoseconds: 250_000_000)
             guard !Task.isCancelled else { return }
             self?.setNeedsDisplay(self?.bounds ?? .zero)
             self?.currentHoveredLink = nil
