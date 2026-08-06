@@ -235,12 +235,12 @@ extension CustomPDFView {
             context.saveGState()
             context.concatenate(page.transform(for: .cropBox))
             
-            let path = NSBezierPath(roundedRect: hoverBounds.insetBy(dx: -2, dy: -2), xRadius: 4, yRadius: 4)
+            let path = NSBezierPath(roundedRect: hoverBounds.insetBy(dx: -1, dy: -1), xRadius: 2, yRadius: 2)
             
             let shadow = NSShadow()
-            shadow.shadowColor = accentColor.withAlphaComponent(0.5)
+            shadow.shadowColor = accentColor.withAlphaComponent(0.4)
             shadow.shadowOffset = .zero
-            shadow.shadowBlurRadius = 6.0
+            shadow.shadowBlurRadius = 4.0
             shadow.set()
             
             accentColor.withAlphaComponent(0.1).setFill()
