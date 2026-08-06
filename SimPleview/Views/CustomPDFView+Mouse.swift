@@ -261,7 +261,7 @@ extension CustomPDFView {
             if isDifferentLink {
                 // New link hovered
                 // Clear old state but without immediately closing the popover to avoid flicker
-                if let oldPage = self.currentHoveredLink?.page {
+                if self.currentHoveredLink?.page != nil {
                     self.setNeedsDisplay(self.bounds)
                 }
                 
