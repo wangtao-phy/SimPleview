@@ -297,19 +297,20 @@ class WindowRegistry: NSObject, NSWindowDelegate, ObservableObject {
                     return false
                 }
             }
-        }
-        
-        // 只有当这是分组里的最后一个标签页（即关闭它将彻底摧毁整个分组/窗口）时，才弹出“删除分组”警告。
-        // 如果有多个标签页，用户点击关闭，我们认为他只是在关闭单个标签页，直接放行即可。
-        if (sender.tabbedWindows?.count ?? 1) == 1 {
-            let groupAlert = NSAlert()
-            groupAlert.messageText = "确认要删除这个分组吗？"
-            groupAlert.informativeText = "关闭窗口将彻底移除该分组。"
-            groupAlert.addButton(withTitle: "确认删除")
-            groupAlert.addButton(withTitle: "取消")
             
-            let response = groupAlert.runModal()
-            return response == .alertFirstButtonReturn
+            // 只有当这是分组里的最后一个标签页（即关闭它将彻底摧毁整个分组/窗口）时，才弹出“删除分组”警告。
+            // 如果有多个标签页，用户点击关闭，我们认为他只是在关闭单个标签页，直接放行即可。
+            // 只有 AppWindowController 才属于一个“分组”，对比窗口等独立窗口不属于分组
+            if (sender.tabbedWindows?.count ?? 1) == 1 {
+                let groupAlert = NSAlert()
+                groupAlert.messageText = "确认要删除这个分组吗？"
+                groupAlert.informativeText = "关闭窗口将彻底移除该分组。"
+                groupAlert.addButton(withTitle: "确认删除")
+                groupAlert.addButton(withTitle: "取消")
+                
+                let response = groupAlert.runModal()
+                return response == .alertFirstButtonReturn
+            }
         }
         
         return true
