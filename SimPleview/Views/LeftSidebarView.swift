@@ -22,9 +22,8 @@ struct LeftSidebarView: View {
                 Button(action: { uiState.isShowingTabGroupsPopover.toggle() }) {
                     Image(systemName: "square.grid.2x2")
                         .foregroundColor(.primary)
-                        .padding(4)
-                        .contentShape(Rectangle())
                 }
+                .buttonStyle(SidebarIconButtonStyle())
                 .popover(isPresented: $uiState.isShowingTabGroupsPopover, arrowEdge: .bottom) {
                     TabGroupsPopoverView()
                 }
@@ -344,5 +343,28 @@ struct ThumbnailItem: View, Equatable {
             return NSItemProvider(object: String(index) as NSString)
             #endif
         }
+    }
+}
+
+// MARK: - Custom Button Style for Tab Groups Button
+struct SidebarIconButtonStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .padding(4)
+            .background(
+                RoundedRectangle(cornerRadius: 6)
+                    .fill(Color(NSColor.controlBackgroundColor))
+                    .shadow(color: Color.black.opacity(configuration.isPressed ? 0.0 : 0.15), 
+                            radius: configuration.isPressed ? 0 : 1, 
+                            x: 0, 
+                            y: configuration.isPressed ? 0 : 1)
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 6)
+                    .stroke(Color.gray.opacity(0.2), lineWidth: 0.5)
+            )
+            .scaleEffect(configuration.isPressed ? 0.92 : 1.0)
+            .opacity(configuration.isPressed ? 0.8 : 1.0)
+            .animation(.easeInOut(duration: 0.1), value: configuration.isPressed)
     }
 }
