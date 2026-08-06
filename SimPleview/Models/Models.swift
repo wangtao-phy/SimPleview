@@ -245,7 +245,16 @@ struct L {
             "No open documents": [.zh: "暂无打开的文档", .en: "No open documents"],
             "New Group": [.zh: "新建分组", .en: "New Group"],
             "Tab Groups": [.zh: "标签页分组", .en: "Tab Groups"],
-            "Group": [.zh: "分组", .en: "Group"]
+            "Group": [.zh: "分组", .en: "Group"],
+            "Check for Updates...": [.zh: "检查更新...", .en: "Check for Updates..."],
+            "Automatically check for updates": [.zh: "自动检查更新", .en: "Automatically check for updates"],
+            "Up to date": [.zh: "当前已是最新版本", .en: "Up to date"],
+            "You are using the latest version of SimPleview.": [.zh: "您正在使用最新版本的 SimPleview。", .en: "You are using the latest version of SimPleview."],
+            "Update Available": [.zh: "发现新版本", .en: "Update Available"],
+            "A new version is available!": [.zh: "发现新版本，是否前往下载？", .en: "A new version is available! Do you want to download it?"],
+            "Network error while checking for updates.": [.zh: "检查更新时网络连接失败，请稍后重试。", .en: "Network error while checking for updates."],
+            "Download": [.zh: "去下载", .en: "Download"],
+            "OK": [.zh: "确定", .en: "OK"]
     ]
     static func s(_ key: String, _ lang: AppLanguage) -> String {
         return dict[key]?[lang] ?? key

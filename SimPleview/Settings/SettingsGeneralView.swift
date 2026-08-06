@@ -34,6 +34,10 @@ struct GeneralSettingsView: View {
                 }
                 .pickerStyle(.menu)
                 .padding(.vertical, 4)
+                
+                // [设置项 1.1：自动检查更新]
+                Toggle(LS("Automatically check for updates"), isOn: AppStorage(wrappedValue: true, "autoCheckUpdates").projectedValue)
+                    .padding(.vertical, 4)
             }
             
             Section {
