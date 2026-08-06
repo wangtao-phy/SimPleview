@@ -25,7 +25,6 @@ struct LeftSidebarView: View {
                         .padding(4)
                         .contentShape(Rectangle())
                 }
-                .buttonStyle(.plain)
                 .popover(isPresented: $uiState.isShowingTabGroupsPopover, arrowEdge: .bottom) {
                     TabGroupsPopoverView()
                 }
