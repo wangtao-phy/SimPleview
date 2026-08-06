@@ -263,24 +263,21 @@ extension CustomPDFView {
                 // New link hovered
                 // Clear old state but without immediately closing the popover to avoid flicker
                 if let oldPage = self.currentHoveredLink?.page {
-                    self.setNeedsDisplay(for: oldPage)
+                    self.setNeedsDisplay(self.bounds)
                 }
                 
                 self.currentHoveredLink = linkAnnot
                 self._threadSafeHoveredLinkBounds = linkAnnot.bounds
                 self._threadSafeHoveredLinkPage = linkAnnot.page
-                if let newPage = linkAnnot.page {
-                    self.setNeedsDisplay(for: newPage)
-                }
+                self.setNeedsDisplay(self.bounds)
                 
                 self.hoverTimer?.invalidate()
                 
                 // Start a timer
-                nonisolated(unsafe) let safeLinkAnnot = linkAnnot
                 self.hoverTimer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: false) { [weak self] _ in
                     Task { @MainActor in
-                        guard let self = self, self.currentHoveredLink == safeLinkAnnot else { return }
-                        self.showLinkPreviewPopover(for: safeLinkAnnot, at: viewPoint, in: self)
+                        guard let self = self, self.currentHoveredLink == linkAnnot else { return }
+                        self.showLinkPreviewPopover(for: linkAnnot, at: viewPoint, in: self)
                     }
                 }
             }
@@ -301,9 +298,7 @@ extension CustomPDFView {
         if self.hoverHideTimer == nil {
             self.hoverHideTimer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: false) { [weak self] _ in
                 Task { @MainActor in
-                    if let oldPage = self?.currentHoveredLink?.page {
-                        self?.setNeedsDisplay(for: oldPage)
-                    }
+                    self?.setNeedsDisplay(self?.bounds ?? .zero)
                     self?.currentHoveredLink = nil
                     self?._threadSafeHoveredLinkBounds = nil
                     self?._threadSafeHoveredLinkPage = nil
