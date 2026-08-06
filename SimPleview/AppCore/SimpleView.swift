@@ -185,6 +185,7 @@ struct SimpleViewApp: App {
     }
 }
 
+@MainActor
 class UpdateManager: ObservableObject {
     static let shared = UpdateManager()
     
@@ -216,11 +217,13 @@ class UpdateManager: ObservableObject {
         let timeInterval = midnight.timeIntervalSince(now)
         
         midnightTimer = Timer.scheduledTimer(withTimeInterval: timeInterval, repeats: false) { [weak self] _ in
-            guard let self = self else { return }
-            if self.autoCheckUpdates {
-                self.checkForUpdates(manual: false)
+            Task { @MainActor in
+                guard let self = self else { return }
+                if self.autoCheckUpdates {
+                    self.checkForUpdates(manual: false)
+                }
+                self.scheduleMidnightCheck()
             }
-            self.scheduleMidnightCheck()
         }
     }
     
