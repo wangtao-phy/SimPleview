@@ -248,13 +248,22 @@ struct L {
             "Group": [.zh: "分组", .en: "Group"],
             "Check for Updates...": [.zh: "检查更新...", .en: "Check for Updates..."],
             "Automatically check for updates": [.zh: "自动检查更新", .en: "Automatically check for updates"],
+            "Default Application": [.zh: "默认应用", .en: "Default Application"],
+            "Set as Default Viewer": [.zh: "设为默认查看器", .en: "Set as Default Viewer"],
+            "Set as Default PDF Viewer": [.zh: "设为默认 PDF 阅读器", .en: "Set as Default PDF Viewer"],
+            "Set as Default Image Viewer": [.zh: "设为默认图片查看器", .en: "Set as Default Image Viewer"],
+            "All Supported Formats": [.zh: "所有支持的格式", .en: "All Supported Formats"],
+            "All Supported Images": [.zh: "所有支持的图片", .en: "All Supported Images"],
             "Up to date": [.zh: "当前已是最新版本", .en: "Up to date"],
             "You are using the latest version of SimPleview.": [.zh: "您正在使用最新版本的 SimPleview。", .en: "You are using the latest version of SimPleview."],
             "Update Available": [.zh: "发现新版本", .en: "Update Available"],
             "A new version is available!": [.zh: "发现新版本，是否前往下载？", .en: "A new version is available! Do you want to download it?"],
             "Network error while checking for updates.": [.zh: "检查更新时网络连接失败，请稍后重试。", .en: "Network error while checking for updates."],
             "Download": [.zh: "去下载", .en: "Download"],
-            "OK": [.zh: "确定", .en: "OK"]
+            "OK": [.zh: "确定", .en: "OK"],
+            "15 Minutes": [.zh: "15 分钟", .en: "15 Minutes"],
+            "30 Minutes": [.zh: "30 分钟", .en: "30 Minutes"],
+            "60 Minutes": [.zh: "60 分钟", .en: "60 Minutes"]
     ]
     static func s(_ key: String, _ lang: AppLanguage) -> String {
         return dict[key]?[lang] ?? key

@@ -16,6 +16,8 @@ struct GeneralSettingsView: View {
     @AppStorage("customBrowserPath") var customBrowserPath: String = ""
     @AppStorage("enableReadingRecord") var enableReadingRecord: Bool = false
     
+    @State private var selectedImageFormat: String = "All"
+    
     // 我们把多语言翻译函数作为外包传入，让这个视图不用关心它是怎么被翻译的，只管显示就行
     let LS: (String) -> String
     
@@ -59,21 +61,16 @@ struct GeneralSettingsView: View {
                 .padding(.vertical, 4)
                 
                 // [设置项 2：休眠断电超时设定]
-                LabeledContent {
-                    HStack(spacing: 8) {
-                        TextField("", text: $hibernationTimeoutStr)
-                            .textFieldStyle(.roundedBorder)
-                            #if os(macOS)
-                            .focusEffectDisabled()
-                            #endif
-                            .multilineTextAlignment(.center)
-                            .frame(width: 60)
-                        Text(LS("Minutes"))
-                    }
+                Picker(selection: $hibernationTimeoutStr) {
+                    Text(LS("15 Minutes")).tag("15")
+                    Text(LS("30 Minutes")).tag("30")
+                    Text(LS("60 Minutes")).tag("60")
+                    Text(LS("Never")).tag("0")
                 } label: {
                     Text(LS("Hibernation Timeout") + ":")
                         .fixedSize(horizontal: true, vertical: false)
                 }
+                .pickerStyle(.menu)
                 .padding(.vertical, 4)
             }
             
@@ -128,11 +125,42 @@ struct GeneralSettingsView: View {
                 }
                 .padding(.vertical, 4)
             }
+            
+            #if os(macOS)
+            Section {
+                HStack(spacing: 8) {
+                    Picker("", selection: $selectedImageFormat) {
+                        Text(LS("All Supported Formats")).tag("All")
+                        Text("PDF").tag("PDF")
+                        Text("PNG").tag("PNG")
+                        Text("JPEG").tag("JPEG")
+                        Text("TIFF").tag("TIFF")
+                    }
+                    .frame(width: 160)
+                    .labelsHidden()
+                    
+                    Button(LS("Set as Default Viewer")) {
+                        var types: [UTType] = []
+                        switch selectedImageFormat {
+                        case "All": types = [.pdf, .png, .jpeg, .tiff]
+                        case "PDF": types = [.pdf]
+                        case "PNG": types = [.png]
+                        case "JPEG": types = [.jpeg]
+                        case "TIFF": types = [.tiff]
+                        default: types = [.pdf, .png, .jpeg, .tiff]
+                        }
+                        setDefaultApplication(for: types)
+                    }
+                    Spacer()
+                }
+                .padding(.vertical, 4)
+            }
+            #endif
         }
         #if os(macOS)
         .formStyle(.grouped) // 使用 macOS 系统原生的分组表单样式
         #endif
-        .frame(width: 420, height: 420) // 固定原生宽度和高度，缩小宽度让它看起来更精致
+        .frame(width: 420, height: 480) // 固定原生宽度和高度，缩小宽度让它看起来更精致
         .background(
             // [黑科技修复] 彻底解决带有 TextField 的 Form 启动时白屏闪烁的系统级 Bug：
             // 添加 .textFieldStyle(.plain) 和 .focusEffectDisabled() 确保焦点被吸收的同时绝对不绘制任何背景白框
@@ -145,4 +173,38 @@ struct GeneralSettingsView: View {
                 #endif
         )
     }
+    
+    #if os(macOS)
+    private func setDefaultApplication(for contentTypes: [UTType]) {
+        let myURL = Bundle.main.bundleURL
+        
+        Task { @MainActor in
+            var errorMessages = [String]()
+            
+            for type in contentTypes {
+                let error: Error? = await withCheckedContinuation { continuation in
+                    NSWorkspace.shared.setDefaultApplication(at: myURL, toOpen: type) { error in
+                        continuation.resume(returning: error)
+                    }
+                }
+                
+                if let error = error {
+                    errorMessages.append("\(type.identifier): \(error.localizedDescription)")
+                }
+            }
+            
+            let alert = NSAlert()
+            if errorMessages.isEmpty {
+                alert.messageText = "设置成功"
+                alert.informativeText = "已成功将 SimPleview 设为相关文件类型的默认应用。"
+                alert.alertStyle = .informational
+            } else {
+                alert.messageText = "部分设置失败"
+                alert.informativeText = errorMessages.joined(separator: "\n")
+                alert.alertStyle = .warning
+            }
+            alert.runModal()
+        }
+    }
+    #endif
 }
