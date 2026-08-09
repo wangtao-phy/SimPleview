@@ -1,4 +1,5 @@
 import SwiftUI
+import os
 @preconcurrency import PDFKit
 #if os(macOS)
 import AppKit
@@ -168,7 +169,7 @@ struct SelectableImageView: NSViewRepresentable {
                         let analysis = try await analyzer.analyze(cgImage, orientation: .up, configuration: configuration)
                         overlay.analysis = analysis
                     } catch {
-                        print("VisionKit analysis failed: \(error)")
+                        Logger.view.error("VisionKit analysis failed: \(error)")
                     }
                 }
             }

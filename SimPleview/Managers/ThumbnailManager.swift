@@ -1,4 +1,5 @@
 import SwiftUI
+import os
 @preconcurrency import PDFKit
 import Combine
 
@@ -21,7 +22,7 @@ final class ThumbnailManager: ObservableObject {
     
     // 防止对同一页重复发起渲染请求，同时保护 strongCache 不被多线程同时写入
     private var generatingIndices = Set<Int>()
-    private let lock = NSLock() // 恢复最轻量的常规锁，不再需要递归锁
+    private let lock = OSAllocatedUnfairLock() // 采用性能最高的 OSAllocatedUnfairLock
     
     // [并发调度器]
     // 专门的渲染队列，使用 OperationQueue 支持取消。

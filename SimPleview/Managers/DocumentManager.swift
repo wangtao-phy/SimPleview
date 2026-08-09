@@ -81,7 +81,7 @@ final class DocumentManager: ObservableObject {
     // MARK: - Safe Background Saving (安全后台保存机制)
     
     // [核心引擎：多线程调度]
-    /// 专门用于在后台执行保存的串行队列，避免在写入大文件 (比如百兆 PDF) 时导致主线程卡顿 (彩虹圈)
+    // (已移除 saveQueue，因为 PDFKit 的 write(to:) 如果不在 MainActor 执行，极易在与 PDFView 渲染并发时引发崩溃)
 
     /// 将对 PDF 的修改保存到磁盘
     /// - Parameters:
@@ -165,14 +165,19 @@ final class DocumentManager: ObservableObject {
 
         saveWorkItem = workItem
 
-        // 因为增量保存极快，我们统一调度在主线程执行，避免非 Sendable 警告和多线程崩溃
+        // [主线程防抖序列化]：
+        // 绝对不能将 `document.write` 移到后台线程！
+        // 经过验证，因为 PDFKit 内部线程安全机制的缺陷，在后台执行 write(to:) 会与主线程渲染产生严重竞态，
+        // 导致应用在删除批注后保存时直接崩溃，或引发 White Page Bug！
+        // 只能强制在 MainActor 执行，通过 500ms 的精细防抖来减轻卡顿。
         if sync {
             // 退出流程要求 write 已经完成；不能仅仅排到下一轮主事件循环。
             workItem.perform()
         } else if immediate {
             DispatchQueue.main.async(execute: workItem)
         } else {
-            DispatchQueue.main.asyncAfter(deadline: .now() + 2.0, execute: workItem)
+            // 500ms 精细防抖，尽可能聚拢高频变动，只在最后停顿后执行一次主程序列化
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5, execute: workItem)
         }
     }
     
@@ -196,7 +201,7 @@ final class DocumentManager: ObservableObject {
             
             // iOS 端同样强制使用增量保存保护 LaTeX 字体，直接在主线程毫秒级完成
             if ImageDocumentManager.isImageFile(url: url) {
-                // TODO: iOS 端暂不支持图片另存为面板，暂时忽略自动保存以保护原图
+                // NOTE: iOS 端暂不支持图片另存为面板，暂时忽略自动保存以保护原图
                 return
             }
             let success = document.write(to: url)

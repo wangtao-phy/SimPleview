@@ -25,8 +25,8 @@ extension AppState {
         navigationManager.goToPage(clampedIndex, pdfView: pdfView, recordHistory: recordHistory)
         
         // 只有页码真正改变时，才去触发 SwiftUI 的重绘
-        if self.currentPageIndex != clampedIndex {
-            self.currentPageIndex = clampedIndex
+        if self.liveState.currentPageIndex != clampedIndex {
+            self.liveState.currentPageIndex = clampedIndex
         }
         
         // 跳转结束，稍微延迟一点放开锁，防止 PDFKit 残留的回调事件
@@ -38,16 +38,16 @@ extension AppState {
     // 处理左侧缩略图被点击时的复杂逻辑（比如按住 Shift 连选）
     func handleThumbnailClick(index: Int, isCommandPressed: Bool, isShiftPressed: Bool) {
         navigationManager.handleThumbnailClick(index: index, pdfView: pdfView, isCommandPressed: isCommandPressed, isShiftPressed: isShiftPressed)
-        self.currentPageIndex = navigationManager.currentPageIndex
+        self.liveState.currentPageIndex = navigationManager.currentPageIndex
     }
     
     func goBack() {
         navigationManager.goBack(pdfView: pdfView)
-        self.currentPageIndex = navigationManager.currentPageIndex
+        self.liveState.currentPageIndex = navigationManager.currentPageIndex
     }
     
     func recordHistoryAction() {
-        navigationManager.recordHistoryAction(currentPageIndex: currentPageIndex)
+        navigationManager.recordHistoryAction(currentPageIndex: liveState.currentPageIndex)
     }
     
     // [交互逻辑：选中批注后的跟随跳转]
@@ -79,18 +79,18 @@ extension AppState {
         let visibleRectOnPage = pdfView.convert(pdfView.bounds, to: page)
         if visibleRectOnPage.intersects(annotation.bounds) {
             // 已经在视野里了，只需安静地更新页码，锁死页面不发生任何物理滚动
-            self.currentPageIndex = index
+            self.liveState.currentPageIndex = index
             return
         }
         
         // 如果批注在视野外（比如从侧边栏点击了其他页的批注），我们才执行滚动跳转
         // 上锁：标记当前正在“因为程序逻辑而导航中”，屏蔽掉用户的滑动干扰
         isNavigating = true
-        if self.currentPageIndex != index { 
+        if self.liveState.currentPageIndex != index { 
             self.recordHistoryAction() 
             // 【极其关键】必须显式更新页码状态，否则 LeftSidebarView 里的 onChange(of: currentPageIndex) 监听不到，
             // 左侧缩略图也就不会跟着往下滚了！
-            self.currentPageIndex = index 
+            self.liveState.currentPageIndex = index 
         }
         
         // 底层 PDFKit 指令：跳到那一页，然后精准定位到那个批注所在的坐标框！

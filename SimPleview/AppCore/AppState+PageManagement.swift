@@ -45,8 +45,8 @@ extension AppState {
         
         // 7. 更新选区和视图状态，并清除所有缩略图缓存
         self.selectedIndices = Set(insertAt..<(insertAt + pagesToMove.count))
-        self.currentPageIndex = insertAt
-        self.totalPageCount = doc.pageCount
+        self.liveState.currentPageIndex = insertAt
+        self.liveState.totalPageCount = doc.pageCount
         thumbnailManager.clearCache()
         self.documentVersion = UUID()
         
@@ -75,11 +75,11 @@ extension AppState {
         // 压入撤销栈
         batchStack.append(.insertPages(count: 1, startIndex: insertAt))
         redoStack.removeAll()
-        totalPageCount = doc.pageCount
+        liveState.totalPageCount = doc.pageCount
         thumbnailManager.clearCache()
         
         // 自动跳转并选中新页面
-        self.currentPageIndex = insertAt
+        self.liveState.currentPageIndex = insertAt
         self.selectedIndices = [insertAt]
         
         pdfView.setPlatformNeedsDisplay()
@@ -111,9 +111,9 @@ extension AppState {
             }
         }
         selectedIndices.removeAll()
-        totalPageCount = doc.pageCount
+        liveState.totalPageCount = doc.pageCount
         thumbnailManager.clearCache()
-        if currentPageIndex >= totalPageCount { currentPageIndex = totalPageCount - 1 }
+        if liveState.currentPageIndex >= liveState.totalPageCount { liveState.currentPageIndex = liveState.totalPageCount - 1 }
         pdfView.setPlatformNeedsDisplay()
         isDirty = true
     }
@@ -128,16 +128,16 @@ extension AppState {
         }
         batchStack.append(.insertPages(count: insertDoc.pageCount, startIndex: insertAt))
         redoStack.removeAll()
-        totalPageCount = doc.pageCount
+        liveState.totalPageCount = doc.pageCount
         thumbnailManager.clearCache()
-        if currentPageIndex >= insertAt { currentPageIndex += insertDoc.pageCount }
+        if liveState.currentPageIndex >= insertAt { liveState.currentPageIndex += insertDoc.pageCount }
         pdfView.setPlatformNeedsDisplay()
         isDirty = true
     }
     
     /// [功能点：原生的逆时针旋转当前页 90 度]
     func rotateCurrentPageLeft() {
-        guard let doc = pdfView.document, let page = doc.page(at: currentPageIndex) else { return }
+        guard let doc = pdfView.document, let page = doc.page(at: liveState.currentPageIndex) else { return }
         
         // PDFKit 角度要求为 0, 90, 180, 270 (不能是负数)
         let newRotation = (page.rotation - 90) % 360
@@ -145,8 +145,8 @@ extension AppState {
         
         // [Bug修复核心] 旋转后，页面的物理宽高比例发生了反转（比如横版变竖版）。
         // 如果不同步更新内存中的 pageAspectRatios，左侧边栏的骨架屏占位框高度就会错乱。
-        if pageAspectRatios.indices.contains(currentPageIndex) {
-            pageAspectRatios[currentPageIndex] = 1.0 / pageAspectRatios[currentPageIndex]
+        if pageAspectRatios.indices.contains(liveState.currentPageIndex) {
+            pageAspectRatios[liveState.currentPageIndex] = 1.0 / pageAspectRatios[liveState.currentPageIndex]
         }
         
         // 使用异步主线程调用，既满足 @MainActor 限制，又能确保修改立刻反映到 UI 上。
@@ -156,7 +156,7 @@ extension AppState {
             // [性能优化] 抛弃了以前那种“删除缓存 -> 排队等后台线程用 dataRepresentation 重新画”的低效做法。
             // 这种旧做法由于存在竞态条件，极大概率导致缩略图不更新。
             // 现在的 updateLiveThumbnail 直接在主线程抓取页面最新快照并瞬间强制覆盖缓存，速度快且 100% 准确！
-            self.thumbnailManager.updateLiveThumbnail(for: page, at: self.currentPageIndex)
+            self.thumbnailManager.updateLiveThumbnail(for: page, at: self.liveState.currentPageIndex)
             
             self.pdfView.layoutDocumentView()
             self.pdfView.setPlatformNeedsDisplay()

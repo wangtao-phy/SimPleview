@@ -1,6 +1,7 @@
 import SwiftUI
 import PDFKit
 import UniformTypeIdentifiers
+import os
 
 #if os(macOS)
 import AppKit
@@ -88,7 +89,7 @@ extension DocumentManager {
                 }
                 #endif
             } catch {
-                print("Failed to save burned PDF: \(error)")
+                Logger.view.error("Failed to save burned PDF: \(error)")
             }
         }
     }

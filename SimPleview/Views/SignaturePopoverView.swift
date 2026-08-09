@@ -107,7 +107,7 @@ struct SignaturePopoverView: View {
                 return d1 > d2
             }
         } catch {
-            print("\(error.localizedDescription)")
+            Logger.view.error("\(error.localizedDescription)")
         }
     }
     
@@ -131,7 +131,7 @@ struct SignaturePopoverView: View {
                     // 导入成功，刷新列表
                     loadSignatures()
                 } catch {
-                    print("\(error.localizedDescription)")
+                    Logger.view.error("\(error.localizedDescription)")
                 }
             }
         }
@@ -146,7 +146,7 @@ struct SignaturePopoverView: View {
                 signatureURLs.removeAll { $0 == url }
             }
         } catch {
-            print("\(error.localizedDescription)")
+            Logger.view.error("\(error.localizedDescription)")
         }
     }
 }

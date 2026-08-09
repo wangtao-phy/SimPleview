@@ -70,7 +70,7 @@ struct ThumbnailListView: View {
                 // 绝对不能用普通的 VStack！如果文档有 3000 页，VStack 会一口气把 3000 页的 UI 全部构建出来，瞬间卡死。
                 // LazyVStack 就像一条流水线，只渲染当前屏幕上能看到的那几个，滚下去再临时构建。
                 LazyVStack(spacing: 0) {
-                    ForEach(0..<state.totalPageCount, id: \.self) { index in
+                    ForEach(0..<state.liveState.totalPageCount, id: \.self) { index in
                         VStack(spacing: 0) {
                             // 拖拽插入时显示的那条蓝色的横线（在图片上方）
                             DropInsertLine(index: index, state: state)
@@ -95,7 +95,7 @@ struct ThumbnailListView: View {
                     }
                     
                     // 最后一页底部也要加一条插入线，允许把页面拖到整个文档最后面
-                    DropInsertLine(index: state.totalPageCount, state: state)
+                    DropInsertLine(index: state.liveState.totalPageCount, state: state)
                 }
                 .id(state.documentVersion) // [黑魔法] 强行绑定 UUID。当页面发生大规模新增或删除时，改变 UUID 让整个列表彻底重建
                 .padding(.bottom, 10)
@@ -112,14 +112,14 @@ struct ThumbnailListView: View {
                 let isShift = keyPress.modifiers.contains(.shift)
                 
                 if keyPress.key == .upArrow {
-                    let newIndex = state.currentPageIndex - 1
+                    let newIndex = state.liveState.currentPageIndex - 1
                     guard newIndex >= 0 else { return .handled }
                     
                     if isShift {
                         if state.shiftSelectionAnchor == nil {
-                            state.shiftSelectionAnchor = state.currentPageIndex
+                            state.shiftSelectionAnchor = state.liveState.currentPageIndex
                         }
-                        state.currentPageIndex = newIndex
+                        state.liveState.currentPageIndex = newIndex
                         let anchor = state.shiftSelectionAnchor!
                         let range = min(anchor, newIndex)...max(anchor, newIndex)
                         state.selectedIndices = Set(range)
@@ -128,26 +128,26 @@ struct ThumbnailListView: View {
                         if !MemoryMode.current.policy.delaysNavigationJumps {
                             state.goToPage(newIndex)
                         } else {
-                            state.currentPageIndex = newIndex
+                            state.liveState.currentPageIndex = newIndex
                             state.selectedIndices = [newIndex]
                             state.thumbnailJumpTask?.cancel()
                             state.thumbnailJumpTask = Task { @MainActor in
                                 try? await Task.sleep(nanoseconds: 200_000_000)
                                 guard !Task.isCancelled else { return }
-                                state.goToPage(state.currentPageIndex)
+                                state.goToPage(state.liveState.currentPageIndex)
                             }
                         }
                     }
                     return .handled
                 } else if keyPress.key == .downArrow {
-                    let newIndex = state.currentPageIndex + 1
-                    guard newIndex < state.totalPageCount else { return .handled }
+                    let newIndex = state.liveState.currentPageIndex + 1
+                    guard newIndex < state.liveState.totalPageCount else { return .handled }
                     
                     if isShift {
                         if state.shiftSelectionAnchor == nil {
-                            state.shiftSelectionAnchor = state.currentPageIndex
+                            state.shiftSelectionAnchor = state.liveState.currentPageIndex
                         }
-                        state.currentPageIndex = newIndex
+                        state.liveState.currentPageIndex = newIndex
                         let anchor = state.shiftSelectionAnchor!
                         let range = min(anchor, newIndex)...max(anchor, newIndex)
                         state.selectedIndices = Set(range)
@@ -156,26 +156,26 @@ struct ThumbnailListView: View {
                         if !MemoryMode.current.policy.delaysNavigationJumps {
                             state.goToPage(newIndex)
                         } else {
-                            state.currentPageIndex = newIndex
+                            state.liveState.currentPageIndex = newIndex
                             state.selectedIndices = [newIndex]
                             state.thumbnailJumpTask?.cancel()
                             state.thumbnailJumpTask = Task { @MainActor in
                                 try? await Task.sleep(nanoseconds: 200_000_000)
                                 guard !Task.isCancelled else { return }
-                                state.goToPage(state.currentPageIndex)
+                                state.goToPage(state.liveState.currentPageIndex)
                             }
                         }
                     }
                     return .handled
                 } else if keyPress.key == .delete || keyPress.key == KeyEquivalent("\u{7F}") {
-                    state.deletePage(at: state.currentPageIndex)
+                    state.deletePage(at: state.liveState.currentPageIndex)
                     return .handled
                 }
                 
                 return .ignored
             }
             #endif
-            .onChange(of: state.currentPageIndex) { _, newIndex in
+            .onChange(of: state.liveState.currentPageIndex) { _, newIndex in
                 let anim: Animation = !MemoryMode.current.policy.delaysNavigationJumps
                     ? .easeOut(duration: 0.2)
                     : .spring(response: 0.15, dampingFraction: 0.9)
@@ -187,7 +187,7 @@ struct ThumbnailListView: View {
                 // 当用户从“大纲”选项卡切回“缩略图”选项卡时，由于此时的 ScrollView 是全新的，
                 // 我们必须在它刚出现的一瞬间，把它拉回当前所处的阅读页码位置，否则它会傻傻地待在最顶部。
                 // 这里的 anchor: .center 是安全的，因为视图还没渲染出来，没有视觉跳动！
-                proxy.scrollTo(state.currentPageIndex, anchor: .center)
+                proxy.scrollTo(state.liveState.currentPageIndex, anchor: .center)
             }
         }
     }
@@ -215,11 +215,11 @@ struct DropInsertLine: View {
         }
         // 注册拖放目标点，允许纯文本或 PDF 文件掉落到上面
         .onDrop(of: [.plainText, .pdf], isTargeted: $isOver) { _ in
-            if let sourceIndices = state.draggedIndices {
+            if let sourceIndices = state.liveState.draggedIndices {
                 DispatchQueue.main.async {
                     // 当松开鼠标时，触发真实的重排逻辑
                     state.movePages(from: sourceIndices, to: index)
-                    state.draggedIndices = nil // 拖拽结束
+                    state.liveState.draggedIndices = nil // 拖拽结束
                 }
                 return true
             }
@@ -319,7 +319,7 @@ struct ThumbnailItem: View, Equatable {
         .onDrag {
             // 先确定这一拖拉起了哪些页面
             let targetIndices = state.selectedIndices.contains(index) ? state.selectedIndices : [index]
-            state.draggedIndices = targetIndices
+            state.liveState.draggedIndices = targetIndices
             
             #if os(macOS)
             let indicesStr = targetIndices.sorted().map { String($0) }.joined(separator: ",")

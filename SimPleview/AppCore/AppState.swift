@@ -31,8 +31,10 @@ final class AppState: NSObject, ObservableObject, PDFViewDelegate {
     // 整个 App 最核心的组件就是这个 PDFView，它是苹果官方提供的重量级 PDF 渲染引擎。
     @Published var pdfView = CustomPDFView()
     @Published var documentVersion = UUID()
-    @Published var dropTargetIndex: Int? = nil
-    @Published var draggedIndices: Set<Int>? = nil
+    
+    // [Phase 1: 高频状态剥离]
+    // 曾经的 @Published var dropTargetIndex 等已移入 liveState，实现精准属性级刷新
+    let liveState = AppLiveState()
     
     // MARK: - Sub-Managers
     
@@ -146,9 +148,7 @@ final class AppState: NSObject, ObservableObject, PDFViewDelegate {
         set { documentManager.isDirty = newValue }
     }
     
-    @Published var currentPageIndex: Int = 0
-    @Published var totalPageCount: Int = 0
-    @Published var selectedOutline: PDFOutline?
+    // (这些属性已移入 liveState 中进行细粒度观测)
     
     var navigationHistory: [Int] {
         get { navigationManager.navigationHistory }

@@ -97,8 +97,8 @@ extension AppState {
                 DispatchQueue.main.async {
                     // 【稳健性优化】如果正在程序跳转导航中，不要接收系统的页码事件，防止动画回跳导致状态冲突！
                     guard let self = self, !self.isNavigating else { return }
-                    if self.currentPageIndex != index {
-                        self.currentPageIndex = index
+                    if self.liveState.currentPageIndex != index {
+                        self.liveState.currentPageIndex = index
                         
                         // 开始记录这新的一页花了多少时间阅读
                         if let doc = self.pdfView.document, let url = doc.documentURL {
@@ -161,7 +161,7 @@ extension AppState {
             .sink { [weak self] _ in self?.performSearch() }
             .store(in: &cancellables)
 
-        $currentPageIndex
+        liveState.pageIndexSubject
             .dropFirst()
             .debounce(for: .milliseconds(400), scheduler: RunLoop.main) 
             .sink { [weak self] index in

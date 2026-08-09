@@ -1,5 +1,6 @@
 import Foundation
 import Combine
+import os
 
 /// [教程注释：全局作者数据结构]
 /// 这个结构体是用来抽象和存储“跨越多篇 PDF”的全局作者实体。
@@ -147,7 +148,7 @@ class GlobalAuthorManager: ObservableObject {
             // 校验并在后台统计
             self.recalculateArticleCounts()
         } catch {
-            print("Failed to load GlobalAuthors.json: \(error)")
+            Logger.view.error("Failed to load GlobalAuthors.json: \(error)")
         }
     }
     

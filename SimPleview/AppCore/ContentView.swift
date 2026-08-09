@@ -157,6 +157,7 @@ struct ContentView: View {
                 }
             }
         }
+        .environment(state.liveState)
         // [核心概念：环境聚焦值传递]
         // 让整个应用里所有的“专注事件” (如菜单栏快捷键) 都能顺利找到我！
         .focusedSceneValue(\.appState, state)
@@ -362,14 +363,14 @@ struct ContentView: View {
                         // 数组索引是从0开始的，所以减一。并将其计入历史，以供可以返回
                         state.goToPage(val - 1, recordHistory: true)
                     }
-                    inputPageText = String(state.currentPageIndex + 1)
+                    inputPageText = String(state.liveState.currentPageIndex + 1)
                 }
                 // 当别人翻页时，文本框里的数字跟着变
-                .onChange(of: state.currentPageIndex) { _, newIndex in
+                .onChange(of: state.liveState.currentPageIndex) { _, newIndex in
                     inputPageText = String(newIndex + 1)
                 }
                 .onAppear {
-                    inputPageText = String(state.currentPageIndex + 1)
+                    inputPageText = String(state.liveState.currentPageIndex + 1)
                 }
                 .multilineTextAlignment(.center)
                 .frame(width: 32)
@@ -383,7 +384,7 @@ struct ContentView: View {
                 .cornerRadius(6)
                 #endif
             
-            Text("/\(state.totalPageCount)")
+            Text("/\(state.liveState.totalPageCount)")
                 .font(.system(size: PlatformUtils.isiOS ? 13 : 11))
                 .foregroundColor(.secondary)
                 .fixedSize()

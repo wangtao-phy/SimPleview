@@ -7,7 +7,7 @@ import os
 
 /// 统一的日志输出器，替代散落的 print()
 extension Logger {
-    static let view = Logger(subsystem: "com.tau.SimPleview", category: "View")
+    nonisolated static let view = Logger(subsystem: "com.tau.SimPleview", category: "View")
 }
 
 /// [教程注释：文件职责]

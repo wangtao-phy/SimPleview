@@ -1,6 +1,7 @@
 import Foundation
 import PDFKit
 import UniformTypeIdentifiers
+import os
 
 #if os(macOS)
 import AppKit
@@ -198,7 +199,7 @@ final class ImageDocumentManager {
             try finalData.write(to: url, options: .atomic)
             return true
         } catch {
-            print("Failed to write image data to \(url.path): \(error)")
+            Logger.view.error("Failed to write image data to \(url.path): \(error)")
             return false
         }
         #else
@@ -245,7 +246,7 @@ final class ImageDocumentManager {
             try finalData.write(to: url, options: .atomic)
             return true
         } catch {
-            print("Failed to write image data to \(url.path): \(error)")
+            Logger.view.error("Failed to write image data to \(url.path): \(error)")
             return false
         }
         #endif

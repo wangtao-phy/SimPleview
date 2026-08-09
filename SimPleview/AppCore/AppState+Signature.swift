@@ -161,7 +161,7 @@ extension AppState {
                 return (obs.normalizedPath, color)
             }
         } catch {
-            print("Vision failed: \(error)")
+            Logger.view.error("Vision failed: \(error)")
         }
         
         return nil

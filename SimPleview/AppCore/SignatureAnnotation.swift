@@ -64,11 +64,15 @@ class VectorSignatureAnnotation: PDFAnnotation {
     }
     
     nonisolated override init(bounds: CGRect, forType annotationType: PDFAnnotationSubtype, withProperties properties: [AnyHashable : Any]?) {
-        fatalError("init(bounds:forType:withProperties:) has not been implemented")
+        self.vectorPath = CGMutablePath()
+        self.themeColor = .black
+        super.init(bounds: bounds, forType: annotationType, withProperties: properties)
     }
     
     nonisolated required init?(coder: NSCoder) {
-        fatalError("init(coder:) has not been implemented")
+        self.vectorPath = CGMutablePath()
+        self.themeColor = .black
+        super.init(coder: coder)
     }
     
     nonisolated override func draw(with box: PDFDisplayBox, in context: CGContext) {

@@ -59,7 +59,7 @@ struct OutlineView: View {
                     ForEach(items) { item in
                         OutlineNodeRow(
                             item: item,
-                            selectedOutline: state.selectedOutline,
+                            selectedOutline: state.liveState.selectedOutline,
                             isCollapsed: collapsedNodes.contains(item.id),
                             onToggleCollapse: {
                                 withAnimation(.easeInOut(duration: 0.2)) {
@@ -71,12 +71,12 @@ struct OutlineView: View {
                                 }
                             },
                             onSelect: {
-                                state.selectedOutline = item.outline
+                                state.liveState.selectedOutline = item.outline
                                 if let dest = item.outline.destination {
                                     state.pdfView.go(to: dest)
                                     // [P0修复] 安全解包 dest.page，防止损坏的 PDF 目录导致崩溃
                                     if let page = dest.page {
-                                        state.goToPage(state.pdfView.document?.index(for: page) ?? state.currentPageIndex)
+                                        state.goToPage(state.pdfView.document?.index(for: page) ?? state.liveState.currentPageIndex)
                                     }
                                 }
                             }

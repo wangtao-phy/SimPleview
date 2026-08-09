@@ -151,11 +151,11 @@ extension AppState {
         self.pdfView.displayBox = .cropBox
         
         self.isDirty = false
-        self.totalPageCount = doc.pageCount
+        self.liveState.totalPageCount = doc.pageCount
         
         let title = url.deletingPathExtension().lastPathComponent
         // 告诉阅读记录追踪器：“哥们开始看了，开始计时！”
-        self.readingTracker.startTracking(documentID: title, documentTitle: title, pageIndex: self.currentPageIndex)
+        self.readingTracker.startTracking(documentID: title, documentTitle: title, pageIndex: self.liveState.currentPageIndex)
         
         // [黑科技：监听外部文件篡改]
         // 用 DispatchSource 监听硬盘上的文件。如果此时用户用另外的 PDF 软件修改了这个文件并保存，
@@ -166,7 +166,7 @@ extension AppState {
                 guard let self = self else { return }
                 // 对于文件被外部修改（如 Markup popover 点击 Done），我们发起热重载
                 // 并提前记录当前的物理坐标，伪装成一次“休眠唤醒”来避开全量重置
-                let pageIndex = self.currentPageIndex
+                let pageIndex = self.liveState.currentPageIndex
                 let zoom = self.pdfView.scaleFactor
                 let pt = self.pdfView.currentDestination?.point ?? .zero
                 self.hibernatedPosition = (pageIndex: pageIndex, point: pt, zoom: zoom)
@@ -230,7 +230,7 @@ extension AppState {
         
         // [状态替换大法]
         // 切换标签页时，把新文件的历史、批注堆栈全部“覆盖”到当前的视图环境里。
-        self.currentPageIndex = model.currentPageIndex
+        self.liveState.currentPageIndex = model.currentPageIndex
         self.navigationManager.navigationHistory = model.navigationHistory
         self.allAnnotations = model.allAnnotations
         self.batchStack = model.batchStack
@@ -329,7 +329,7 @@ extension AppState {
     
     func autoSyncCurrentDocument() {
         guard !documents.isEmpty && activeDocumentIndex < documents.count else { return }
-        documentManager.documents[activeDocumentIndex].currentPageIndex = self.currentPageIndex
+        documentManager.documents[activeDocumentIndex].currentPageIndex = self.liveState.currentPageIndex
         documentManager.documents[activeDocumentIndex].navigationHistory = self.navigationHistory
         documentManager.documents[activeDocumentIndex].allAnnotations = self.allAnnotations
         documentManager.documents[activeDocumentIndex].batchStack = self.batchStack
