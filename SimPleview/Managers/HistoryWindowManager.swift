@@ -2,11 +2,14 @@ import SwiftUI
 #if os(macOS)
 import AppKit
 
+/// [教程注释：历史记录窗口大内总管]
+/// 这个类用于独立管理历史记录窗口的生命周期。为了避免 SwiftUI 场景的自动弹出 bug，我们采用了原生的 NSWindow。
 class HistoryWindowManager {
     static let shared = HistoryWindowManager()
     private var windowController: NSWindowController?
     
     func open() {
+        // 如果窗口已经打开了，那么就让它激活并置于前台
         if let wc = windowController, let window = wc.window, window.isVisible {
             window.makeKeyAndOrderFront(nil)
             return
@@ -29,7 +32,9 @@ class HistoryWindowManager {
         window.setContentSize(NSSize(width: 800, height: 600))
         window.center()
         
+        // 将生命周期交还给 Manager 避免崩溃
         window.isReleasedWhenClosed = false
+        // 彻底禁用 macOS 烦人的窗口位置记忆
         window.isRestorable = false
         
         let wc = NSWindowController(window: window)
