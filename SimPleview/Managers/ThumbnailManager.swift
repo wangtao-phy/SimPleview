@@ -38,7 +38,7 @@ final class ThumbnailManager: ObservableObject {
     private var operations = [Int: (id: UUID, operation: Operation)]()
     
     // 用来通知 UI 某张图画好了的信号发射器
-    let thumbnailUpdateSubject = PassthroughSubject<Int, Never>()
+    let thumbnailUpdateSubject = PassthroughSubject<(Int, PlatformImage), Never>()
     
     // 用来通知所有存活（可见）的缩略图重新发起渲染请求（热重载唤醒机制）
     let hotReloadSubject = PassthroughSubject<Void, Never>()
@@ -145,7 +145,7 @@ final class ThumbnailManager: ObservableObject {
         }
         lock.unlock()
         
-        thumbnailUpdateSubject.send(index)
+        thumbnailUpdateSubject.send((index, thumb))
     }
 
     // [紧急制动]
@@ -272,7 +272,7 @@ final class ThumbnailManager: ObservableObject {
                     }
                     self.lock.unlock()
                     
-                    self.thumbnailUpdateSubject.send(index)
+                    self.thumbnailUpdateSubject.send((index, thumb))
                     self.markAsFinished(index, id: operationID)
                 }
             }

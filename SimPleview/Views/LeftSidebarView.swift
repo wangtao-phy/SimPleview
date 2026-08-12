@@ -292,7 +292,11 @@ struct ThumbnailItem: View, Equatable {
         }
         .padding(.horizontal, 10).contentShape(Rectangle())
         // 接收来自画图线程通过 Combine 发回来的“画好了”信号！
-        .onReceive(state.thumbnailUpdateSubject) { if $0 == index { thumbnail = state.getThumbnail(for: index) } }
+        .onReceive(state.thumbnailUpdateSubject) { payload in 
+            if payload.0 == index { 
+                thumbnail = payload.1 
+            } 
+        }
         // 接收热重载的“唤醒”信号！仅当前可见的 ThumbnailItem 会收到此信号，触发自身的精准重绘
         .onReceive(state.thumbnailManager.hotReloadSubject) { _ in
             thumbnail = nil // [强制释放可能被系统回收了底层位图的旧 NSImage]

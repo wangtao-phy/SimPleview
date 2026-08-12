@@ -243,7 +243,7 @@ final class AppState: NSObject, ObservableObject, PDFViewDelegate {
     static var pendingRestoreURLs: [URL] = []
     static var isAppExiting = false
     
-    var thumbnailUpdateSubject: PassthroughSubject<Int, Never> { thumbnailManager.thumbnailUpdateSubject }
+    var thumbnailUpdateSubject: PassthroughSubject<(Int, PlatformImage), Never> { thumbnailManager.thumbnailUpdateSubject }
     
     // [生命周期：对象诞生]
     override init() {
