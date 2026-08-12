@@ -20,6 +20,7 @@ SimPleview 是一款完全通过 AI 辅助编程构建的 macOS PDF 阅读器。
 - **Hover to View Internal Links**: Quickly preview the target content by simply hovering over internal cross-reference links in the PDF, without losing your current reading position.
 - **Eye-Protection Background**: Provides a comfortable background color mode to reduce eye strain during long reading sessions.
 - **Tab Management & Grouping**: Easily manage multiple open PDFs with a dedicated tab group interface, allowing you to organize, rename, and group your reading sessions, with automatic state persistence.
+- **History Management**: Easily browse and manage recently opened PDFs, with support for clearing records and quickly locating files in Finder.
 
 - **后台内存休眠**：自带的“预览”会将所有打开的 PDF 完整驻留在内存中。而 SimPleview 会自动侦测长期在后台静置的窗口，将其进入休眠状态以节省资源。
 - **标注自由切换颜色**：这个 app 的初衷便是解放自带“预览”中定死的下划线颜色，实现真正的自由标色。
@@ -33,6 +34,7 @@ SimPleview 是一款完全通过 AI 辅助编程构建的 macOS PDF 阅读器。
 - **悬浮查看内部链接**：在 PDF 中只需将鼠标悬浮在内部跨页跳转链接上方，即可快速预览目标内容，无需来回点击打断阅读进度。
 - **护眼背景色**：提供舒适的背景色模式，有效缓解长时间阅读带来的视觉疲劳。
 - **标签页管理与分组**：通过专属的标签页悬浮窗轻松管理多个打开的 PDF，支持自由组合、拖拽、重命名分组，并且会自动记住您退出前打开的窗口组。
+- **历史记录管理**：轻松浏览和管理最近打开过的 PDF，支持清理历史记录以及在访达中快速定位文件。
 ---
 
 ## 📥 Installation & Usage / 安装与使用指南
