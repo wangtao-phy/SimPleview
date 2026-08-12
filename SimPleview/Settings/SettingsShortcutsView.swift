@@ -39,8 +39,8 @@ struct ShortcutsSettingsView: View {
                     
                     // 第 2 行
                     GridRow {
-                        labelView(LS("Save"))
-                        recorderView($shortcutManager.save)
+                        labelView(LS("History"))
+                        recorderView($shortcutManager.history)
                         
                         labelView(LS("Open in Browser"))
                         recorderView($shortcutManager.openInBrowser)

@@ -19,7 +19,7 @@ struct SimpleViewApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
     #endif
     
-    // [教程注释：环境变量注入]
+    // [逻辑流程：环境与依赖注入]
     // `@Environment` 是一种从系统环境变量中读取依赖的方式。
     // \.openWindow 是 SwiftUI 提供的一个全局闭包，可以随时调用它来打开新的系统窗口。
     @Environment(\.openWindow) private var openWindow
@@ -101,6 +101,21 @@ struct SimpleViewApp: App {
             
             Button(LS("Compare View")) { NotificationCenter.default.post(name: NSNotification.Name("GlobalCompareView"), object: nil) }
                 .keyboardShortcut(shortcutManager.compareView.keyEquivalent, modifiers: shortcutManager.compareView.modifiers)
+            
+            Button(LS("History")) { 
+                #if os(macOS)
+                HistoryWindowManager.shared.open()
+                #else
+                // Fallback for iOS if needed later
+                #endif
+            }
+                .keyboardShortcut(shortcutManager.history.keyEquivalent, modifiers: shortcutManager.history.modifiers)
+            
+            Button(LS("Global Authors Library")) {
+                #if os(macOS)
+                AuthorsWindowManager.shared.open()
+                #endif
+            }
             
             Button(LS("Slideshow")) { NotificationCenter.default.post(name: NSNotification.Name("GlobalPresentation"), object: nil) }
                 .keyboardShortcut(shortcutManager.slideshow.keyEquivalent, modifiers: shortcutManager.slideshow.modifiers)

@@ -96,18 +96,8 @@ struct RecordSettingsView: View {
                 .formStyle(.grouped)
                 #endif
                 .frame(maxWidth: 500)
+                .padding(.top, 60)
                 
-                // 下半部分：极其复杂的作者大内总管界面
-                VStack(alignment: .leading, spacing: 8) {
-                    Text(LS("Global Authors Library"))
-                        .font(.headline)
-                        .foregroundColor(.secondary)
-                        .padding(.horizontal)
-                    
-                    GlobalAuthorsSettingsView(LS: LS)
-                }
-                .frame(maxWidth: 700)
-                .frame(minHeight: 400)
             }
             .padding(.vertical, 20)
             .frame(maxWidth: .infinity, alignment: .center)

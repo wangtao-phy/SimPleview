@@ -71,6 +71,7 @@ final class ShortcutManager: ObservableObject {
     @Published var none = AppShortcut(key: "u", modifiers: .control)
     @Published var ink = AppShortcut(key: "h", modifiers: .control)
     
+    @Published var history = AppShortcut(key: "y", modifiers: .command)
     @Published var save = AppShortcut(key: "s", modifiers: .command)
     @Published var closeWindow = AppShortcut(key: "w", modifiers: .command)
     @Published var openInBrowser = AppShortcut(key: "g", modifiers: .command)
@@ -107,6 +108,7 @@ final class ShortcutManager: ObservableObject {
             if let v = dict["none"] { none = v }
             if let v = dict["ink"] { ink = v }
             if let v = dict["compareView"] { compareView = v }
+            if let v = dict["history"] { history = v }
             if let v = dict["save"] { save = v }
             if let v = dict["closeWindow"] { closeWindow = v }
             if let v = dict["openInBrowser"] { openInBrowser = v }
@@ -136,6 +138,7 @@ final class ShortcutManager: ObservableObject {
             "none": none,
             "ink": ink,
             "compareView": compareView,
+            "history": history,
             "save": save,
             "closeWindow": closeWindow,
             "openInBrowser": openInBrowser,

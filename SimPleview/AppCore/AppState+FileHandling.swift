@@ -129,6 +129,10 @@ extension AppState {
         self.fileURL = url
         self.pdfView.document = doc
         
+        if !isHotReloading {
+            HistoryManager.shared.recordOpen(url: url)
+        }
+        
         // autoScales = true 让 PDF 自动贴合窗口大小
         self.pdfView.autoScales = true
         // singlePageContinuous 是经典的竖向连续滚动模式
