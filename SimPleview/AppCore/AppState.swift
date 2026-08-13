@@ -334,6 +334,16 @@ final class AppState: NSObject, ObservableObject, PDFViewDelegate {
         // 在窗口关闭的这一刻，彻底斩断它所有的内部事件流监听，杜绝僵尸对象响应事件！
         cancellables.forEach { $0.cancel() }
         cancellables.removeAll()
+
+        // [内存防漏] 取消本实例专属的内存压力监听源，避免窗口反复开关累积活跃的 DispatchSource
+        memoryPressureSource?.cancel()
+        memoryPressureSource = nil
+    }
+
+    deinit {
+        // [内存防漏兜底] 即便 cleanup() 未被调用，对象销毁时也确保底层内存压力源被取消
+        memoryPressureSource?.cancel()
+        memoryPressureSource = nil
     }
     
     

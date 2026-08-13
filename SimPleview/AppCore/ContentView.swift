@@ -236,10 +236,6 @@ struct ContentView: View {
             }
             #endif
         }
-        // Global commands moved to PDFContainerView to reduce compiler complexity
-        .onDisappear {
-            state.cleanup()
-        }
     }
 
     // MARK: - PDF Viewing Container

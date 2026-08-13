@@ -305,6 +305,11 @@ class ArrowMonitorNSView: NSView {
     
     override func viewDidMoveToWindow() {
         if window != nil {
+            // [防泄漏] 视图可能被多次挂载，先移除已存在的监听器，避免叠加多个 monitor
+            if let existing = monitor {
+                NSEvent.removeMonitor(existing)
+                monitor = nil
+            }
             monitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
                 guard let self = self, let window = self.window else { return event }
                 
