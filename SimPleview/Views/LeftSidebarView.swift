@@ -63,6 +63,35 @@ struct ThumbnailListView: View {
     @ObservedObject var state: AppState
     @FocusState.Binding var isThumbnailFocused: Bool
     
+    #if os(macOS)
+    /// 方向键翻页的统一处理：Shift 连选 / 普通翻页（含节约模式防抖）
+    private func navigateThumbnail(to newIndex: Int, isShift: Bool) {
+        if isShift {
+            if state.shiftSelectionAnchor == nil {
+                state.shiftSelectionAnchor = state.liveState.currentPageIndex
+            }
+            state.liveState.currentPageIndex = newIndex
+            let anchor = state.shiftSelectionAnchor!
+            let range = min(anchor, newIndex)...max(anchor, newIndex)
+            state.selectedIndices = Set(range)
+        } else {
+            state.shiftSelectionAnchor = nil
+            if !MemoryMode.current.policy.delaysNavigationJumps {
+                state.goToPage(newIndex)
+            } else {
+                state.liveState.currentPageIndex = newIndex
+                state.selectedIndices = [newIndex]
+                state.thumbnailJumpTask?.cancel()
+                state.thumbnailJumpTask = Task { @MainActor in
+                    try? await Task.sleep(nanoseconds: 200_000_000)
+                    guard !Task.isCancelled else { return }
+                    state.goToPage(state.liveState.currentPageIndex)
+                }
+            }
+        }
+    }
+    #endif
+    
     var body: some View {
         ScrollViewReader { proxy in
             ScrollView {
@@ -108,72 +137,26 @@ struct ThumbnailListView: View {
             .focusable() // 让它能接盘键盘按键
             .focused($isThumbnailFocused)
             .focusEffectDisabled() // 取消原生的蓝色对焦框，因为我们在内部做了红色的描边
-            .onKeyPress { keyPress in
-                let isShift = keyPress.modifiers.contains(.shift)
-                
-                if keyPress.key == .upArrow {
-                    let newIndex = state.liveState.currentPageIndex - 1
-                    guard newIndex >= 0 else { return .handled }
-                    
-                    if isShift {
-                        if state.shiftSelectionAnchor == nil {
-                            state.shiftSelectionAnchor = state.liveState.currentPageIndex
-                        }
-                        state.liveState.currentPageIndex = newIndex
-                        let anchor = state.shiftSelectionAnchor!
-                        let range = min(anchor, newIndex)...max(anchor, newIndex)
-                        state.selectedIndices = Set(range)
-                    } else {
-                        state.shiftSelectionAnchor = nil
-                        if !MemoryMode.current.policy.delaysNavigationJumps {
-                            state.goToPage(newIndex)
-                        } else {
-                            state.liveState.currentPageIndex = newIndex
-                            state.selectedIndices = [newIndex]
-                            state.thumbnailJumpTask?.cancel()
-                            state.thumbnailJumpTask = Task { @MainActor in
-                                try? await Task.sleep(nanoseconds: 200_000_000)
-                                guard !Task.isCancelled else { return }
-                                state.goToPage(state.liveState.currentPageIndex)
-                            }
-                        }
+            // [修复] 改用 NSEvent 本地监听拦截方向键。原 .onKeyPress 依赖 SwiftUI 焦点 + ScrollView，
+            // 在 macOS 上会被内层 NSScrollView 抢先消费方向键导致失效。本地监听在事件派发前拦截，稳定可靠。
+            .background(
+                ThumbnailKeyMonitorView(
+                    isFocused: isThumbnailFocused,
+                    onUp: { isShift in
+                        let newIndex = state.liveState.currentPageIndex - 1
+                        guard newIndex >= 0 else { return }
+                        navigateThumbnail(to: newIndex, isShift: isShift)
+                    },
+                    onDown: { isShift in
+                        let newIndex = state.liveState.currentPageIndex + 1
+                        guard newIndex < state.liveState.totalPageCount else { return }
+                        navigateThumbnail(to: newIndex, isShift: isShift)
+                    },
+                    onDelete: {
+                        state.deletePage(at: state.liveState.currentPageIndex)
                     }
-                    return .handled
-                } else if keyPress.key == .downArrow {
-                    let newIndex = state.liveState.currentPageIndex + 1
-                    guard newIndex < state.liveState.totalPageCount else { return .handled }
-                    
-                    if isShift {
-                        if state.shiftSelectionAnchor == nil {
-                            state.shiftSelectionAnchor = state.liveState.currentPageIndex
-                        }
-                        state.liveState.currentPageIndex = newIndex
-                        let anchor = state.shiftSelectionAnchor!
-                        let range = min(anchor, newIndex)...max(anchor, newIndex)
-                        state.selectedIndices = Set(range)
-                    } else {
-                        state.shiftSelectionAnchor = nil
-                        if !MemoryMode.current.policy.delaysNavigationJumps {
-                            state.goToPage(newIndex)
-                        } else {
-                            state.liveState.currentPageIndex = newIndex
-                            state.selectedIndices = [newIndex]
-                            state.thumbnailJumpTask?.cancel()
-                            state.thumbnailJumpTask = Task { @MainActor in
-                                try? await Task.sleep(nanoseconds: 200_000_000)
-                                guard !Task.isCancelled else { return }
-                                state.goToPage(state.liveState.currentPageIndex)
-                            }
-                        }
-                    }
-                    return .handled
-                } else if keyPress.key == .delete || keyPress.key == KeyEquivalent("\u{7F}") {
-                    state.deletePage(at: state.liveState.currentPageIndex)
-                    return .handled
-                }
-                
-                return .ignored
-            }
+                )
+            )
             #endif
             .onChange(of: state.liveState.currentPageIndex) { _, newIndex in
                 let anim: Animation = !MemoryMode.current.policy.delaysNavigationJumps
@@ -363,3 +346,76 @@ struct SidebarIconButtonStyle: ButtonStyle {
             )
     }
 }
+
+#if os(macOS)
+// MARK: - 缩略图键盘导航监听 (NSEvent 本地监听)
+// [修复] 原 .onKeyPress 依赖 SwiftUI 焦点 + ScrollView，在 macOS 上会被内层 NSScrollView 抢先消费方向键。
+// 改用 NSEvent.addLocalMonitorForEvents 在事件派发前拦截，稳定可靠。
+struct ThumbnailKeyMonitorView: NSViewRepresentable {
+    var isFocused: Bool
+    var onUp: (Bool) -> Void
+    var onDown: (Bool) -> Void
+    var onDelete: () -> Void
+    
+    func makeNSView(context: Context) -> ThumbnailKeyMonitorNSView {
+        let view = ThumbnailKeyMonitorNSView()
+        view.isFocused = isFocused
+        view.onUp = onUp
+        view.onDown = onDown
+        view.onDelete = onDelete
+        return view
+    }
+    
+    func updateNSView(_ nsView: ThumbnailKeyMonitorNSView, context: Context) {
+        nsView.isFocused = isFocused
+        nsView.onUp = onUp
+        nsView.onDown = onDown
+        nsView.onDelete = onDelete
+    }
+}
+
+final class ThumbnailKeyMonitorNSView: NSView {
+    var isFocused = false
+    var onUp: ((Bool) -> Void)?
+    var onDown: ((Bool) -> Void)?
+    var onDelete: (() -> Void)?
+    private var monitor: Any?
+    
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        if window != nil {
+            installMonitorIfNeeded()
+        } else {
+            removeMonitor()
+        }
+    }
+    
+    private func installMonitorIfNeeded() {
+        guard monitor == nil else { return }
+        monitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
+            guard let self = self, self.isFocused else { return event }
+            let isShift = event.modifierFlags.contains(.shift)
+            switch event.keyCode {
+            case 126: // Up
+                self.onUp?(isShift)
+                return nil
+            case 125: // Down
+                self.onDown?(isShift)
+                return nil
+            case 51, 117: // Backspace / Forward Delete
+                self.onDelete?()
+                return nil
+            default:
+                return event
+            }
+        }
+    }
+    
+    func removeMonitor() {
+        if let m = monitor {
+            NSEvent.removeMonitor(m)
+            monitor = nil
+        }
+    }
+}
+#endif

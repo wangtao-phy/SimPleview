@@ -202,6 +202,7 @@ struct SearchSidebarView: View {
                 #if os(macOS)
                 .background(
                     ArrowKeyMonitorView(
+                        isFocused: isSearchFocused,
                         onUp: {
                             guard !searchManager.searchResults.isEmpty else { return }
                             let newIndex = (searchManager.currentSearchIndex ?? searchManager.searchResults.count) - 1
@@ -285,22 +286,30 @@ struct SearchResultItem: View {
 
 #if os(macOS)
 struct ArrowKeyMonitorView: NSViewRepresentable {
+    var isFocused: Bool
     var onUp: () -> Void
     var onDown: () -> Void
     
     func makeNSView(context: Context) -> NSView {
         let view = ArrowMonitorNSView()
+        view.isFocused = isFocused
         view.onUp = onUp
         view.onDown = onDown
         return view
     }
     
-    func updateNSView(_ nsView: NSView, context: Context) {}
+    func updateNSView(_ nsView: NSView, context: Context) {
+        guard let view = nsView as? ArrowMonitorNSView else { return }
+        view.isFocused = isFocused
+        view.onUp = onUp
+        view.onDown = onDown
+    }
 }
 
 class ArrowMonitorNSView: NSView {
     var onUp: (() -> Void)?
     var onDown: (() -> Void)?
+    var isFocused = false
     var monitor: Any?
     
     override func viewDidMoveToWindow() {
@@ -311,21 +320,17 @@ class ArrowMonitorNSView: NSView {
                 monitor = nil
             }
             monitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
-                guard let self = self, let window = self.window else { return event }
+                guard let self = self else { return event }
                 
-                // Only intercept if the first responder is inside the sidebar (e.g. the search text field)
-                // or if it's the window itself. If it's the PDFView, we shouldn't intercept.
-                let firstResponder = window.firstResponder
-                let isPDFViewFocused = String(describing: type(of: firstResponder)).contains("PDFView")
+                // [修复] 只在搜索框获得焦点时拦截方向键，避免与缩略图列表的键盘翻页冲突
+                guard self.isFocused else { return event }
                 
-                if !isPDFViewFocused {
-                    if event.keyCode == 126 { // Up arrow
-                        self.onUp?()
-                        return nil
-                    } else if event.keyCode == 125 { // Down arrow
-                        self.onDown?()
-                        return nil
-                    }
+                if event.keyCode == 126 { // Up arrow
+                    self.onUp?()
+                    return nil
+                } else if event.keyCode == 125 { // Down arrow
+                    self.onDown?()
+                    return nil
                 }
                 return event
             }
