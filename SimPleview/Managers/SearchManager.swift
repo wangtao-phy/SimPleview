@@ -239,6 +239,10 @@ final class SearchManager: ObservableObject {
                     #else
                     annot.color = UIColor.yellow.withAlphaComponent(1.0)
                     #endif
+                    // [防污染] 标记为临时闪烁批注：不打印、只读，并在收集逻辑中排除
+                    annot.userName = "SEARCH_FLASH"
+                    annot.shouldPrint = false
+                    annot.isReadOnly = true
                     page.addAnnotation(annot)
                     return annot
                 }

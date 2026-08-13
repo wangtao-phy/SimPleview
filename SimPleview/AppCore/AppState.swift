@@ -196,8 +196,26 @@ final class AppState: NSObject, ObservableObject, PDFViewDelegate {
     
     // 【终极混合页面解法】：为了支持每一页大小不一的奇葩 PDF（如 PPT 混插），
     // 同时也为了杜绝 PDFKit 的多线程获取导致的白屏崩溃，我们将全书所有页面的长宽比
-    // 在加载文档时的后台线程一次性全量提取，并作为一个内存只读数组供 UI 极速查询！
+    // 在加载文档时一次性全量提取，并作为一个内存只读数组供 UI 极速查询！
     @Published var pageAspectRatios: [CGFloat] = []
+
+    /// 重建全书每一页的“旋转感知长宽比”（宽/高），供缩略图骨架屏 O(1) 查询。
+    /// 必须在主线程调用：内部访问 `PDFDocument.page(at:)`，与 PDFView 渲染同线程，安全。
+    func rebuildPageAspectRatios() {
+        guard let doc = pdfView.document else {
+            pageAspectRatios = []
+            return
+        }
+        let fallback = 1.0 / 1.414
+        pageAspectRatios = (0..<doc.pageCount).map { i -> CGFloat in
+            guard let page = doc.page(at: i) else { return fallback }
+            let bounds = page.bounds(for: .cropBox)
+            let isRotated = page.rotation == 90 || page.rotation == 270
+            let w = isRotated ? bounds.height : bounds.width
+            let h = isRotated ? bounds.width : bounds.height
+            return h > 0 ? (w / h) : fallback
+        }
+    }
     
     // (Search proxy properties removed to prevent global SwiftUI over-rendering. Views now bind directly to `searchManager`.)
     

@@ -156,6 +156,7 @@ extension AppState {
         
         self.isDirty = false
         self.liveState.totalPageCount = doc.pageCount
+        self.rebuildPageAspectRatios()
         
         let title = url.deletingPathExtension().lastPathComponent
         // 告诉阅读记录追踪器：“哥们开始看了，开始计时！”

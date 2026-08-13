@@ -41,22 +41,10 @@ final class DocumentManager: ObservableObject {
     // MARK: - Bookmark Management (书签权限管理)
     // 苹果系统有极其严格的沙盒机制。用户选择了一个文件授权给你，重启 App 之后，这个 URL 就作废了！
     // 所以我们需要把那个 URL 的底层权限打包成“书签 (Bookmark Data)”，存进系统偏好设置。下次通过书签还原出带权限的 URL。
-    
-    /// 将最新打开的文件路径和权限书签保存到 UserDefaults，以便下次启动时恢复
-    func updateOpenedRecent(url: URL) {
-        #if os(macOS)
-        guard url.isFileURL else { return }
-        var dict = UserDefaults.standard.dictionary(forKey: "OpenedPDFBookmarks") as? [String: Data] ?? [:]
-        do {
-            // 关键 API：生成携带安全作用域的数据
-            let bookmark = try url.bookmarkData(options: .withSecurityScope, includingResourceValuesForKeys: nil, relativeTo: nil)
-            dict[url.path] = bookmark
-            UserDefaults.standard.set(dict, forKey: "OpenedPDFBookmarks")
-        } catch {
-            // 失败就随风而去
-        }
-        #endif
-    }
+    //
+    // [注意] updateOpenedRecent 从未被调用，因此 OpenedPDFBookmarks 字典始终为空，下面的书签链路目前是惰性 no-op。
+    // 实际的窗口恢复由 applicationDidFinishLaunching 中的 SavedWindowGroups（纯路径）承担。
+    // 若日后启用 App Sandbox，需在此处重新挂入“写入书签”的逻辑。
     
     /// 当文档被显式关闭时，从持久化历史中移除它的书签权限
     func removeFromOpenedRecent(url: URL?) {

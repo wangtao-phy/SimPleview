@@ -115,6 +115,8 @@ final class AnnotationManager: ObservableObject {
             guard let page = document.page(at: i) else { continue }
             for annot in page.annotations {
                 guard let type = annot.type, lowercasedTargets.contains(type.lowercased()) else { continue }
+                // [防污染] 跳过搜索闪烁的临时批注，避免其进入侧边栏列表
+                if (annot.userName ?? "") == "SEARCH_FLASH" { continue }
                 
                 let id = annot.userName ?? ""
                 

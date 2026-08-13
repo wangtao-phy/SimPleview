@@ -309,7 +309,6 @@ struct PDFDocumentModel: Identifiable, Equatable {
     var currentPageIndex: Int = 0           // 当前阅读到的页码
     var navigationHistory: [Int] = []       // 页面跳转历史（用于实现“返回上一处”功能）
     var allAnnotations: [PDFAnnotation] = [] // 缓存所有的批注
-    var fileData: Data?                     // 文件内容快照
     var batchStack: [UndoAction] = []       // 撤销堆栈（Undo/Redo 系统的核心）
     var redoStack: [UndoAction] = []        // 重做堆栈
     var isAccessing: Bool = false           // 标记文件安全访问权限的状态（用于 App Sandbox 环境）
