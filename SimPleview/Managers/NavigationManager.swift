@@ -7,8 +7,10 @@ import Combine
 /// 如果没有历史记录，用户跳过去之后就回不来了！
 /// 这个类专门用来记录用户的每一次“跳跃”，从而实现类似浏览器“后退(Back)”的功能。
 final class NavigationManager: ObservableObject {
-    // 当前我们正在看第几页 (0-indexed)
-    @Published var currentPageIndex: Int = 0
+    // 当前我们正在看第几页 (0-indexed)。
+    // [性能修复] 不再使用 @Published：此值仅由 AppState 内部读取，对外统一走 liveState.currentPageIndex，
+    // 避免每次翻页重复发布 objectWillChange 导致整树重渲染。
+    var currentPageIndex: Int = 0
     
     // [核心数据：历史轨迹栈]
     // 每次发生长距离跳转前，把当前的页码推进去。最多存 30 条。

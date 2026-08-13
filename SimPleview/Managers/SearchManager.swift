@@ -64,18 +64,22 @@ final class SearchManager: ObservableObject {
         let currentQuery = query
 
         let startIndex = pdfView?.currentPage.map { document.index(for: $0) } ?? 0
-        // 搜索在独立的 PDFKit 副本上执行，避免与可视 PDFView 的渲染、标注和保存并发访问同一对象。
-        guard let documentData = document.dataRepresentation() else {
-            isSearching = false
-            return
-        }
         
         // [异步编程：OperationBlock]
         // 切入后台线程执行底层的文本扫描，支持被中途取消
+        // 将 PDFDocument 引用以 nonisolated(unsafe) 方式传入后台串行队列（与 ThumbnailManager 同款）。
+        // 仅做只读 dataRepresentation 序列化，安全。
+        nonisolated(unsafe) let searchDocument = document
         let operation = BlockOperation()
         operation.addExecutionBlock { [weak self, weak operation] in
             // 刚进来就先查一下有没有被取消，不要浪费算力
             guard let operation = operation, !operation.isCancelled else { return }
+            // [性能修复] 全量序列化 dataRepresentation 移入后台串行队列，避免大 PDF 在主线程卡顿。
+            // PDFDocument 的只读序列化是线程安全的；searchQueue 为串行队列，不会与自身并发。
+            guard let documentData = searchDocument.dataRepresentation() else {
+                DispatchQueue.main.async { [weak self] in self?.isSearching = false }
+                return
+            }
             guard let safeDocument = PDFDocument(data: documentData) else {
                 DispatchQueue.main.async { [weak self] in self?.isSearching = false }
                 return
