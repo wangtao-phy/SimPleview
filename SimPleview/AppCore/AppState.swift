@@ -27,6 +27,9 @@ final class AppState: NSObject, ObservableObject, PDFViewDelegate {
     // 整个 App 最核心的组件就是这个 PDFView，它是苹果官方提供的重量级 PDF 渲染引擎。
     @Published var pdfView = CustomPDFView()
     @Published var documentVersion = UUID()
+    // 页面结构变化信号（插入/删除/重排页），用于视图层在菜单关闭 + go(to:) 完成后重新聚焦缩略图列表。
+    // 与 documentVersion 分开：documentVersion 会触发全量重建（闪白），而此信号只用于焦点恢复。
+    @Published var pageStructureChanged = UUID()
     
     // [Phase 1: 高频状态剥离]
     // 曾经的 @Published var dropTargetIndex 等已移入 liveState，实现精准属性级刷新

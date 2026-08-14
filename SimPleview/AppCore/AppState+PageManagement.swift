@@ -50,6 +50,7 @@ extension AppState {
         thumbnailManager.clearCache()
         self.rebuildPageAspectRatios()
         self.documentVersion = UUID()
+        self.pageStructureChanged = UUID()
         
         DispatchQueue.main.async { [weak self] in
             self?.pdfView.layoutDocumentView()
@@ -80,6 +81,7 @@ extension AppState {
         thumbnailManager.clearCache()
         rebuildPageAspectRatios()
         thumbnailManager.hotReloadSubject.send() // 重建可见缩略图（避免全量重建导致闪白）
+        pageStructureChanged = UUID() // 通知视图层重新聚焦缩略图列表
         
         // 自动跳转并选中新页面
         self.liveState.currentPageIndex = insertAt
@@ -118,6 +120,7 @@ extension AppState {
         thumbnailManager.clearCache()
         rebuildPageAspectRatios()
         thumbnailManager.hotReloadSubject.send() // 重建可见缩略图（避免全量重建导致闪白）
+        pageStructureChanged = UUID() // 通知视图层重新聚焦缩略图列表
         if liveState.currentPageIndex >= liveState.totalPageCount { liveState.currentPageIndex = liveState.totalPageCount - 1 }
         pdfView.setPlatformNeedsDisplay()
         isDirty = true
@@ -137,6 +140,7 @@ extension AppState {
         thumbnailManager.clearCache()
         rebuildPageAspectRatios()
         thumbnailManager.hotReloadSubject.send() // 重建可见缩略图（避免全量重建导致闪白）
+        pageStructureChanged = UUID() // 通知视图层重新聚焦缩略图列表
         if liveState.currentPageIndex >= insertAt { liveState.currentPageIndex += insertDoc.pageCount }
         pdfView.setPlatformNeedsDisplay()
         isDirty = true

@@ -165,9 +165,13 @@ struct ThumbnailListView: View {
                     proxy.scrollTo(newIndex)
                 }
             }
-            .onChange(of: state.liveState.totalPageCount) { _, _ in
-                // 插入/删除页面后（PDFView.go(to:) 可能抢走焦点），重新聚焦缩略图列表，避免键盘翻页失效
-                isThumbnailFocused = true
+            .onChange(of: state.pageStructureChanged) { _, _ in
+                // 插入/删除/重排页后，上下文菜单关闭 + PDFView.go(to:)（异步）可能抢走焦点。
+                // 立即重新聚焦会被随后发生的焦点抢占“覆盖”，导致首次插入后键盘翻页失效。
+                // 延迟到这些瞬态焦点事件完成之后再重新聚焦，确保生效。
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
+                    isThumbnailFocused = true
+                }
             }
             .onAppear {
                 // 当用户从“大纲”选项卡切回“缩略图”选项卡时，由于此时的 ScrollView 是全新的，
