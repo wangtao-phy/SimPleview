@@ -49,6 +49,13 @@ struct LeftSidebarView: View {
             default: EmptyView()
             }
         }
+        #if os(macOS)
+        // 焦点挂在左侧栏 VStack（普通视图，焦点稳定）而非 ScrollView（NSScrollView 焦点不可靠），
+        // 且切 tab 时 VStack 不会被移除，FocusState 不会复位，切回缩略图栏时键盘翻页依然生效。
+        .focusable()
+        .focused($isThumbnailFocused)
+        .focusEffectDisabled()
+        #endif
     }
 }
 
@@ -133,9 +140,6 @@ struct ThumbnailListView: View {
                 .onTapGesture { isThumbnailFocused = true }
             }
             #if os(macOS)
-            .focusable() // 让它能接盘键盘按键
-            .focused($isThumbnailFocused)
-            .focusEffectDisabled() // 取消原生的蓝色对焦框，因为我们在内部做了红色的描边
             // [修复] 改用 NSEvent 本地监听拦截方向键。原 .onKeyPress 依赖 SwiftUI 焦点 + ScrollView，
             // 在 macOS 上会被内层 NSScrollView 抢先消费方向键导致失效。本地监听在事件派发前拦截，稳定可靠。
             .background(
@@ -177,11 +181,6 @@ struct ThumbnailListView: View {
                 // 我们必须在它刚出现的一瞬间，把它拉回当前所处的阅读页码位置，否则它会傻傻地待在最顶部。
                 // 这里的 anchor: .center 是安全的，因为视图还没渲染出来，没有视觉跳动！
                 proxy.scrollTo(state.liveState.currentPageIndex, anchor: .center)
-                // 切回缩略图栏时，FocusState 会因旧 ScrollView 被移除而复位，这里重新激活键盘翻页。
-                // 延迟到下一 runloop，确保 .focused() 绑定已就绪。
-                DispatchQueue.main.async {
-                    isThumbnailFocused = true
-                }
             }
         }
     }
