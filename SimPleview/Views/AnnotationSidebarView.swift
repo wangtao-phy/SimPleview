@@ -90,10 +90,13 @@ struct AnnotationSidebarView: View {
                         guard let currentIndex = all.firstIndex(where: { $0.userName == state.selectedAnnotation?.userName }),
                               currentIndex > 0 else { return .handled }
                         let nextAnnot = all[currentIndex - 1]
-                        state.selectedAnnotation = nextAnnot
                         let nid = nextAnnot.userName ?? ""
-                        focusedField = nid
-                        proxy.scrollTo(nid, anchor: .center)
+                        // 延迟到下一 runloop，避免在视图更新中同步发布 @Published 状态（SwiftUI 运行时警告）
+                        DispatchQueue.main.async {
+                            state.selectedAnnotation = nextAnnot
+                            focusedField = nid
+                            proxy.scrollTo(nid, anchor: .center)
+                        }
                         return .handled
                     }
                     .onKeyPress(.downArrow) {
@@ -101,10 +104,13 @@ struct AnnotationSidebarView: View {
                         guard let currentIndex = all.firstIndex(where: { $0.userName == state.selectedAnnotation?.userName }),
                               currentIndex < all.count - 1 else { return .handled }
                         let nextAnnot = all[currentIndex + 1]
-                        state.selectedAnnotation = nextAnnot
                         let nid = nextAnnot.userName ?? ""
-                        focusedField = nid
-                        proxy.scrollTo(nid, anchor: .center)
+                        // 延迟到下一 runloop，避免在视图更新中同步发布 @Published 状态（SwiftUI 运行时警告）
+                        DispatchQueue.main.async {
+                            state.selectedAnnotation = nextAnnot
+                            focusedField = nid
+                            proxy.scrollTo(nid, anchor: .center)
+                        }
                         return .handled
                     }
                 }
