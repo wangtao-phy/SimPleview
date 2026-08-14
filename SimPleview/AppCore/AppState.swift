@@ -399,8 +399,10 @@ final class AppState: NSObject, ObservableObject, PDFViewDelegate {
         guard let currentDoc = self.pdfView.document, let currentPage = self.pdfView.currentPage else { return }
         
         #if os(macOS)
-        // 直接绕过 SwiftUI，实例化一个极其纯净的原生 PDFView
-        let purePDFView = PDFView()
+        // 直接绕过 SwiftUI，实例化一个纯净的 CustomPDFView（继承 PDFView），
+        // 复用主窗口同款的护眼色渲染逻辑（draw(_:to:) 中的背景滤镜）
+        let purePDFView = CustomPDFView()
+        purePDFView._threadSafePageBackgroundColor = self.pageBackgroundColor
         purePDFView.document = currentDoc
         purePDFView.autoScales = true
         purePDFView.displayMode = .singlePageContinuous
@@ -458,17 +460,29 @@ final class AppState: NSObject, ObservableObject, PDFViewDelegate {
 #if os(macOS)
 // 专门用于对比窗口的轻量控制器，用于监听页码变化并更新标题栏，同时保证内存安全
 class CompareWindowController: NSWindowController {
-    weak var pdfView: PDFView?
+    weak var pdfView: CustomPDFView?
     var pageLabel: NSTextField?
     
     override func showWindow(_ sender: Any?) {
         super.showWindow(sender)
         NotificationCenter.default.addObserver(self, selector: #selector(pageChanged), name: .PDFViewPageChanged, object: pdfView)
+        // 跟随主窗口护眼色：监听 UserDefaults 变更，同步背景色
+        NotificationCenter.default.addObserver(self, selector: #selector(backgroundChanged), name: UserDefaults.didChangeNotification, object: nil)
     }
     
     @objc func pageChanged() {
         if let pdfView = pdfView, let page = pdfView.currentPage, let doc = pdfView.document {
             pageLabel?.stringValue = "\(doc.index(for: page) + 1) / \(doc.pageCount)"
+        }
+    }
+    
+    @objc private func backgroundChanged() {
+        guard let pdfView = pdfView else { return }
+        let raw = UserDefaults.standard.integer(forKey: "pdfPageBackgroundColor")
+        let color = PDFPageBackgroundColor(rawValue: raw) ?? .default
+        if pdfView._threadSafePageBackgroundColor != color {
+            pdfView._threadSafePageBackgroundColor = color
+            pdfView.setPlatformNeedsDisplay()
         }
     }
     
