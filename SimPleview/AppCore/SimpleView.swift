@@ -2,9 +2,7 @@ import SwiftUI
 import UniformTypeIdentifiers
 import Combine
 
-#if os(macOS)
 import AppKit
-#endif
 
 /// [教程注释：App 入口点]
 /// `@main` 标签告诉编译器：这是整个应用程序的绝对入口！
@@ -79,11 +77,7 @@ struct SimpleViewApp: App {
             #endif
             
             Button(LS("Open...")) {
-                #if os(macOS)
                 _ = appDelegate.applicationShouldOpenUntitledFile(NSApp)
-                #else
-                isImporting = true
-                #endif
             }.keyboardShortcut(shortcutManager.open.keyEquivalent, modifiers: shortcutManager.open.modifiers)
             
             Button(LS("Find...")) { focusedUIState?.triggerSearchFocus(state: focusedState) }
@@ -103,11 +97,7 @@ struct SimpleViewApp: App {
                 .keyboardShortcut(shortcutManager.compareView.keyEquivalent, modifiers: shortcutManager.compareView.modifiers)
             
             Button(LS("History")) { 
-                #if os(macOS)
                 HistoryWindowManager.shared.open()
-                #else
-                // Fallback for iOS if needed later
-                #endif
             }
                 .keyboardShortcut(shortcutManager.history.keyEquivalent, modifiers: shortcutManager.history.modifiers)
             
@@ -177,26 +167,12 @@ struct SimpleViewApp: App {
     
     /// [教程注释：主场景渲染区]
     var body: some Scene {
-        #if os(macOS)
         // 在 macOS 上，如果你只提供 `Settings` 场景而不提供 `WindowGroup`，
         // App 启动时将不会自动弹出任何多余的空白主界面！这是极简主义 PDF 阅读器的基石。
         Settings {
             SettingsView()
         }
         .commands { appCommands }
-        #else
-        // [逻辑流程：iOS 多窗口支持]
-        // 苹果在 iOS 14+ 提供了原生的多窗口支持 (通过 WindowGroup)。
-        // 这里的 `id` 非常重要，系统用它来追踪和管理同一个应用开启的不同窗口状态。
-        WindowGroup(id: "url_viewer", for: URL.self) { $url in
-            if let validUrl = url {
-                ContentView(url: validUrl)
-            } else {
-                ContentView(url: nil)
-            }
-        }
-        .commands { appCommands }
-        #endif
     }
 }
 

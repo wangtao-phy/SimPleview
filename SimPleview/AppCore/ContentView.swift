@@ -3,11 +3,7 @@ import PDFKit
 import UniformTypeIdentifiers
 import QuickLook
 
-#if os(macOS)
 import AppKit
-#else
-import UIKit
-#endif
 
 /// [教程注释：主舞台与根视图]
 /// 这是每个单独文档窗口的“大管家”，负责搭建左、中、右三个区域的整体骨架 (NavigationSplitView + Inspector)，
@@ -42,11 +38,9 @@ struct ContentView: View {
     // 打开新窗口的方法注入
     @Environment(\.openWindow) private var openWindow
     
-    #if os(macOS)
     // 逆向反向绑定：为了能够在 SwiftUI 里动态改变其宿主原生窗口（NSWindow）的标题栏属性，
     // 我们用一个 @State 把外界真正的指针“钩”进来保存着。
     @State private var hostingWindow: NSWindow?
-    #endif
     
     // 监听休眠时间的改变，以便实时对处于后台的标签页生效
     @AppStorage("hibernationTimeoutStr") var hibernationTimeoutStr: String = "20"
@@ -64,11 +58,7 @@ struct ContentView: View {
     }
     
     private func executeIfActive(_ action: @escaping () -> Void) {
-        #if os(macOS)
         if hostingWindow?.isKeyWindow == true { action() }
-        #else
-        action()
-        #endif
     }
     
     // MARK: - Core Application View Structure
@@ -86,66 +76,13 @@ struct ContentView: View {
             HStack(spacing: 0) {
                 // [中间主内容区]
                 PDFContainerView
-                    .navigationTitle(PlatformUtils.isiOS ? "" : state.fileName)
-                    #if os(iOS)
-                    // iOS 专用的导航栏排版
-                    .toolbar {
-                        // [教程注释：ToolbarItemGroup]
-                        // 它可以把一堆按钮塞进导航栏的左上角 (navigationBarLeading)。
-                        ToolbarItemGroup(placement: .navigationBarLeading) {
-                            HStack(spacing: 2) {
-                                Button(action: state.goBack) {
-                                    Image(systemName: "chevron.left").fontWeight(.bold)
-                                }
-                                // .disabled() 也是 SwiftUI 非常典型的响应式修饰符。
-                                // 当历史记录为空时，后退按钮自动变灰，完全不需要写手动判断逻辑。
-                                .disabled(state.navigationHistory.isEmpty)
-                                pageNumberInput
-                            }
-                        }
-                    }
-                    .toolbar {
-                        if uiState.showActionGroup {
-                            ToolbarItem(placement: .navigationBarTrailing) {
-                                ActionGroupView(state: state, uiState: uiState) {
-                                    isImporting = true
-                                }
-                            }
-                        }
-                    }
-                    .toolbar {
-                        if uiState.showAnnotationGroup {
-                            ToolbarItem(placement: .navigationBarTrailing) {
-                                AnnotationGroupView(state: state, uiState: uiState)
-                            }
-                        }
-                    }
-                    .toolbar {
-                        ToolbarItem(placement: .navigationBarTrailing) {
-                            Button(action: { state.rotateCurrentPageLeft() }) {
-                                Image(systemName: "rotate.left")
-                            }
-                        }
-                    }
-                    .toolbar {
-                        if uiState.showColorGroup {
-                            ToolbarItem(placement: .navigationBarTrailing) {
-                                ColorGroupView(state: state, uiState: uiState)
-                            }
-                        }
-                    }
-                    .popover(isPresented: $uiState.isShowingToolbarCustomizer) {
-                        ToolbarSelectionWindow(uiState: uiState)
-                    }
-                    #endif
-                    #if os(macOS)
+                    .navigationTitle(state.fileName)
                     .modifier(MacToolbarModifier(
                         state: state,
                         uiState: uiState,
                         shortcutManager: shortcutManager,
                         pageNumberInput: AnyView(pageNumberInput)
                     ))
-                    #endif
                 
                 // [右侧边栏]
                 // 变通方案：直接放在 HStack 里，这样它的高度自然会受到安全区域（Toolbar 底部）的限制，
@@ -164,9 +101,6 @@ struct ContentView: View {
         .focusedSceneValue(\.uiState, uiState)
         
         // 监听外部应用（如文件管家）调用的 "在 App 中打开此文件" 事件。
-        #if os(iOS)
-        .onOpenURL { state.loadPDF(url: $0) }
-        #endif
         .onChange(of: uiState.isSlideshowActive) { _, isActive in
             if isActive {
                 state.enterPresentationMode(uiState: uiState)
@@ -178,7 +112,6 @@ struct ContentView: View {
             AnnotationEditorView(state: state, uiState: uiState)
         }
 
-        #if os(macOS)
         // [高级黑科技：窗口状态桥接]
         // WindowAccessor 是一段我们自己封装的原生视图，它可以神不知鬼不觉地爬到树的顶端，
         // 把底层的 NSWindow 拿出来赋给我们的 hostingWindow 变量。
@@ -224,9 +157,7 @@ struct ContentView: View {
                 state.scheduleHibernation()
             }
         }
-        #endif
         .onAppear {
-            #if os(macOS) 
             // 如果第一次打开没有任何页面，启动自动恢复上次关闭前的窗口记忆系统
             if !AppState.hasAttemptedRestore && state.fileURL == nil {
                 AppState.hasAttemptedRestore = true
@@ -234,7 +165,6 @@ struct ContentView: View {
                     NSApp.openSwiftUIWindow(for: url)
                 })
             }
-            #endif
         }
     }
 
@@ -247,40 +177,23 @@ struct ContentView: View {
     private var PDFContainerView: some View {
         VStack(spacing: 0) {
 
-            #if os(iOS)
-            if !state.documents.isEmpty {
-                DocumentTabsView(state: state)
-            }
-            #endif
-            
             // ZStack 会让所有组件像是“洋葱”一样，一层一层地在屏幕 Z 轴上叠起来。
             ZStack {
                 if state.fileURL != nil {
                     // 如果有文件，加载真正的 PDF 引擎视图
-                    #if os(iOS)
                     PDFKitRepresentable(pdfView: state.pdfView, activeType: $state.activeType, inkColor: state.currentColor, selectedBatchID: state.selectedAnnotation?.userName)
                         .focusable()
                         .focusEffectDisabled()
                         .id(state.pdfViewId) // 绑定唯一ID强制系统刷新
-                    #else
-                    PDFKitRepresentable(pdfView: state.pdfView, activeType: $state.activeType, inkColor: state.currentColor, selectedBatchID: state.selectedAnnotation?.userName)
-                        .focusable()
-                        .focusEffectDisabled()
-                        .id(state.pdfViewId)
-                    #endif
                 } else {
                     // 如果没文件，显示高大上的“暂无内容”界面
                     ContentUnavailableView {
                         Label(state.L("No PDF Opened"), systemImage: "doc.text.fill")
                     } description: {
-                        Text(PlatformUtils.isiOS ? state.L("iOS Open File Description") : state.L("Open File Description"))
+                        Text(state.L("Open File Description"))
                     } actions: {
                         Button(state.L("Open File")) {
-                            #if os(macOS)
                             executeOpenFlow()
-                            #else
-                            isImporting = true
-                            #endif
                         }
                         .buttonStyle(.borderedProminent)
                     }
@@ -321,11 +234,9 @@ struct ContentView: View {
             }
         }
         .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("TriggerBurnIn"))) { _ in
-            #if os(macOS)
             if hostingWindow?.isKeyWindow == true {
                 state.documentManager.burnInAnnotations(pdfView: state.pdfView)
             }
-            #endif
         }
         .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("GlobalUndo"))) { _ in executeIfActive { state.undo() } }
         .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("GlobalRedo"))) { _ in executeIfActive { state.redo() } }
@@ -337,9 +248,7 @@ struct ContentView: View {
         .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("GlobalInk"))) { _ in executeIfActive { state.activeType = .ink } }
         .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("GlobalCompareView"))) { _ in executeIfActive { state.openCompareWindow() } }
         .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("GlobalPrint"))) { _ in
-            #if os(macOS)
             executeIfActive { state.printDocument() }
-            #endif
         }
         .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("GlobalPresentation"))) { _ in
             executeIfActive {
@@ -370,25 +279,16 @@ struct ContentView: View {
                 }
                 .multilineTextAlignment(.center)
                 .frame(width: 32)
-                #if os(macOS)
                 .textFieldStyle(.roundedBorder)
-                #else
-                // 专门给 iOS 单独设计的浅灰色圆角质感输入框，不套用 Mac 的那种硬朗框框。
-                .textFieldStyle(.plain)
-                .padding(.vertical, 4)
-                .background(Color.primary.opacity(0.08))
-                .cornerRadius(6)
-                #endif
             
             Text("/\(state.liveState.totalPageCount)")
-                .font(.system(size: PlatformUtils.isiOS ? 13 : 11))
+                .font(.system(size: 11))
                 .foregroundColor(.secondary)
                 .fixedSize()
         }
         .padding(.trailing, 4)
     }
 
-    #if os(macOS)
     /// 触发 macOS 底层的文件打开流
     private func executeOpenFlow() {
         let panel = NSOpenPanel()
@@ -399,10 +299,8 @@ struct ContentView: View {
             }
         }
     }
-    #endif
 }
 
-#if os(macOS)
 // [终极架构：隔离修饰器]
 // 通过将整个庞大的 Toolbar 移入一个独立的 ViewModifier，我们将编译器推断的复杂度瞬间降为了 O(1)！
 // 这个技巧是解决 SwiftUI "表达式过于复杂无法在合理时间内完成编译" 终极法宝，同时完美保留原生定制。
@@ -426,7 +324,4 @@ struct MacToolbarModifier: ViewModifier {
             )
     }
 }
-
-// [教程注释：如何将 macOS 底层对象包装给 SwiftUI 使用]
-#endif
 

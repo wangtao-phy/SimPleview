@@ -3,11 +3,7 @@ import PDFKit
 import UniformTypeIdentifiers
 import os
 
-#if os(macOS)
 import AppKit
-#else
-import UIKit
-#endif
 
 /// 专门处理图像查看、转换为临时 PDF 以及保存回图像的独立模块
 final class ImageDocumentManager {
@@ -78,7 +74,6 @@ final class ImageDocumentManager {
             return false
         }
         
-        #if os(macOS)
         let width = Int(finalSize.width.rounded(.down))
         let height = Int(finalSize.height.rounded(.down))
         let colorSpace = CGColorSpaceCreateDeviceRGB()
@@ -202,54 +197,6 @@ final class ImageDocumentManager {
             Logger.view.error("Failed to write image data to \(url.path): \(error)")
             return false
         }
-        #else
-        let finalSize = targetSize ?? mediaBox.size
-        let format = UIGraphicsImageRendererFormat()
-        format.scale = 1.0 // 保持原图 1x 比例，避免体积膨胀
-        let renderer = UIGraphicsImageRenderer(size: finalSize, format: format)
-        let ext = url.pathExtension.lowercased()
-        
-        let image = renderer.image { ctx in
-            if ext == "jpg" || ext == "jpeg" || ext == "bmp" {
-                UIColor.white.set()
-                ctx.fill(CGRect(origin: .zero, size: finalSize))
-            }
-            
-            // CoreGraphics 坐标系翻转
-            ctx.cgContext.translateBy(x: 0, y: finalSize.height)
-            ctx.cgContext.scaleBy(x: 1.0, y: -1.0)
-            
-            let scaleX = finalSize.width / mediaBox.width
-            let scaleY = finalSize.height / mediaBox.height
-            ctx.cgContext.scaleBy(x: scaleX, y: scaleY)
-            
-            page.draw(with: .cropBox, to: ctx.cgContext)
-            
-            for annotation in page.annotations {
-                annotation.draw(with: .cropBox, in: ctx.cgContext)
-            }
-        }
-        
-        let data: Data?
-        
-        if ext == "png" {
-            data = image.pngData()
-        } else if ext == "jpg" || ext == "jpeg" {
-            data = image.jpegData(compressionQuality: 0.8)
-        } else {
-            data = image.pngData()
-        }
-        
-        guard let finalData = data else { return false }
-        
-        do {
-            try finalData.write(to: url, options: .atomic)
-            return true
-        } catch {
-            Logger.view.error("Failed to write image data to \(url.path): \(error)")
-            return false
-        }
-        #endif
     }
     
     #if os(macOS)

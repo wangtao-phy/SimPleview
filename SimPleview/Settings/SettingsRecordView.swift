@@ -24,11 +24,7 @@ struct RecordSettingsView: View {
     
     private func swiftColor(for name: String) -> Color {
         if name.hasPrefix("#") {
-            #if os(macOS)
             return Color(nsColor: NSColor(hex: name) ?? .clear)
-            #else
-            return .clear
-            #endif
         }
         switch name {
         case "Blue": return .blue
@@ -45,15 +41,7 @@ struct RecordSettingsView: View {
         Binding<Color>(
             get: { self.swiftColor(for: colorString.wrappedValue) },
             set: { newColor in
-                #if os(macOS)
                 colorString.wrappedValue = NSColor(newColor).hexString
-                #else
-                let uiColor = UIColor(newColor)
-                var r: CGFloat = 0, g: CGFloat = 0, b: CGFloat = 0, a: CGFloat = 0
-                uiColor.getRed(&r, green: &g, blue: &b, alpha: &a)
-                let red = Int(round(r * 255)), green = Int(round(g * 255)), blue = Int(round(b * 255))
-                colorString.wrappedValue = String(format: "#%02X%02X%02X", red, green, blue)
-                #endif
             }
         )
     }
@@ -106,7 +94,6 @@ struct RecordSettingsView: View {
     
     // [底层交互：修改阅读记录存放在硬盘里的哪一层文件夹]
     private func changeSaveDirectory() {
-        #if os(macOS)
         let panel = NSOpenPanel()
         // 禁止选具体的文件
         panel.canChooseFiles = false
@@ -119,10 +106,5 @@ struct RecordSettingsView: View {
             // 如果选好了，告诉底层引擎切换写入目标。引擎会自动把老文件夹的东西搬去新文件夹。
             tracker.customDirectoryURL = url
         }
-        #else
-        // iOS Directory selection uses Document picker which is limited.
-        // It's recommended to stick to the sandbox Documents folder on iOS.
-        // Directory change is not supported on iOS directly due to sandboxing.
-        #endif
     }
 }

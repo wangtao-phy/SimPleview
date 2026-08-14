@@ -1,10 +1,6 @@
 import SwiftUI
 
-#if os(macOS)
 import AppKit
-#else
-import UIKit
-#endif
 
 // [原生化重构] 移除了繁杂的 ColorImageCache, ColorPickerRow 和 ColorPanelManager。
 // 现在的 macOS/iOS 均原生支持 ColorPicker，性能更好，体验更系统化。
@@ -31,11 +27,7 @@ struct AnnotationSettingsView: View {
     private func swiftColor(for name: String) -> Color {
         // 如果是外部引入的 Hex (例如 #FFAABB)，调用下面的扩展进行反解析
         if name.hasPrefix("#") {
-            #if os(macOS)
             return Color(nsColor: NSColor(hex: name) ?? .clear)
-            #else
-            return .clear
-            #endif
         }
         // 普通基础颜色的快速翻译
         switch name {
@@ -53,15 +45,7 @@ struct AnnotationSettingsView: View {
         Binding<Color>(
             get: { self.swiftColor(for: colorString.wrappedValue) },
             set: { newColor in
-                #if os(macOS)
                 colorString.wrappedValue = NSColor(newColor).hexString
-                #else
-                let uiColor = UIColor(newColor)
-                var r: CGFloat = 0, g: CGFloat = 0, b: CGFloat = 0, a: CGFloat = 0
-                uiColor.getRed(&r, green: &g, blue: &b, alpha: &a)
-                let red = Int(round(r * 255)), green = Int(round(g * 255)), blue = Int(round(b * 255))
-                colorString.wrappedValue = String(format: "#%02X%02X%02X", red, green, blue)
-                #endif
             }
         )
     }
@@ -93,9 +77,7 @@ struct AnnotationSettingsView: View {
             ColorPicker(LS("Ink Default Color") + ":", selection: colorBinding(for: $defaultInkColor), supportsOpacity: false)
                 .padding(.vertical, 4)
         }
-        #if os(macOS)
         .formStyle(.grouped)
-        #endif
         .frame(width: 450, height: 350) // 适配设置面板的尺寸
         // [广播机制]
         // 由于这几个默认颜色直接影响到了右边侧边栏的界面渲染，
@@ -113,7 +95,6 @@ struct AnnotationSettingsView: View {
 }
 
 // MARK: - macOS 颜色处理黑科技扩展
-#if os(macOS)
 /// [教程注释：十六进制颜色(Hex)与苹果原生颜色(NSColor)相互转化的炼金术]
 extension NSColor {
     // [解析器] 将 "#FF0000" 变为纯正的系统红色
@@ -159,4 +140,3 @@ extension NSColor {
         return String(format: "#%02X%02X%02X", red, green, blue)
     }
 }
-#endif

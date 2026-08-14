@@ -150,11 +150,7 @@ struct GlobalAuthorsSettingsView: View {
                     Spacer() // 靠左对齐推手
                 }
                 // 根据平台的背景颜色调整这根底部栏底色
-                #if os(macOS)
                 .background(Color(NSColor.controlBackgroundColor))
-                #else
-                .background(Color(UIColor.secondarySystemBackground))
-                #endif
                 .overlay(Divider(), alignment: .top) // 在上面再压一条横线盖住列表
             }
             // [UI布局] 这里控制全局作者库框中左侧列表的绝对宽度
@@ -179,11 +175,7 @@ struct GlobalAuthorsSettingsView: View {
             // [UI布局] 彻底放弃 GeometryReader，直接使用 SwiftUI 的自动弹簧布局，让右侧吃掉所有剩余空间，解决加载瞬间闪烁的问题。
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
-        #if os(macOS)
         .border(Color(NSColor.gridColor)) // 给整个大界面外面套一个精装盒子
-        #else
-        .border(Color.secondary.opacity(0.3))
-        #endif
         // [UI布局] 整个全局作者编辑大框的高度，加大到 350 以留出更多 Bio 空间
         .frame(height: 350)
     }
