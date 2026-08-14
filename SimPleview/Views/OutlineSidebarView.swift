@@ -57,6 +57,7 @@ struct OutlineView: View {
     
     var body: some View {
         let items = cachedItems
+        Group {
         if !items.isEmpty {
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 0) {
@@ -91,8 +92,6 @@ struct OutlineView: View {
                 }
                 .padding(.vertical, 8)
             }
-            .onAppear { rebuildVisibleItems() }
-            .onChange(of: state.documentVersion) { _, _ in rebuildVisibleItems() }
         } else {
             // [空状态展示]
             VStack {
@@ -102,6 +101,9 @@ struct OutlineView: View {
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
+        }
+        .onAppear { rebuildVisibleItems() }
+        .onChange(of: state.documentVersion) { _, _ in rebuildVisibleItems() }
     }
 }
 
