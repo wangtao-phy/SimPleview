@@ -93,7 +93,9 @@ extension CustomPDFView {
         if bgColor != .default {
             context.saveGState()
             
-            // displayBox 全程固定为 .cropBox（setupDocument / 演示模式均如此），直接使用，避免每瓦片 ObjC 查询
+            // 应用页面变换（含旋转与 cropBox 映射），再填充未旋转的 cropBox，
+            // 确保旋转页面时护眼色也能覆盖整页（否则未旋转的 bounds 在旋转后的坐标下会盖不全）。
+            context.concatenate(page.transform(for: .cropBox))
             let bounds = page.bounds(for: .cropBox)
             
             switch bgColor {
