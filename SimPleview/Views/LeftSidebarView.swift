@@ -59,11 +59,6 @@ struct ThumbnailListView: View {
     @ObservedObject var state: AppState
     @FocusState.Binding var isThumbnailFocused: Bool
     
-    // 缩略图列表是否处于“激活”状态（用户最后点击了缩略图）。
-    // 不再依赖 FocusState（ScrollView 的 .focusable() 在 macOS 上不可靠，FocusState 会被立即重置为 false），
-    // 改用普通 @State 手动维护：点击缩略图置 true，点击 PDF（收到通知）置 false。
-    @State private var isThumbnailActive = false
-    
     #if os(macOS)
     /// 方向键翻页的统一处理。
     ///
@@ -122,7 +117,7 @@ struct ThumbnailListView: View {
                                     let isShift = NSEvent.modifierFlags.contains(.shift)
                                     state.handleThumbnailClick(index: index, isCommandPressed: isCommand, isShiftPressed: isShift)
                                     state.shiftSelectionAnchor = nil // 鼠标点击后重置键盘连选锚点
-                                    isThumbnailActive = true // 激活缩略图键盘导航
+                                    isThumbnailFocused = true // 把键盘焦点抢过来
                                 }
                         }
                     }
@@ -135,7 +130,7 @@ struct ThumbnailListView: View {
                 .padding(.top, 2)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .contentShape(Rectangle())
-                .onTapGesture { isThumbnailActive = true }
+                .onTapGesture { isThumbnailFocused = true }
             }
             #if os(macOS)
             .focusable() // 让它能接盘键盘按键
@@ -145,7 +140,7 @@ struct ThumbnailListView: View {
             // 在 macOS 上会被内层 NSScrollView 抢先消费方向键导致失效。本地监听在事件派发前拦截，稳定可靠。
             .background(
                 ThumbnailKeyMonitorView(
-                    isFocused: isThumbnailActive,
+                    isFocused: isThumbnailFocused,
                     onUp: { isShift in
                         let newIndex = state.liveState.currentPageIndex - 1
                         guard newIndex >= 0 else { return }
@@ -172,14 +167,10 @@ struct ThumbnailListView: View {
             }
             .onChange(of: state.pageStructureChanged) { _, _ in
                 // 插入/删除/重排页后，上下文菜单关闭 + PDFView.go(to:)（异步）可能抢走焦点。
-                // 立即重新激活会被随后发生的焦点抢占“覆盖”，延迟到这些瞬态事件完成之后再重新激活。
+                // 立即重新聚焦会被随后发生的焦点抢占“覆盖”，延迟到这些瞬态事件完成之后再重新聚焦。
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
-                    isThumbnailActive = true
+                    isThumbnailFocused = true
                 }
-            }
-            .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("PDFViewFocusedNotification"))) { _ in
-                // 用户点击了 PDF 画布，解除缩略图键盘导航，让方向键交还给 PDF 滚动
-                isThumbnailActive = false
             }
             .onAppear {
                 // 当用户从“大纲”选项卡切回“缩略图”选项卡时，由于此时的 ScrollView 是全新的，

@@ -9,8 +9,6 @@ extension CustomPDFView {
 
         // [关键修复：焦点抢占] 当从侧边栏或悬浮窗点击进来时，PDFView 必须夺回 FirstResponder 身份，否则后续的 Backspace 键盘事件(keyDown) 会被系统丢弃！
         self.window?.makeFirstResponder(self)
-        // 通知缩略图列表：PDF 画布获得焦点，解除缩略图键盘导航
-        NotificationCenter.default.post(name: NSNotification.Name("PDFViewFocusedNotification"), object: nil)
         
         // --- 拦截手绘模式 ---
         if self.activeType == .ink {
