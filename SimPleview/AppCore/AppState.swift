@@ -134,14 +134,6 @@ final class AppState: NSObject, ObservableObject, PDFViewDelegate {
     var fileName: String {
         return fileURL?.lastPathComponent ?? L("Untitled")
     }
-    var documents: [PDFDocumentModel] {
-        get { documentManager.documents }
-        set { documentManager.documents = newValue }
-    }
-    var activeDocumentIndex: Int {
-        get { documentManager.activeDocumentIndex }
-        set { documentManager.activeDocumentIndex = newValue }
-    }
     var isDirty: Bool {
         get { documentManager.isDirty }
         set { documentManager.isDirty = newValue }
@@ -331,9 +323,6 @@ final class AppState: NSObject, ObservableObject, PDFViewDelegate {
         // 当这个 State 马上要被清理出内存时，抓紧最后机会保存阅读时长和打卡标签
         if let url = fileURL {
             autoTagDocumentIfCompleted(url: url)
-        }
-        for doc in documents {
-            autoTagDocumentIfCompleted(url: doc.url)
         }
         
         // 从全局花名册中把自己划掉

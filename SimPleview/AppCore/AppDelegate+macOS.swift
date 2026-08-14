@@ -328,9 +328,6 @@ class WindowRegistry: NSObject, NSWindowDelegate, ObservableObject {
                 if let url = state.fileURL {
                     state.autoTagDocumentIfCompleted(url: url)
                 }
-                for doc in state.documents {
-                    state.autoTagDocumentIfCompleted(url: doc.url)
-                }
             }
             
             window.delegate = nil

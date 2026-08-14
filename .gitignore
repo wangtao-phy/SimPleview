@@ -4,6 +4,7 @@
 
 ## User settings
 xcuserdata/
+.vscode/
 
 ## compatibility with Xcode 8 and earlier (ignoring not only the settings of main project but also workspace's)
 *.xcworkspace/xcuserdata/

@@ -298,32 +298,6 @@ struct SearchMatch: Identifiable, Equatable {
     static func == (lhs: SearchMatch, rhs: SearchMatch) -> Bool { lhs.id == rhs.id }
 }
 
-/// [教程注释：核心文档模型]
-/// 整个 App 的核心模型，代表了一个被打开的 PDF 文档在内存中的完整状态。
-struct PDFDocumentModel: Identifiable, Equatable {
-    let id = UUID()
-    let url: URL
-    let document: PDFDocument
-    
-    // 这些是可变的（var）业务属性：
-    var currentPageIndex: Int = 0           // 当前阅读到的页码
-    var navigationHistory: [Int] = []       // 页面跳转历史（用于实现“返回上一处”功能）
-    var allAnnotations: [PDFAnnotation] = [] // 缓存所有的批注
-    var batchStack: [UndoAction] = []       // 撤销堆栈（Undo/Redo 系统的核心）
-    var redoStack: [UndoAction] = []        // 重做堆栈
-    var isAccessing: Bool = false           // 标记文件安全访问权限的状态（用于 App Sandbox 环境）
-    
-    // [教程注释：便捷访问]
-    // 通过 url 解析出不带后缀的文件名，方便 UI 直接显示标题。
-    var fileName: String {
-        url.deletingPathExtension().lastPathComponent
-    }
-    
-    static func == (lhs: PDFDocumentModel, rhs: PDFDocumentModel) -> Bool {
-        lhs.id == rhs.id
-    }
-}
-
 /// [教程注释：撤销动作栈枚举]
 /// 使用了 Swift 强大的“带关联值的枚举 (Enum with Associated Values)”。
 /// 这不仅仅是个状态标志，它还能直接把当时的数据“打包”携带，完美匹配撤销重做（Undo/Redo）的设计模式。

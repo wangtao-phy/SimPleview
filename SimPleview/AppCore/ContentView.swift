@@ -35,9 +35,6 @@ struct ContentView: View {
     // 存放快速翻页输入框里的字符串
     @State private var inputPageText: String = ""
     
-    // 打开新窗口的方法注入
-    @Environment(\.openWindow) private var openWindow
-    
     // 逆向反向绑定：为了能够在 SwiftUI 里动态改变其宿主原生窗口（NSWindow）的标题栏属性，
     // 我们用一个 @State 把外界真正的指针“钩”进来保存着。
     @State private var hostingWindow: NSWindow?
@@ -137,17 +134,6 @@ struct ContentView: View {
         .onReceive(NotificationCenter.default.publisher(for: NSWindow.didResignKeyNotification)) { notification in
             if let window = notification.object as? NSWindow, window === hostingWindow {
                 state.scheduleHibernation()
-            }
-        }
-        // 当窗口马上要关闭：强制给阅读到一半的文章打上“已读”相关的标签记录。
-        .onReceive(NotificationCenter.default.publisher(for: NSWindow.willCloseNotification)) { notification in
-            if let window = notification.object as? NSWindow {
-                let isMatch = (window === hostingWindow)
-                if isMatch {
-                    for doc in state.documents {
-                        state.autoTagDocumentIfCompleted(url: doc.url)
-                    }
-                }
             }
         }
         // 当用户在设置中改变了休眠时间：

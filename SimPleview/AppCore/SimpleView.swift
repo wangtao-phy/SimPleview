@@ -19,9 +19,6 @@ struct SimpleViewApp: App {
     
     // [逻辑流程：环境与依赖注入]
     // `@Environment` 是一种从系统环境变量中读取依赖的方式。
-    // \.openWindow 是 SwiftUI 提供的一个全局闭包，可以随时调用它来打开新的系统窗口。
-    @Environment(\.openWindow) private var openWindow
-    
     // [核心概念：焦点值绑定]
     // `@FocusedValue` 用于多窗口程序。如果你打开了三个 PDF 窗口，全局菜单栏的按钮怎么知道应该操作哪一个？
     // 答案就是看哪个窗口当前处于“激活(Focused)”状态，它就会动态读取那个窗口的 state。

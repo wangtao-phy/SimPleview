@@ -13,12 +13,6 @@ final class DocumentManager: ObservableObject {
     /// 当前打开的 PDF 文件的本地 URL
     @Published var fileURL: URL?
     
-    /// (仅限 iOS) 多标签文档列表：iOS 没有浮动窗口，只能在一个界面里开多个标签
-    @Published var documents: [PDFDocumentModel] = []
-    
-    /// (仅限 iOS) 的当前活动文档索引
-    @Published var activeDocumentIndex: Int = 0
-    
     /// 标记当前文档是否包含未保存的修改 (比如你刚画了一条线)
     @Published var isDirty: Bool = false
     
