@@ -50,7 +50,9 @@ class HistoryWindowManager {
             object: window,
             queue: .main
         ) { [weak self] _ in
-            self?.windowController = nil
+            MainActor.assumeIsolated {
+                self?.windowController = nil
+            }
         }
         
         wc.showWindow(nil)
