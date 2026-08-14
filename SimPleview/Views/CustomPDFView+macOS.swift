@@ -6,6 +6,11 @@ import AppKit
 
 private nonisolated(unsafe) var inkPathAssociatedKey: UInt8 = 0
 
+// 缓存的护眼色 CGColor（device RGB 色彩空间），避免每个瓦片渲染时重复创建 NSColor 并做色彩空间转换
+nonisolated let eyeCareGreenCGColor: CGColor = NSColor(red: 0.78, green: 0.93, blue: 0.8, alpha: 1.0).cgColor
+nonisolated let eyeCareYellowCGColor: CGColor = NSColor(red: 0.96, green: 0.9, blue: 0.75, alpha: 1.0).cgColor
+nonisolated let eyeCareWhiteCGColor: CGColor = NSColor.white.cgColor
+
 extension PDFAnnotation {
     nonisolated var cachedInkBezierPath: NSBezierPath? {
         get { objc_getAssociatedObject(self, &inkPathAssociatedKey) as? NSBezierPath }
@@ -88,26 +93,20 @@ extension CustomPDFView {
         if bgColor != .default {
             context.saveGState()
             
-            // 为了安全获取 displayBox，由于 Swift 6 @MainActor 隔离，通过 ObjC 机制获取
-            let boxGetter = class_getInstanceMethod(PDFView.self, #selector(getter: PDFView.displayBox))!
-            let boxImp = method_getImplementation(boxGetter)
-            typealias BoxGetterType = @convention(c) (AnyObject, Selector) -> PDFDisplayBox
-            let getBox = unsafeBitCast(boxImp, to: BoxGetterType.self)
-            let box = getBox(self, #selector(getter: PDFView.displayBox))
-            
-            let bounds = page.bounds(for: box)
+            // displayBox 全程固定为 .cropBox（setupDocument / 演示模式均如此），直接使用，避免每瓦片 ObjC 查询
+            let bounds = page.bounds(for: .cropBox)
             
             switch bgColor {
             case .green:
-                context.setFillColor(NSColor(red: 0.78, green: 0.93, blue: 0.8, alpha: 1.0).cgColor)
+                context.setFillColor(eyeCareGreenCGColor)
                 context.setBlendMode(.multiply)
                 context.fill(bounds)
             case .yellow:
-                context.setFillColor(NSColor(red: 0.96, green: 0.9, blue: 0.75, alpha: 1.0).cgColor)
+                context.setFillColor(eyeCareYellowCGColor)
                 context.setBlendMode(.multiply)
                 context.fill(bounds)
             case .black:
-                context.setFillColor(NSColor.white.cgColor)
+                context.setFillColor(eyeCareWhiteCGColor)
                 context.setBlendMode(.difference)
                 context.fill(bounds)
             default:

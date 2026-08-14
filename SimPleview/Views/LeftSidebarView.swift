@@ -165,6 +165,10 @@ struct ThumbnailListView: View {
                     proxy.scrollTo(newIndex)
                 }
             }
+            .onChange(of: state.liveState.totalPageCount) { _, _ in
+                // 插入/删除页面后（PDFView.go(to:) 可能抢走焦点），重新聚焦缩略图列表，避免键盘翻页失效
+                isThumbnailFocused = true
+            }
             .onAppear {
                 // 当用户从“大纲”选项卡切回“缩略图”选项卡时，由于此时的 ScrollView 是全新的，
                 // 我们必须在它刚出现的一瞬间，把它拉回当前所处的阅读页码位置，否则它会傻傻地待在最顶部。

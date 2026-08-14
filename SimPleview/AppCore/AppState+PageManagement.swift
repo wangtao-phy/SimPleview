@@ -79,7 +79,7 @@ extension AppState {
         liveState.totalPageCount = doc.pageCount
         thumbnailManager.clearCache()
         rebuildPageAspectRatios()
-        documentVersion = UUID() // 重建缩略图列表身份，避免插入页后 @State 缓存错位
+        thumbnailManager.hotReloadSubject.send() // 重建可见缩略图（避免全量重建导致闪白）
         
         // 自动跳转并选中新页面
         self.liveState.currentPageIndex = insertAt
@@ -117,7 +117,7 @@ extension AppState {
         liveState.totalPageCount = doc.pageCount
         thumbnailManager.clearCache()
         rebuildPageAspectRatios()
-        documentVersion = UUID() // 重建缩略图列表身份，避免删除页后 @State 缓存错位
+        thumbnailManager.hotReloadSubject.send() // 重建可见缩略图（避免全量重建导致闪白）
         if liveState.currentPageIndex >= liveState.totalPageCount { liveState.currentPageIndex = liveState.totalPageCount - 1 }
         pdfView.setPlatformNeedsDisplay()
         isDirty = true
@@ -136,7 +136,7 @@ extension AppState {
         liveState.totalPageCount = doc.pageCount
         thumbnailManager.clearCache()
         rebuildPageAspectRatios()
-        documentVersion = UUID() // 重建缩略图列表身份，避免插入 PDF 后 @State 缓存错位
+        thumbnailManager.hotReloadSubject.send() // 重建可见缩略图（避免全量重建导致闪白）
         if liveState.currentPageIndex >= insertAt { liveState.currentPageIndex += insertDoc.pageCount }
         pdfView.setPlatformNeedsDisplay()
         isDirty = true
