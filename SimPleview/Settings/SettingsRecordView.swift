@@ -6,7 +6,6 @@ import SwiftUI
 struct RecordSettingsView: View {
     // [AppStorage 数据源绑定]
     @AppStorage("appLanguage") var appLanguage: AppLanguage = .zh
-    @AppStorage("recordEnabled") var recordEnabled: Bool = true
     @AppStorage("heatmapSegments") var heatmapSegments: Double = 50.0
     @AppStorage("heatmapColorTheme") var heatmapColorTheme: String = "Red"
     @AppStorage("ratingChartColorTheme") var ratingChartColorTheme: String = "Blue"

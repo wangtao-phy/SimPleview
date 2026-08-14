@@ -7,6 +7,7 @@ import AppKit
 class HistoryWindowManager {
     static let shared = HistoryWindowManager()
     private var windowController: NSWindowController?
+    private var closeObserver: NSObjectProtocol?
     
     func open() {
         // 如果窗口已经打开了，那么就让它激活并置于前台
@@ -32,13 +33,26 @@ class HistoryWindowManager {
         window.setContentSize(NSSize(width: 800, height: 600))
         window.center()
         
-        // 将生命周期交还给 Manager 避免崩溃
-        window.isReleasedWhenClosed = false
+        // 关闭时释放窗口资源（避免常驻内存）；下次 open 会重新创建
+        window.isReleasedWhenClosed = true
         // 彻底禁用 macOS 烦人的窗口位置记忆
         window.isRestorable = false
         
         let wc = NSWindowController(window: window)
         self.windowController = wc
+        
+        // 窗口关闭时释放 windowController 引用，让窗口与视图树真正释放内存
+        if let obs = closeObserver {
+            NotificationCenter.default.removeObserver(obs)
+        }
+        closeObserver = NotificationCenter.default.addObserver(
+            forName: NSWindow.willCloseNotification,
+            object: window,
+            queue: .main
+        ) { [weak self] _ in
+            self?.windowController = nil
+        }
+        
         wc.showWindow(nil)
     }
 }

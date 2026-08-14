@@ -23,12 +23,16 @@ struct OutlineView: View {
     // 存储被用户主动“收起”的节点 ID（默认全部展开，符合大多数人的阅读直觉）
     @State private var collapsedNodes = Set<ObjectIdentifier>()
     
-    // [极致计算量优化：瞬间拍平结构]
-    // 每次渲染只提取"当前可视状态下"的线性大纲，扔给底层 LazyVStack。
-    // 这把千万级的递归视图开销直接降维打击成了几十个扁平格子的循环！
-    var visibleItems: [FlatOutlineItem] {
+    // [性能修复] 缓存拍平后的线性大纲。仅在文档切换 / 折叠状态变化时重建，
+    // 避免每次 body 渲染都全量递归遍历整棵大纲树 (O(N)) 造成滚动抖动。
+    @State private var cachedItems: [FlatOutlineItem] = []
+    
+    private func rebuildVisibleItems() {
         var items: [FlatOutlineItem] = []
-        guard let root = state.pdfView.document?.outlineRoot else { return [] }
+        guard let root = state.pdfView.document?.outlineRoot else {
+            cachedItems = []
+            return
+        }
         
         func traverse(_ node: PDFOutline, level: Int) {
             let id = ObjectIdentifier(node)
@@ -48,11 +52,11 @@ struct OutlineView: View {
         for i in 0..<root.numberOfChildren {
             if let child = root.child(at: i) { traverse(child, level: 0) }
         }
-        return items
+        cachedItems = items
     }
     
     var body: some View {
-        let items = visibleItems
+        let items = cachedItems
         if !items.isEmpty {
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 0) {
@@ -68,6 +72,7 @@ struct OutlineView: View {
                                     } else {
                                         collapsedNodes.insert(item.id)
                                     }
+                                    rebuildVisibleItems() // 折叠状态变化后重建缓存
                                 }
                             },
                             onSelect: {
@@ -86,6 +91,8 @@ struct OutlineView: View {
                 }
                 .padding(.vertical, 8)
             }
+            .onAppear { rebuildVisibleItems() }
+            .onChange(of: state.documentVersion) { _, _ in rebuildVisibleItems() }
         } else {
             // [空状态展示]
             VStack {

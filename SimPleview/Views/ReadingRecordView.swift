@@ -20,7 +20,7 @@ struct ReadingRecordView: View {
     // 因为这篇文档的数据原本藏在 `tracker` 字典里的一角，我们用闭包动态查字典生成了一个 Binding 对象，
     // 把里面的值像水管一样导出来，供给下方的各种输入框直接双向修改。
     private var currentRecordBinding: Binding<DocumentRecord>? {
-        guard let url = state.pdfView.document?.documentURL else { return nil }
+        guard let url = state.fileURL else { return nil }
         let title = url.deletingPathExtension().lastPathComponent
         guard tracker.recordsCache[title] != nil else { return nil }
         
@@ -266,8 +266,8 @@ struct ReadingRecordView: View {
                 (a, r, g, b) = (255, (int >> 8) * 17, (int >> 4 & 0xF) * 17, (int & 0xF) * 17)
             case 6: // RGB (24-bit)
                 (a, r, g, b) = (255, int >> 16, int >> 8 & 0xFF, int & 0xFF)
-            case 8: // ARGB (32-bit)
-                (a, r, g, b) = (int >> 24, int >> 16 & 0xFF, int >> 8 & 0xFF, int & 0xFF)
+            case 8: // RGBA (32-bit)，与 NSColor(hex:) 的解析保持一致
+                (a, r, g, b) = (int & 0xFF, int >> 24 & 0xFF, int >> 16 & 0xFF, int >> 8 & 0xFF)
             default:
                 (a, r, g, b) = (255, 0, 0, 0)
             }
