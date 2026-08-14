@@ -177,6 +177,11 @@ struct ThumbnailListView: View {
                 // 我们必须在它刚出现的一瞬间，把它拉回当前所处的阅读页码位置，否则它会傻傻地待在最顶部。
                 // 这里的 anchor: .center 是安全的，因为视图还没渲染出来，没有视觉跳动！
                 proxy.scrollTo(state.liveState.currentPageIndex, anchor: .center)
+                // 切回缩略图栏时，FocusState 会因旧 ScrollView 被移除而复位，这里重新激活键盘翻页。
+                // 延迟到下一 runloop，确保 .focused() 绑定已就绪。
+                DispatchQueue.main.async {
+                    isThumbnailFocused = true
+                }
             }
         }
     }
