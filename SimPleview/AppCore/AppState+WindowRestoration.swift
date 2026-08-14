@@ -60,7 +60,6 @@ extension AppState {
     func openInBrowser() {
         guard let url = fileURL else { return }
         
-        #if os(macOS)
         let browserPrefStr = UserDefaults.standard.string(forKey: "externalBrowser") ?? "Default"
         let browserPref = ExternalBrowser(rawValue: browserPrefStr) ?? .defaultBrowser
         let customPath = UserDefaults.standard.string(forKey: "customBrowserPath") ?? ""
@@ -101,10 +100,6 @@ extension AppState {
         } else {
             NSWorkspace.shared.open(url)
         }
-        #else
-        // iOS 非常简单粗暴，交由系统决定去哪个软件里
-        UIApplication.shared.open(url)
-        #endif
     }
     
     // 从最近打开的历史记录清理掉本文件

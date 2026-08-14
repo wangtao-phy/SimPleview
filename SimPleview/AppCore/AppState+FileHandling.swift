@@ -14,35 +14,20 @@ extension AppState {
     
     // [原生打印功能]
     func printDocument() {
-        #if os(macOS)
         // 使用 PDFView 自带的原生打印接口，完美包含一切手写和矢量批注
         let printInfo = NSPrintInfo.shared
         printInfo.horizontalPagination = .fit
         printInfo.verticalPagination = .fit
         pdfView.print(with: printInfo, autoRotate: true)
-        #endif
     }
     
     /// [核心概念：加载 PDF]
     /// 这是 App 启动后最重要的函数，负责将硬盘里的 PDF 文件塞入内存。
     func loadPDF(url: URL, isHotReloading: Bool = false) {
-        #if os(iOS)
-        // iOS 模式下：如果在多标签页中发现这个文件已经打开了，直接切换到它，不再重复加载。
-        if let existingIndex = documents.firstIndex(where: { $0.url == url }) {
-            selectDocument(at: existingIndex)
-            return
-        }
-        #endif
-        
-        #if os(macOS)
         // [底层逻辑：App Sandbox 沙盒权限机制]
         // 苹果系统的安全机制极其严格。如果这个 URL 是我们通过系统的弹窗选的，它会有“SecurityScopedResource”权限。
         // 如果是历史记录里的，需要解析书签来恢复权限。这个 resolve 函数帮我们封装了底层复杂的权限申请。
-        let resolvedURL = resolveSecurityURL(url: url)
-        let targetURL = resolvedURL
-        #else
-        let targetURL = url
-        #endif
+        let targetURL = resolveSecurityURL(url: url)
         
         // 每一次加载都获得版本号；慢的旧请求只能自行释放资源，不能回写 UI。
         loadGeneration &+= 1
@@ -102,22 +87,10 @@ extension AppState {
                     return
                 }
                 
-                #if os(iOS)
-                // iOS: 新开一个标签页
-                let newModel = PDFDocumentModel(url: url, document: doc, isAccessing: accessing)
-                self.documentManager.documents.append(newModel)
-                self.documentManager.activeDocumentIndex = self.documentManager.documents.count - 1
-                #else
                 // macOS: 每次打开新文件时，我们把它从“最近打开”的内部列表里清理掉，防止重复。
                 self.documentManager.removeFromOpenedRecent(url: self.fileURL)
-                #endif
                 
                 self.setupDocument(doc, url: targetURL, isHotReloading: isHotReloading)
-                
-                #if os(iOS)
-                // 存进UserDefaults持久化标签状态
-                self.documentManager.persistiOSDocuments()
-                #endif
             }
         }
         loadTask = task
@@ -225,31 +198,6 @@ extension AppState {
         }
     }
     
-    // MARK: - iOS Multi-tab support
-    
-    // iOS 专用：切换顶部标签页
-    func selectDocument(at index: Int) {
-        guard index >= 0 && index < documents.count else { return }
-        documentManager.activeDocumentIndex = index
-        let model = documents[index]
-        
-        // [状态替换大法]
-        // 切换标签页时，把新文件的历史、批注堆栈全部“覆盖”到当前的视图环境里。
-        self.liveState.currentPageIndex = model.currentPageIndex
-        self.navigationManager.navigationHistory = model.navigationHistory
-        self.allAnnotations = model.allAnnotations
-        self.batchStack = model.batchStack
-        self.redoStack = model.redoStack
-        
-        self.setupDocument(model.document, url: model.url)
-        self.refreshAnnotations()
-        
-        // 让 PDF 引擎精准跳转到之前看到的那页
-        if let page = model.document.page(at: model.currentPageIndex) {
-            pdfView.go(to: page)
-        }
-    }
-    
     // [智能自动化：文献已读打签]
     // 这是个专为强迫症学者设计的功能。关闭文件时，检查各种信息（是否总结过？是否有打分？是否有作者信息？）
     // 如果全都有，说明这篇论文已经“精读”过了，自动在 macOS 底层用访达（Finder）给文件挂上一个橘黄色的“已精读”系统标签！
@@ -266,7 +214,6 @@ extension AppState {
             }
             
             if hasDate && hasSummary && hasRatings && hasValidAuthor {
-                #if os(macOS)
                 var fileURL = url
                 let accessing = fileURL.startAccessingSecurityScopedResource()
                 defer { if accessing { fileURL.stopAccessingSecurityScopedResource() } }
@@ -283,63 +230,7 @@ extension AppState {
                 } catch {
                     // 默默失败，不打扰用户
                 }
-                #endif
             }
         }
     }
-    
-    // 关闭标签页（或关闭单文档窗口时触发）
-    func closeDocument(at index: Int) {
-        guard index >= 0 && index < documents.count else { return }
-        
-        let documentToClose = documents[index]
-        autoTagDocumentIfCompleted(url: documentToClose.url) // 关闭前尝试打标签
-        
-        let removed = documentManager.documents.remove(at: index)
-        // 取消底层授权，防止句柄泄露
-        if removed.isAccessing { removed.url.stopAccessingSecurityScopedResource() }
-        
-        if documents.isEmpty {
-            // 如果全关了，清空环境，显示空白占位图
-            fileURL = nil
-            pdfView.document = nil
-            activeDocumentIndex = 0
-            allAnnotations = []
-            batchStack = []
-            redoStack = []
-            navigationManager.clearHistory()
-        } else {
-            // 如果还剩有标签，自动跳到左边那个标签
-            let newIndex = min(index, documents.count - 1)
-            selectDocument(at: newIndex)
-        }
-        documentManager.persistiOSDocuments()
-    }
-    
-    #if os(iOS)
-    // [底层逻辑：iOS 上的 URL 书签恢复]
-    // iOS 重启 App 后，直接用原来的 URL 会因为沙盒报错“无权限”。
-    // 必须要用上次特意存进 UserDefaults 的 Bookmark (书签数据) 还原出一条有权限的 URL 才行！
-    func restoreiOSDocuments() {
-        guard let bookmarks = UserDefaults.standard.array(forKey: "OpenediOSPDFBookmarks") as? [Data] else { return }
-        for data in bookmarks {
-            do {
-                var isStale = false
-                let url = try URL(resolvingBookmarkData: data, bookmarkDataIsStale: &isStale)
-                if !isStale { loadPDF(url: url) }
-            } catch {
-            }
-        }
-    }
-    
-    func autoSyncCurrentDocument() {
-        guard !documents.isEmpty && activeDocumentIndex < documents.count else { return }
-        documentManager.documents[activeDocumentIndex].currentPageIndex = self.liveState.currentPageIndex
-        documentManager.documents[activeDocumentIndex].navigationHistory = self.navigationHistory
-        documentManager.documents[activeDocumentIndex].allAnnotations = self.allAnnotations
-        documentManager.documents[activeDocumentIndex].batchStack = self.batchStack
-        documentManager.documents[activeDocumentIndex].redoStack = self.redoStack
-        documentManager.persistiOSDocuments()
-    }
-    #endif
 }

@@ -56,16 +56,6 @@ final class DocumentManager: ObservableObject {
         #endif
     }
     
-    /// 仅限 iOS: 将所有打开的选项卡的文档状态序列化保存，方便应用下次启动时重新恢复这些标签页
-    func persistiOSDocuments() {
-        #if os(iOS)
-        let bookmarks = documents.compactMap { model -> Data? in
-            try? model.url.bookmarkData(options: [], includingResourceValuesForKeys: nil, relativeTo: nil)
-        }
-        UserDefaults.standard.set(bookmarks, forKey: "OpenediOSPDFBookmarks")
-        #endif
-    }
-    
     // MARK: - Safe Background Saving (安全后台保存机制)
     
     // [核心引擎：多线程调度]
@@ -169,47 +159,10 @@ final class DocumentManager: ObservableObject {
         }
     }
     
-    // MARK: - iOS Specific Debounced Save
-    #if os(iOS)
-    private var iosSaveDebounceWorkItem: DispatchWorkItem?
-    
-    /// 专门为 iOS 优化的延迟保存机制。
-    /// 核心区别：将防抖等待放在 `document.dataRepresentation()` 之前执行。
-    /// 只有当用户停笔 3 秒后，才真正进入主线程提取沉重的 PDF 数据，从而彻底消除标注时的 UI 卡顿。
-    func saveForiOS(pdfView: PDFView?) {
-        guard isDirty, let url = fileURL, let document = pdfView?.document else { return }
-        
-        iosSaveDebounceWorkItem?.cancel()
-        
-        let workItem = DispatchWorkItem { [weak self] in
-            guard let self = self, self.isDirty else { return }
-            
-            let accessing = url.startAccessingSecurityScopedResource()
-            defer { if accessing { url.stopAccessingSecurityScopedResource() } }
-            
-            // iOS 端同样强制使用增量保存保护 LaTeX 字体，直接在主线程毫秒级完成
-            if ImageDocumentManager.isImageFile(url: url) {
-                // NOTE: iOS 端暂不支持图片另存为面板，暂时忽略自动保存以保护原图
-                return
-            }
-            let success = document.write(to: url)
-            
-            if success {
-                self.isDirty = false
-            }
-        }
-        
-        iosSaveDebounceWorkItem = workItem
-        // 延迟 3 秒，防止连续高频标注导致重复序列化
-        DispatchQueue.main.asyncAfter(deadline: .now() + 3.0, execute: workItem)
-    }
-    #endif
-    
     // MARK: - Security Scoped Resources Access
     
     // 负责申请和释放沙盒权限，防止应用崩溃
     func handleDocumentAccess(url: URL) -> Bool {
-        #if os(macOS)
         let accessing = url.startAccessingSecurityScopedResource()
         // macOS 是单窗口结构，所以如果换了新文件，一定要把旧文件的访问锁释放掉
         if let oldURL = macOSAccessingURL {
@@ -221,23 +174,14 @@ final class DocumentManager: ObservableObject {
             macOSAccessingURL = nil
         }
         return accessing
-        #else
-        // iOS 管理方式不一样，它的锁存在 Model 身上
-        return url.startAccessingSecurityScopedResource()
-        #endif
     }
 
     /// 仅在该 URL 仍是当前持有的授权时释放它，避免过期加载任务误释放新文档的权限。
     func releaseDocumentAccessIfCurrent(url: URL, wasAccessing: Bool = true) {
-        #if os(macOS)
         guard macOSAccessingURL == url else { return }
         guard wasAccessing else { return }
         url.stopAccessingSecurityScopedResource()
         macOSAccessingURL = nil
-        #else
-        guard wasAccessing else { return }
-        url.stopAccessingSecurityScopedResource()
-        #endif
     }
     
     // 程序退出时的终极清理
@@ -246,17 +190,7 @@ final class DocumentManager: ObservableObject {
         fileMonitor?.stop()
         fileMonitor = nil
         
-        #if os(macOS)
         macOSAccessingURL?.stopAccessingSecurityScopedResource()
-        #endif
-        
-        #if os(iOS)
-        for doc in documents {
-            if doc.isAccessing {
-                doc.url.stopAccessingSecurityScopedResource()
-            }
-        }
-        #endif
     }
 }
 

@@ -41,11 +41,7 @@ final class AnnotationManager: ObservableObject {
     private static func color(from name: String?, defaultColor: PlatformColor) -> PlatformColor {
         guard let name = name else { return defaultColor }
         if name.hasPrefix("#") {
-            #if os(macOS)
             return NSColor(hex: name) ?? defaultColor
-            #else
-            return defaultColor
-            #endif
         }
         switch name {
         case "Blue": return .platformBlue

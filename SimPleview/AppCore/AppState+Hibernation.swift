@@ -1,11 +1,7 @@
 import Foundation
 import PDFKit
 import Combine
-#if os(macOS)
 import AppKit
-#else
-import UIKit
-#endif
 
 /// [教程注释：极客级内存休眠机制]
 /// 这是本 App 引以为傲的核心卖点之一。

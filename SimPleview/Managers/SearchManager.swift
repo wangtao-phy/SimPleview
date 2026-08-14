@@ -54,9 +54,6 @@ final class SearchManager: ObservableObject {
             self.searchResults = []
             self.currentSearchIndex = nil
             self.isSearching = false
-            #if os(iOS)
-            pdfView?.highlightedSelections = nil
-            #endif
             return
         }
         
@@ -234,11 +231,7 @@ final class SearchManager: ObservableObject {
                 let flashAnnotations = match.boundsArray.map { bounds -> PDFAnnotation in
                     let annot = PDFAnnotation(bounds: bounds, forType: .highlight, withProperties: nil)
                     // 使用纯黄色，更加明亮醒目
-                    #if os(macOS)
                     annot.color = NSColor.yellow.withAlphaComponent(1.0)
-                    #else
-                    annot.color = UIColor.yellow.withAlphaComponent(1.0)
-                    #endif
                     // [防污染] 标记为临时闪烁批注：不打印、只读，并在收集逻辑中排除
                     annot.userName = "SEARCH_FLASH"
                     annot.shouldPrint = false
@@ -247,22 +240,13 @@ final class SearchManager: ObservableObject {
                     return annot
                 }
                 
-                #if os(iOS)
-                pdfView.highlightedSelections = [selection]
-                pdfView.becomeFirstResponder()
-                #endif
-                
                 // 使用 Task.sleep 实现平滑褪色动画 (0.5秒内褪色完毕)
                 let totalSteps = 12 // 12 帧，每帧 0.04 秒 ≈ 0.5 秒动画
                 for step in 1...totalSteps {
                     try? await Task.sleep(nanoseconds: 40_000_000)
                     let alpha = CGFloat(1.0 - Double(step) / Double(totalSteps))
                     for annot in flashAnnotations {
-                        #if os(macOS)
                         annot.color = NSColor.yellow.withAlphaComponent(alpha)
-                        #else
-                        annot.color = UIColor.yellow.withAlphaComponent(alpha)
-                        #endif
                     }
                 }
                 

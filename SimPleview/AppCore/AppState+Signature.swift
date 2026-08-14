@@ -204,11 +204,7 @@ extension AppState {
         }
         
         if count > 0 {
-            #if os(macOS)
             return NSColor(calibratedRed: CGFloat(rSum/count)/255.0, green: CGFloat(gSum/count)/255.0, blue: CGFloat(bSum/count)/255.0, alpha: 1.0)
-            #else
-            return UIColor(red: CGFloat(rSum/count)/255.0, green: CGFloat(gSum/count)/255.0, blue: CGFloat(bSum/count)/255.0, alpha: 1.0)
-            #endif
         }
         
         return PlatformColor.black

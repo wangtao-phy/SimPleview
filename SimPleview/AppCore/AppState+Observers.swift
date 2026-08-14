@@ -68,16 +68,9 @@ extension AppState {
                 self?.resetAnnotationTimer()
             }
         }
-        #if os(iOS)
-        pdfView.onSaveRequired = { [weak self] in
-            self?.isDirty = true
-            self?.save()
-        }
-        #else
         pdfView.onSaveRequired = { [weak self] in
             self?.isDirty = true
         }
-        #endif
     }
     
     // [教程注释：基于 Combine 的响应式编程流]
@@ -105,10 +98,6 @@ extension AppState {
                             let title = url.deletingPathExtension().lastPathComponent
                             self.readingTracker.startTracking(documentID: title, documentTitle: title, pageIndex: index)
                         }
-                        
-                        #if os(iOS)
-                        self.autoSyncCurrentDocument()
-                        #endif
                     }
                 }
             }
@@ -129,11 +118,7 @@ extension AppState {
 
         // 监听文本选择事件
         nc.publisher(for: .PDFViewSelectionChanged)
-            #if os(iOS)
-            .debounce(for: .milliseconds(600), scheduler: RunLoop.main) // 防抖：iOS 手指划动会触发几百次选择改变，防抖让它安静下来再处理
-            #else
             .debounce(for: .milliseconds(200), scheduler: RunLoop.main)
-            #endif
             .sink { [weak self] _ in
                 guard let self = self else { return }
                 
@@ -187,23 +172,9 @@ extension AppState {
                     // 把页码存入磁盘，下次打开回到这里
                     UserDefaults.standard.set(index, forKey: "PDFLastPage_" + url.lastPathComponent)
                 }
-                
-                #if os(iOS)
-                self.autoSyncCurrentDocument()
-                #endif
             }
             .store(in: &cancellables)
             
-        annotationManager.$allAnnotations
-            .dropFirst()
-            .sink { [weak self] _ in
-                #if os(iOS)
-                self?.autoSyncCurrentDocument()
-                #endif
-            }
-            .store(in: &cancellables)
-
-        #if os(macOS)
         // 监听到系统真的要退出了，马上发起急救式保存
         nc.publisher(for: NSApplication.willTerminateNotification)
             .sink { [weak self] _ in
@@ -234,17 +205,6 @@ extension AppState {
                 self.thumbnailManager.hotReloadSubject.send()
             }
             .store(in: &cancellables)
-        #else
-        // iOS 对应的前台激活通知
-        nc.publisher(for: UIApplication.didBecomeActiveNotification)
-            .sink { [weak self] _ in
-                guard let self = self, !self.isHibernating else { return }
-                
-                self.thumbnailManager.clearCache()
-                self.thumbnailManager.hotReloadSubject.send()
-            }
-            .store(in: &cancellables)
-        #endif
         
         nc.publisher(for: NSNotification.Name("PDFRefreshAnnotations"))
             .sink { [weak self] _ in self?.refreshAnnotations() }
@@ -299,11 +259,7 @@ extension AppState {
                 
                 // 2. 强迫 PDFKit 吐出非可视区域的瓦片（Tile Cache）
                 // 这个原生调用会让 PDFView 重新评估可视区域，从而释放大量积压在 CoreAnimation 里的高清贴图。
-                #if os(macOS)
                 self.pdfView.layoutDocumentView()
-                #else
-                self.pdfView.setNeedsLayout()
-                #endif
             }
         }
         source.resume()

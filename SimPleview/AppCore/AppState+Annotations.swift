@@ -30,11 +30,6 @@ extension AppState {
             isDirty = true // 将文档打上“被弄脏(已被编辑，需要保存)”的标记
         }
         isApplyingAnnotation = false
-        
-        // iOS 沙盒机制不同，没有明显的“退出”或保存动作，我们需要随时帮它落盘。
-        #if os(iOS)
-        if isDirty { documentManager.saveForiOS(pdfView: pdfView) }
-        #endif
     }
     
     func deleteAnnotation(_ annotation: PDFAnnotation) {
@@ -45,9 +40,6 @@ extension AppState {
         }) {
             isDirty = true
         }
-        #if os(iOS)
-        if isDirty { documentManager.saveForiOS(pdfView: pdfView) }
-        #endif
     }
     
     func deleteSelectedAnnotation() {

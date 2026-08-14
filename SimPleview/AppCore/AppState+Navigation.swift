@@ -137,9 +137,6 @@ extension AppState {
             self?.goToPage(index)
         }) {
             isDirty = true
-            #if os(iOS)
-            if isDirty { documentManager.saveForiOS(pdfView: pdfView) }
-            #endif
         }
     }
     
@@ -157,9 +154,6 @@ extension AppState {
             self?.goToPage(index)
         }) {
             isDirty = true
-            #if os(iOS)
-            if isDirty { documentManager.saveForiOS(pdfView: pdfView) }
-            #endif
         }
     }
     

@@ -77,7 +77,6 @@ class ReadingTracker: ObservableObject {
     // 目的是：不管是在 Mac 还是 iOS，只要应用被推到后台，或者被强制杀死，我们都能第一时间接到通知！
     private func registerAppLifecycleNotifications() {
         let center = NotificationCenter.default
-        #if os(macOS)
         observers.append(center.addObserver(forName: NSApplication.willResignActiveNotification, object: nil, queue: .main) { [weak self] _ in
             Task { @MainActor [weak self] in self?.handleAppDeactivated() }
         })
@@ -87,17 +86,6 @@ class ReadingTracker: ObservableObject {
         observers.append(center.addObserver(forName: NSApplication.willTerminateNotification, object: nil, queue: .main) { [weak self] _ in
             Task { @MainActor [weak self] in self?.handleAppDeactivated() }
         })
-        #else
-        observers.append(center.addObserver(forName: UIApplication.didEnterBackgroundNotification, object: nil, queue: .main) { [weak self] _ in
-            Task { @MainActor [weak self] in self?.handleAppDeactivated() }
-        })
-        observers.append(center.addObserver(forName: UIApplication.willEnterForegroundNotification, object: nil, queue: .main) { [weak self] _ in
-            Task { @MainActor [weak self] in self?.handleAppActivated() }
-        })
-        observers.append(center.addObserver(forName: UIApplication.willTerminateNotification, object: nil, queue: .main) { [weak self] _ in
-            Task { @MainActor [weak self] in self?.handleAppDeactivated() }
-        })
-        #endif
     }
     
     private func handleAppDeactivated() {

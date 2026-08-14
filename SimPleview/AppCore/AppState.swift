@@ -3,11 +3,7 @@ import PDFKit
 import SwiftUI
 import UniformTypeIdentifiers
 
-#if os(macOS)
 import AppKit
-#else
-import UIKit
-#endif
 
 /// 弱引用包装器，用于打破全局数组对 AppState 的死锁强引用
 struct WeakAppState {
@@ -274,9 +270,6 @@ final class AppState: NSObject, ObservableObject, PDFViewDelegate {
         pdfView.delegate = self
         setupCallbacks()
         setupObservers()
-        #if os(iOS)
-        restoreiOSDocuments()
-        #endif
         // 把自己注册到全局花名册里，并顺手清理一下死掉的僵尸对象
         AppState.addInstance(self)
     }
