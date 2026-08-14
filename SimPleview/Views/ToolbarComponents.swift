@@ -122,9 +122,8 @@ struct DrawButtonView: View {
     }
 }
 
-// MARK: - iOS 专属：批注二次编辑面板
-/// 当你在 iOS 上点击了 PDF 里的某条高亮，屏幕底部会弹出一个浮窗。
-/// 这个浮窗就是这里定义的。它允许你修改高亮的颜色，或者一键删掉它。
+// MARK: - 批注二次编辑面板
+/// 当你在 PDF 里选中了某条高亮，屏幕会弹出一个浮窗，允许修改颜色或删除。
 struct AnnotationEditorView: View {
     @ObservedObject var state: AppState
     @ObservedObject var uiState: UIState
