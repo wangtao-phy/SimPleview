@@ -222,13 +222,9 @@ struct ReadingRecordView: View {
                                 ReadingTracker.shared.saveAllRecords()
                                 
                                 // 回车打分后，强制让键盘自动收起 (降维打击底层 API 调用)
-                                #if os(macOS)
                                 DispatchQueue.main.async {
                                     NSApp.keyWindow?.makeFirstResponder(nil)
                                 }
-                                #else
-                                UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
-                                #endif
                             }
                         }
                 }
@@ -430,11 +426,7 @@ struct RatingLineChartView: View {
     // 解析用户设置的主题色
     private var themeColor: Color {
         if ratingChartColorTheme.hasPrefix("#") {
-            #if os(macOS)
             return Color(nsColor: NSColor(hex: ratingChartColorTheme) ?? .blue)
-            #else
-            return .blue
-            #endif
         }
         switch ratingChartColorTheme {
         case "Red": return .red

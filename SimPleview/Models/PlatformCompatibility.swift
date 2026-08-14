@@ -8,7 +8,6 @@ import AppKit
 typealias PlatformColor = NSColor
 typealias PlatformImage = NSImage
 typealias PlatformView = NSView
-typealias PlatformViewController = NSViewController
 
 // MARK: - 统一颜色入口
 extension PlatformColor {
@@ -45,9 +44,6 @@ extension PlatformView {
 
 // MARK: - 平台工具箱
 struct PlatformUtils {
-    static var isMacOS: Bool { true }
-    static var isiOS: Bool { false }
-
     static func revealInFinder(url: URL) {
         NSWorkspace.shared.activateFileViewerSelecting([url])
     }

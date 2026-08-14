@@ -13,7 +13,6 @@ struct ShortcutsSettingsView: View {
     }
     
     var body: some View {
-        #if os(macOS)
         VStack(spacing: 0) {
             ScrollView {
                 // [原生化重构] 使用 macOS 原生 Grid (六列高级自适应布局) 替代手工计算宽度的 HStack
@@ -113,12 +112,8 @@ struct ShortcutsSettingsView: View {
             .padding()
             .background(Color(NSColor.windowBackgroundColor))
         }
-        #else
-        Text("Shortcuts not supported on iOS")
-        #endif
     }
     
-    #if os(macOS)
     // 自动向右对齐的文字标签单元格
     private func labelView(_ text: String) -> some View {
         Text(text + ":")
@@ -134,5 +129,4 @@ struct ShortcutsSettingsView: View {
         .gridColumnAlignment(.leading)
         .padding(.trailing, 20) // 在每组结尾加点空隙
     }
-    #endif
 }

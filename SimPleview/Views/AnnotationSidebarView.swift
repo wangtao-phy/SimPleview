@@ -25,32 +25,6 @@ struct AnnotationSidebarView: View {
                 ContentUnavailableView("无标注内容", systemImage: "pencil.and.outline", description: Text("在文档中划线或高亮来记录内容"))
                     .frame(maxHeight: .infinity)
             } else {
-                #if os(iOS)
-                // [iOS 专用列表]
-                // iOS 的 List 性能极佳，自带左滑删除等手势，所以我们尽量使用系统原生 List
-                List {
-                    ForEach(state.allAnnotations, id: \.safeID) { annotation in
-                        let isSelected = state.selectedAnnotation?.userName == annotation.userName
-                        Button(action: {
-                            state.selectedAnnotation = annotation
-                        }) {
-                            AnnotationRow(annotation: annotation, isSelected: isSelected, focusedField: $focusedField, onSelect: {
-                                state.selectedAnnotation = annotation
-                            })
-                        }
-                        .buttonStyle(.plain)
-                            .listRowInsets(EdgeInsets())
-                            .listRowBackground(isSelected ? Color.accentColor.opacity(0.15) : Color.clear)
-                            .listRowSeparator(.visible, edges: .bottom)
-                    }
-                    .onDelete { indexSet in // 原生左滑删除
-                        for index in indexSet {
-                            state.deleteAnnotation(state.allAnnotations[index])
-                        }
-                    }
-                }
-                .listStyle(.plain)
-                #else
                 // [macOS 专用列表]
                 // 响应用户需求：使用原生左滑删除替代右键菜单，这要求我们必须使用原生的 List 组件。
                 ScrollViewReader { proxy in // 用于代码控制滚动条的位置
@@ -134,7 +108,6 @@ struct AnnotationSidebarView: View {
                         return .handled
                     }
                 }
-                #endif
             }
         }
         // [延迟加载批注]
@@ -166,14 +139,14 @@ struct AnnotationRow: View {
                     .frame(width: 8, height: 8)
                 
                 Text(annotation.typeDisplay)
-                    .font(PlatformUtils.isiOS ? .body : .caption)
+                    .font(.caption)
                     .foregroundColor(isSelected ? .primary : .secondary)
                 
                 Spacer()
                 
                 if let page = annotation.page, let index = page.document?.index(for: page) {
                     Text("P\(index + 1)")
-                        .font(PlatformUtils.isiOS ? .subheadline : .caption2)
+                        .font(.caption2)
                         .padding(.horizontal, 6)
                         .padding(.vertical, 2)
                         .background(isSelected ? Color.white.opacity(0.3) : Color.primary.opacity(0.1))
@@ -186,13 +159,13 @@ struct AnnotationRow: View {
             let text = annotation.simPleNote
             if text.isEmpty {
                 Text(" ")
-                    .font(.system(size: PlatformUtils.isiOS ? 16 : 11))
-                    .frame(minHeight: PlatformUtils.isiOS ? 22 : 16, alignment: .topLeading)
+                    .font(.system(size: 11))
+                    .frame(minHeight: 16, alignment: .topLeading)
                     .padding(.top, 4)
             } else {
                 ScrollView(.vertical, showsIndicators: true) {
                     Text(text)
-                        .font(.system(size: PlatformUtils.isiOS ? 16 : 11))
+                        .font(.system(size: 11))
                         .foregroundColor(isSelected ? .primary : .primary.opacity(0.8))
                         .frame(maxWidth: .infinity, alignment: .topLeading)
                         // 给内部留一点点边距，防止滚动条遮挡文字
@@ -213,13 +186,9 @@ struct AnnotationRow: View {
         .onTapGesture { // 拦截一切落在外层的点击
             onSelect?()
         }
-        #if os(macOS)
         .background(isSelected ? Color.accentColor.opacity(0.15) : Color.clear)
         .focusable()
         .focused($focusedField, equals: id)
-        #else
-        .background(isSelected ? Color.black.opacity(0.05) : Color.clear) // iOS 也给个微微的高亮反馈
-        #endif
     }
 }
 

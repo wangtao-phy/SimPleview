@@ -111,7 +111,7 @@ struct OutlineNodeRow: View {
         HStack(spacing: 8) {
             // [层级缩进]
             if item.level > 0 {
-                Spacer().frame(width: CGFloat(item.level) * (PlatformUtils.isiOS ? 12 : 5))
+                Spacer().frame(width: CGFloat(item.level) * (5))
             }
             
             // [展开/收起的小箭头]
@@ -132,12 +132,12 @@ struct OutlineNodeRow: View {
             // [目录标题文本]
             Text(item.outline.label ?? "未命名章节")
                 .lineLimit(1)
-                .font(.system(size: PlatformUtils.isiOS ? 15 : 13))
+                .font(.system(size: 13))
             
             Spacer()
         }
-        .padding(.vertical, PlatformUtils.isiOS ? 12 : 8)
-        .padding(.horizontal, PlatformUtils.isiOS ? 8 : 4)
+        .padding(.vertical, 8)
+        .padding(.horizontal, 4)
         .frame(maxWidth: .infinity)
         .contentShape(Rectangle()) // 让整行可点击
         // [选中状态高亮]

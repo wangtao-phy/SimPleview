@@ -1,10 +1,6 @@
 import SwiftUI
 
-#if os(macOS)
 import AppKit
-#else
-import UIKit
-#endif
 
 /// [教程注释：右侧边栏总入口]
 /// 右侧边栏负责一切和“当前正文阅读状态”无关的附加功能：
@@ -63,11 +59,7 @@ struct SearchSidebarView: View {
     @ObservedObject var state: AppState
     @ObservedObject var uiState: UIState
     @ObservedObject var searchManager: SearchManager
-    #if os(macOS)
     @State private var isSearchFocused: Bool = false
-    #else
-    @FocusState private var isSearchFocused: Bool
-    #endif
     
     var body: some View {
         VStack(spacing: 0) {
@@ -79,7 +71,6 @@ struct SearchSidebarView: View {
                     Image(systemName: "magnifyingglass").foregroundColor(.secondary)
                     
                     Group {
-                        #if os(macOS)
                         SearchTextField(
                             placeholder: state.L("Search Document..."),
                             text: $searchManager.searchQuery,
@@ -91,18 +82,6 @@ struct SearchSidebarView: View {
                             isFocused: $isSearchFocused
                         )
                         .frame(height: 22)
-                        #else
-                        TextField(state.L("Search Document..."), text: $searchManager.searchQuery)
-                            .textFieldStyle(.plain) // 扒掉系统默认的白底圆角框，因为我们外面自己画了一个更好看的
-                            .focused($isSearchFocused)
-                            .submitLabel(.search) // iOS 专用：把键盘右下角的回车键变成蓝色的“搜索”按钮
-                            .onSubmit {
-                                // 当用户按下回车时，显式触发主线程更新，调用搜索下一个的逻辑
-                                DispatchQueue.main.async {
-                                    state.goToNextSearchResult()
-                                }
-                            }
-                        #endif
                     }
                         .onChange(of: uiState.focusSearchTrigger) { _, _ in
                             DispatchQueue.main.async {
@@ -170,7 +149,6 @@ struct SearchSidebarView: View {
             .animation(.easeInOut(duration: 0.2), value: searchManager.searchResults.isEmpty)
             
             // [底部：搜索结果列表区]
-            #if os(macOS)
             // Mac 上因为需要精确控制背景色，弃用 List，改用 ScrollView + LazyVStack 手动打造，防止闪烁
             ScrollViewReader { proxy in
                 ScrollView {
@@ -199,7 +177,6 @@ struct SearchSidebarView: View {
                     }
                     .padding(.top, 4)
                 }
-                #if os(macOS)
                 .background(
                     ArrowKeyMonitorView(
                         isFocused: isSearchFocused,
@@ -221,40 +198,12 @@ struct SearchSidebarView: View {
                         }
                     )
                 )
-                #endif
                 .onChange(of: searchManager.currentSearchIndex) { _, newIndex in
                     if let index = newIndex {
                         withAnimation { proxy.scrollTo(index, anchor: .center) }
                     }
                 }
             }
-            #else
-            // selection 绑定了一个可空变量，使得点击某一行时它会变成蓝底选中状态
-            List(selection: $searchManager.currentSearchIndex) {
-                ForEach(0..<searchManager.searchResults.count, id: \.self) { index in
-                    if index < searchManager.searchResults.count {
-                        // 移除对 state 和 searchManager 的重型依赖，只传递计算好的轻量数值
-                        let isCurrent = searchManager.currentSearchIndex == index
-                        let format = state.L("Page Number Input")
-                        Button(action: {
-                            searchManager.currentSearchIndex = index
-                            state.selectSearchResult(at: index)
-                        }) {
-                            SearchResultItem(index: index, match: searchManager.searchResults[index], isCurrentIndex: isCurrent, pageFormat: format)
-                                .contentShape(Rectangle())
-                        }
-                        .buttonStyle(.plain)
-                        .tag(index as Int?)
-                    }
-                }
-            }
-            .listStyle(.sidebar) // 使用原生侧边栏风格（没有丑陋的分隔线）
-            .scrollContentBackground(.hidden) // [修复] 消除 List 默认白色背景，防止打开搜索时的白色闪烁
-            .onChange(of: searchManager.currentSearchIndex) { _, newIndex in
-                // 当用户点击了某一项，命令 PDF 滚过去
-                if let index = newIndex { state.selectSearchResult(at: index) }
-            }
-            #endif
         }
     }
 }
@@ -271,14 +220,14 @@ struct SearchResultItem: View {
         VStack(alignment: .leading, spacing: 4) {
             // 页码标题 (例如: 第 5 页)
             Text(String(format: pageFormat, "\(match.pageIndex + 1)"))
-                .font(PlatformUtils.isiOS ? .body : .caption)
+                .font(.caption)
                 .bold()
                 // 如果当前正好停留在这行，字体变成灰色(配合蓝色背景)；否则是高亮色
                 .foregroundColor(isCurrentIndex ? .secondary : .accentColor)
             
             // 上下文原文
             Text(match.context)
-                .font(.system(size: PlatformUtils.isiOS ? 15 : 11))
+                .font(.system(size: 11))
                 .lineLimit(2) // 最多显示两行，剩下的用 ... 截断
         }.padding(.vertical, 4)
     }

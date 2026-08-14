@@ -49,10 +49,6 @@ struct LeftSidebarView: View {
             default: EmptyView()
             }
         }
-        #if os(iOS)
-        // 在 iOS 的原生 NavigationSplitView 中，如果不加这句，它会自带一个难以控制的展开/收起按钮
-        .toolbar(removing: .sidebarToggle)
-        #endif
     }
 }
 
@@ -116,15 +112,11 @@ struct ThumbnailListView: View {
                                 .equatable() // .equatable() 告诉 SwiftUI：如果不发生实质性变化，不要去重绘它！
                                 .id(index) // 给滚动定位器打的标记
                                 .onTapGesture {
-                                    #if os(macOS)
                                     // 捕获系统修饰键，用于判断是 Command 点击(点选) 还是 Shift 点击(连选)
                                     let isCommand = NSEvent.modifierFlags.contains(.command)
                                     let isShift = NSEvent.modifierFlags.contains(.shift)
                                     state.handleThumbnailClick(index: index, isCommandPressed: isCommand, isShiftPressed: isShift)
                                     state.shiftSelectionAnchor = nil // 鼠标点击后重置键盘连选锚点
-                                    #else
-                                    state.goToPage(index)
-                                    #endif
                                     isThumbnailFocused = true // 把键盘焦点抢过来
                                 }
                         }
@@ -239,19 +231,11 @@ struct ThumbnailItem: View, Equatable {
         VStack(spacing: 6) {
             ZStack {
                 if let img = thumbnail {
-                    #if os(macOS)
                     Image(nsImage: img)
                         .resizable()
                         .interpolation(.high)
                         .contrast(1.15)
                         .aspectRatio(contentMode: .fit)
-                    #else
-                    Image(uiImage: img)
-                        .resizable()
-                        .interpolation(.high)
-                        .contrast(1.15)
-                        .aspectRatio(contentMode: .fit)
-                    #endif
                 } else {
                     // [骨架屏 / Skeleton] 如果图片还没渲染出来，先显示一个空白框
                     Color.primary.opacity(0.03)
@@ -277,7 +261,7 @@ struct ThumbnailItem: View, Equatable {
             )
             // 底下的页码标
             Text("\(index + 1)")
-                .font(.system(size: PlatformUtils.isiOS ? 15 : 10, weight: .medium))
+                .font(.system(size: 10, weight: .medium))
                 .foregroundColor(isSelected ? .accentColor : .secondary)
         }
         .padding(.horizontal, 10).contentShape(Rectangle())
@@ -315,7 +299,6 @@ struct ThumbnailItem: View, Equatable {
             let targetIndices = state.selectedIndices.contains(index) ? state.selectedIndices : [index]
             state.liveState.draggedIndices = targetIndices
             
-            #if os(macOS)
             let indicesStr = targetIndices.sorted().map { String($0) }.joined(separator: ",")
             let provider = NSItemProvider() // 系统底层的拖拽物提供者
             
@@ -335,9 +318,6 @@ struct ThumbnailItem: View, Equatable {
             provider.suggestedName = "dragger"
             
             return provider
-            #else
-            return NSItemProvider(object: String(index) as NSString)
-            #endif
         }
     }
 }

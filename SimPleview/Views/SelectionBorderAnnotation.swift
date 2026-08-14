@@ -1,11 +1,7 @@
 import PDFKit
 import SwiftUI
 
-#if os(macOS)
 import AppKit
-#else
-import UIKit
-#endif
 
 /// 自定义的“选中状态”辅助批注。
 /// 它的唯一使命是在页面上画一个半透明的蓝色边框，如果是处于多段高亮的最下方，还会附加一个“便签”图标。
@@ -29,7 +25,6 @@ class SelectionBorderAnnotation: PDFAnnotation {
         self.isReadOnly = true
         self.userName = "SYSTEM_BORDER" // 标记为系统实体，避免被保存或意外编辑
         
-        #if os(macOS)
         let accentColor: NSColor
         if #available(macOS 10.14, *) {
             accentColor = NSColor.controlAccentColor
@@ -37,10 +32,6 @@ class SelectionBorderAnnotation: PDFAnnotation {
             accentColor = NSColor.systemBlue
         }
         self.color = accentColor.withAlphaComponent(0.8)
-        #else
-        self.color = UIColor.systemBlue.withAlphaComponent(0.8)
-        self.interiorColor = .clear
-        #endif
     }
     
     #if os(macOS)
