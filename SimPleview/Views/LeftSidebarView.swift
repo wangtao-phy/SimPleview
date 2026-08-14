@@ -64,7 +64,14 @@ struct ThumbnailListView: View {
     @FocusState.Binding var isThumbnailFocused: Bool
     
     #if os(macOS)
-    /// 方向键翻页的统一处理：Shift 连选 / 普通翻页（含节约模式防抖）
+    /// 方向键翻页的统一处理。
+    ///
+    /// 两条分支：
+    /// 1. Shift+方向键 → 范围连选：以 `shiftSelectionAnchor` 为锚点，把锚点与目标页之间的区间全部纳入 `selectedIndices`。
+    ///    （锚点在第一次按 Shift 时记下，普通点击/松 Shift 时清空）
+    /// 2. 普通方向键 → 翻页：
+    ///    - 性能模式（`delaysNavigationJumps == false`）：立即 `goToPage`，所见即所得。
+    ///    - 节约模式：先更新页码/选中态，200ms 防抖后再 `goToPage`，避免按住方向键时高频跨页触发大量内存分配。
     private func navigateThumbnail(to newIndex: Int, isShift: Bool) {
         if isShift {
             if state.shiftSelectionAnchor == nil {
@@ -349,12 +356,32 @@ struct SidebarIconButtonStyle: ButtonStyle {
 
 #if os(macOS)
 // MARK: - 缩略图键盘导航监听 (NSEvent 本地监听)
-// [修复] 原 .onKeyPress 依赖 SwiftUI 焦点 + ScrollView，在 macOS 上会被内层 NSScrollView 抢先消费方向键。
-// 改用 NSEvent.addLocalMonitorForEvents 在事件派发前拦截，稳定可靠。
+//
+// [为什么不用 .onKeyPress]
+// 原 .onKeyPress 依赖 SwiftUI 焦点 + ScrollView。但 ScrollView 内部是一个 NSScrollView，
+// 它会在事件派发阶段“抢先消费”上/下方向键（用于原生滚动），导致 .onKeyPress 永远收不到键。
+//
+// [本方案原理]
+// `NSEvent.addLocalMonitorForEvents(matching: .keyDown)` 注册的是**应用级**监听器，
+// 在事件派发到任何 NSView（包括 NSScrollView）**之前**拦截，因此不依赖 SwiftUI 焦点、
+// 也不受 NSScrollView 拦截影响——与右侧搜索栏的 ArrowMonitorNSView 是同一套验证过的机制。
+//
+// [焦点门控]
+// 监听器是应用级的，必须靠 `isFocused`（来自 FocusState `isThumbnailFocused`）过滤：
+// 只有当缩略图列表真正获得焦点时才拦截方向键，否则放行给 PDF/搜索框等其它控件。
+//
+// [键码对照] 126 = Up, 125 = Down, 51 = Backspace(退格), 117 = Forward Delete(删除)
+//
+// [生命周期]
+// `viewDidMoveToWindow` 在视图挂载到窗口时注册监听、移出窗口时注销，避免监听器泄漏。
 struct ThumbnailKeyMonitorView: NSViewRepresentable {
+    /// 缩略图列表当前是否拥有焦点（决定是否拦截方向键）
     var isFocused: Bool
+    /// 按下 Up 键的回调，参数为是否同时按下了 Shift
     var onUp: (Bool) -> Void
+    /// 按下 Down 键的回调，参数为是否同时按下了 Shift
     var onDown: (Bool) -> Void
+    /// 按下退格/删除键的回调（删除当前页）
     var onDelete: () -> Void
     
     func makeNSView(context: Context) -> ThumbnailKeyMonitorNSView {
@@ -367,6 +394,7 @@ struct ThumbnailKeyMonitorView: NSViewRepresentable {
     }
     
     func updateNSView(_ nsView: ThumbnailKeyMonitorNSView, context: Context) {
+        // SwiftUI 每次重渲染（如焦点变化）都会同步最新的回调与焦点状态到 NSView
         nsView.isFocused = isFocused
         nsView.onUp = onUp
         nsView.onDown = onDown
@@ -398,7 +426,7 @@ final class ThumbnailKeyMonitorNSView: NSView {
             switch event.keyCode {
             case 126: // Up
                 self.onUp?(isShift)
-                return nil
+                return nil // 返回 nil = 消费该事件，不再派发给任何视图
             case 125: // Down
                 self.onDown?(isShift)
                 return nil
@@ -406,7 +434,7 @@ final class ThumbnailKeyMonitorNSView: NSView {
                 self.onDelete?()
                 return nil
             default:
-                return event
+                return event // 其它键放行
             }
         }
     }

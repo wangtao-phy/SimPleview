@@ -322,7 +322,10 @@ class ArrowMonitorNSView: NSView {
             monitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
                 guard let self = self else { return event }
                 
-                // [修复] 只在搜索框获得焦点时拦截方向键，避免与缩略图列表的键盘翻页冲突
+                // [修复] 只在搜索框获得焦点时拦截方向键。
+                // 旧实现用 `!isPDFViewFocused` 判断，范围过宽：当焦点在缩略图列表（同样不是 PDFView）时，
+                // 方向键会被这里误抢走，导致缩略图列表无法翻页。改为精确的 isSearchFocused 门控后，
+                // 搜索栏只在自己聚焦时响应方向键，与缩略图翻页互不冲突。
                 guard self.isFocused else { return event }
                 
                 if event.keyCode == 126 { // Up arrow
