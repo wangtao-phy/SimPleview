@@ -188,8 +188,11 @@ extension AppState {
         nc.publisher(for: NSWindow.willEnterFullScreenNotification)
             .sink { [weak self] _ in self?.pdfView.autoScales = false }
             .store(in: &cancellables)
+        nc.publisher(for: NSWindow.didEnterFullScreenNotification)
+            .sink { [weak self] _ in self?.pdfView.autoScales = true }
+            .store(in: &cancellables)
         nc.publisher(for: NSWindow.didExitFullScreenNotification)
-            .sink { [weak self] _ in self?.pdfView.autoScales = false }
+            .sink { [weak self] _ in self?.pdfView.autoScales = true }
             .store(in: &cancellables)
             
         // [稳健性修复：从后台返回时自动刷新缩略图]
@@ -215,6 +218,14 @@ extension AppState {
         nc.publisher(for: UserDefaults.didChangeNotification)
             .sink { [weak self] _ in
                 guard let self = self else { return }
+                // 同步护眼色到所有窗口（@AppStorage 的 didSet 只在改色的当前窗口触发，跨窗口同步靠此观察器）
+                let bgRaw = UserDefaults.standard.integer(forKey: "pdfPageBackgroundColor")
+                let bgColor = PDFPageBackgroundColor(rawValue: bgRaw) ?? .default
+                if self.pdfView._threadSafePageBackgroundColor != bgColor {
+                    self.pdfView._threadSafePageBackgroundColor = bgColor
+                    self.pdfView.setPlatformNeedsDisplay()
+                }
+                // 同步内存模式渲染策略
                 let policy = MemoryMode.current.policy
                 if self.pdfView.interpolationQuality != policy.interpolationQuality {
                     self.pdfView.interpolationQuality = policy.interpolationQuality
