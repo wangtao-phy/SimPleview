@@ -160,6 +160,10 @@ extension AppState {
                 let dest = PDFDestination(page: page, at: pos.point)
                 dest.zoom = pos.zoom
                 self.pdfView.go(to: dest)
+                // 热重载后恢复手动缩放：setupDocument 前面已设 autoScales=true（自动贴合），
+                // 会让触控板拺合缩放失效（Cmd+/- 会隐式关闭 autoScales 所以还能用）。
+                // 恢复到一个具体 zoom 后应关闭 autoScales，保持手动缩放与热重载前一致。
+                self.pdfView.autoScales = false
             }
             // 恢复完毕，清空位置缓存
             self.hibernatedPosition = nil
