@@ -64,6 +64,8 @@ final class AppState: NSObject, ObservableObject, PDFViewDelegate {
     /// 精确剥离底层 `PDFDocument` 并释放大量堆内存，而在用户重新激活应用时无缝重建。
     @Published var isHibernating: Bool = false
     var hibernationWorkItem: DispatchWorkItem? // 用来取消延时执行的闭包任务
+    // [缩略图刷新节流] 记录应用上次失去活跃状态的时刻，用于判断"离开多久"才值得全量刷新缩略图。
+    var lastResignActiveDate: Date?
     // [O(1)级极速恢复] 用于保存休眠前的物理状态，使用基础数据类型避免强引用泄漏
     var hibernatedPosition: (pageIndex: Int, point: CGPoint, zoom: CGFloat)?
     var originalWindowTitle: String?
