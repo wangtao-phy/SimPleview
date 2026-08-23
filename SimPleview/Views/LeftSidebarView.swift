@@ -415,6 +415,14 @@ final class ThumbnailKeyMonitorNSView: NSView {
         guard monitor == nil else { return }
         monitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
             guard let self = self, self.isFocused else { return event }
+            // [焦点精确门控] SwiftUI 的 FocusState 在焦点转移到 AppKit 控件时不会自动复位：
+            // 用户先点缩略图再点进搜索框/页数输入框/PDF 视图后，isFocused 仍是 true，
+            // 若不检查真实的第一响应者，这些控件里的退格键/方向键会被这里误吞。
+            // 因此：只要真正的键盘焦点在文本编辑或 PDF 视图上，就放行事件，交给它们自己处理。
+            if let responder = event.window?.firstResponder,
+               responder is NSTextView || responder is NSTextField || responder is PDFView {
+                return event
+            }
             let isShift = event.modifierFlags.contains(.shift)
             switch event.keyCode {
             case 126: // Up
