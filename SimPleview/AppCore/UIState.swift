@@ -59,7 +59,10 @@ class UIState: ObservableObject {
     /// - Parameter state: 传入 AppState 是因为侧边栏的折叠会改变 PDF 窗口大小。
     /// PDFKit 在动态改变大小时如果不关闭 `autoScales`，会触发极其消耗 CPU 的重绘卡顿。
     func toggleLeftSidebar(state: AppState? = nil) {
-        state?.pdfView.autoScales = false
+        let wasAutoScaling = state?.pdfView.autoScales ?? true
+        if wasAutoScaling {
+            state?.pdfView.autoScales = false
+        }
         
         // withAnimation 提供顺滑的过渡动画
         withAnimation(.easeInOut(duration: 0.2)) {
@@ -71,7 +74,7 @@ class UIState: ObservableObject {
         }
         
         // 动画（0.2秒）结束后，再恢复 PDFView 的自动缩放
-        if let state = state {
+        if let state = state, wasAutoScaling {
             // [专家级防泄漏] 虽然延迟仅有 0.25 秒，但在复杂的视图卸载场景下，强行保留大体积的 AppState 可能引发短暂的内存峰值或卸载失败。
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) { [weak state] in
                 state?.pdfView.autoScales = true
@@ -81,11 +84,14 @@ class UIState: ObservableObject {
     
     /// 切换右侧边栏的显示/隐藏状态
     func toggleRightSidebar(state: AppState? = nil) {
-        state?.pdfView.autoScales = false
+        let wasAutoScaling = state?.pdfView.autoScales ?? true
+        if wasAutoScaling {
+            state?.pdfView.autoScales = false
+        }
         withAnimation(.easeInOut(duration: 0.2)) {
             showRightSidebar.toggle()
         }
-        if let state = state {
+        if let state = state, wasAutoScaling {
             // [专家级防泄漏]
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) { [weak state] in
                 state?.pdfView.autoScales = true
@@ -95,7 +101,10 @@ class UIState: ObservableObject {
     
     /// 唤起右侧搜索栏，并请求键盘焦点
     func triggerSearchFocus(state: AppState? = nil) {
-        state?.pdfView.autoScales = false
+        let wasAutoScaling = state?.pdfView.autoScales ?? true
+        if wasAutoScaling {
+            state?.pdfView.autoScales = false
+        }
         // 使用 DispatchQueue 确保在主线程执行 UI 更新
         DispatchQueue.main.async { [weak self] in
             guard let self = self else { return }
@@ -112,7 +121,7 @@ class UIState: ObservableObject {
             // 更换 UUID 触发 ContentView 中的 `.onChange` 拦截器
             self.focusSearchTrigger = UUID()
             
-            if let state = state {
+            if let state = state, wasAutoScaling {
                 // [专家级防泄漏]
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) { [weak state] in
                     state?.pdfView.autoScales = true

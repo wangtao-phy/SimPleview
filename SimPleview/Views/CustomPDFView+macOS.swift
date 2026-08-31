@@ -463,6 +463,18 @@ extension CustomPDFView {
         // 不需要做任何额外清理，回归纯粹的原生管理
     }
     
+    // [修复 macOS 14+ 侧边栏伸缩导致触控板缩放失效的 Bug]
+    override func magnify(with event: NSEvent) {
+        // 强制保障缩放范围，防止 PDFKit 在多次开关 autoScales 后将 min/max 锁死
+        if self.minScaleFactor > 0.1 { self.minScaleFactor = 0.1 }
+        if self.maxScaleFactor < 10.0 { self.maxScaleFactor = 10.0 }
+        
+        // 原生 PDFView 在 autoScales=true 且遭遇布局变动时，可能会“吞掉”触控板的放大事件
+        if self.autoScales {
+            self.autoScales = false
+        }
+        super.magnify(with: event)
+    }
 }
 
 extension CustomPDFView: NSPopoverDelegate {}
