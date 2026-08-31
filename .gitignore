@@ -69,3 +69,6 @@ fastlane/test_output
 
 # Code Injection
 iOSInjectionProject/
+
+# Swift Package Manager configuration
+.swiftpm/
