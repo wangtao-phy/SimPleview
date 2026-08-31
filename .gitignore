@@ -72,3 +72,4 @@ iOSInjectionProject/
 
 # Swift Package Manager configuration
 .swiftpm/
+Package.swift
