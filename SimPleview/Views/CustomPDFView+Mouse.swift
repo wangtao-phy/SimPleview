@@ -81,6 +81,75 @@ extension CustomPDFView {
             return
         }
         
+        // --- SyncTeX 反向搜索支持 (Cmd + Click) ---
+        if event.modifierFlags.contains(.command) {
+            let viewPoint = convert(event.locationInWindow, from: nil)
+            if let page = page(for: viewPoint, nearest: false),
+               let document = self.document,
+               let fileURL = document.documentURL,
+               fileURL.isFileURL {
+                
+                let pagePoint = convert(viewPoint, to: page)
+                let pageBounds = page.bounds(for: .cropBox)
+                // synctex 的 y 坐标是从页面左上角往下算
+                let synctexX = pagePoint.x - pageBounds.minX
+                let synctexY = pageBounds.height - (pagePoint.y - pageBounds.minY)
+                let pageIndex = document.index(of: page) + 1 // 1-based page
+                
+                DispatchQueue.global(qos: .userInitiated).async {
+                    let task = Process()
+                    task.launchPath = "/usr/bin/env"
+                    
+                    // 配置 PATH 环境变量以确保能找到 synctex
+                    let pathEnv = ProcessInfo.processInfo.environment["PATH"] ?? ""
+                    let fullPath = "/Library/TeX/texbin:/usr/local/bin:/opt/homebrew/bin:" + pathEnv
+                    var env = ProcessInfo.processInfo.environment
+                    env["PATH"] = fullPath
+                    task.environment = env
+                    
+                    task.arguments = [
+                        "synctex",
+                        "edit",
+                        "-o", "\(pageIndex):\(synctexX):\(synctexY):\(fileURL.path)"
+                    ]
+                    
+                    let pipe = Pipe()
+                    task.standardOutput = pipe
+                    do {
+                        try task.run()
+                        task.waitUntilExit()
+                        
+                        let data = pipe.fileHandleForReading.readDataToEndOfFile()
+                        if let output = String(data: data, encoding: .utf8) {
+                            var inputPath = ""
+                            var line = ""
+                            for textLine in output.components(separatedBy: .newlines) {
+                                if textLine.hasPrefix("Input:") {
+                                    inputPath = String(textLine.dropFirst(6))
+                                } else if textLine.hasPrefix("Line:") {
+                                    line = String(textLine.dropFirst(5))
+                                }
+                            }
+                            
+                            if !inputPath.isEmpty && !line.isEmpty {
+                                // 找到了源码，尝试用 VSCode 打开并跳转到对应行
+                                let codeTask = Process()
+                                codeTask.launchPath = "/bin/sh"
+                                codeTask.arguments = [
+                                    "-c",
+                                    "PATH=\"/usr/local/bin:/opt/homebrew/bin:$PATH\"; if command -v code >/dev/null; then code -g \"\(inputPath):\(line)\"; elif [ -f \"/Applications/Visual Studio Code.app/Contents/Resources/app/bin/code\" ]; then \"/Applications/Visual Studio Code.app/Contents/Resources/app/bin/code\" -g \"\(inputPath):\(line)\"; else open -a \"Visual Studio Code\" \"\(inputPath)\"; fi"
+                                ]
+                                try codeTask.run()
+                            }
+                        }
+                    } catch {
+                        print("SyncTeX failed to run: \(error)")
+                    }
+                }
+                return // 阻止 PDFKit 默认的鼠标框选行为
+            }
+        }
+        
         let viewPoint = convert(event.locationInWindow, from: nil)
         guard let page = page(for: viewPoint, nearest: false) else {
             super.mouseDown(with: event)
