@@ -94,7 +94,7 @@ extension CustomPDFView {
                 // synctex 的 y 坐标是从页面左上角往下算
                 let synctexX = pagePoint.x - pageBounds.minX
                 let synctexY = pageBounds.height - (pagePoint.y - pageBounds.minY)
-                let pageIndex = document.index(of: page) + 1 // 1-based page
+                let pageIndex = document.index(for: page) + 1 // 1-based page
                 
                 DispatchQueue.global(qos: .userInitiated).async {
                     let task = Process()
@@ -143,7 +143,7 @@ extension CustomPDFView {
                             }
                         }
                     } catch {
-                        print("SyncTeX failed to run: \(error)")
+                        Swift.print("SyncTeX failed to run: \(error)")
                     }
                 }
                 return // 阻止 PDFKit 默认的鼠标框选行为
