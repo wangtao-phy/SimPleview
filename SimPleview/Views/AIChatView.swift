@@ -145,7 +145,7 @@ struct ChatBubbleView: View {
     var body: some View {
         HStack {
             if message.role == "user" {
-                Spacer()
+                Spacer(minLength: 200)
                 Text(message.content)
                     .padding(10)
                     .background(Color.blue)
@@ -181,7 +181,7 @@ struct ChatBubbleView: View {
                 .clipShape(RoundedRectangle(cornerRadius: 12))
                 // add border
                 .overlay(RoundedRectangle(cornerRadius: 12).stroke(Color.gray.opacity(0.2), lineWidth: 1))
-                Spacer()
+                Spacer(minLength: 200)
             }
         }
     }
