@@ -20,10 +20,21 @@ class AIChatViewModel: ObservableObject {
         didSet {
             if !isGenerating {
                 saveCurrentSession()
+                checkAndCompressMemoryIfNeeded()
             }
         }
     }
     @Published var estimatedContextTokens: Int = 0
+    @Published var lastUsage: TokenUsage? {
+        didSet {
+            if let usage = lastUsage {
+                UserDefaults.standard.set(usage.promptTokens, forKey: "lastPromptTokens")
+                UserDefaults.standard.set(usage.completionTokens, forKey: "lastCompletionTokens")
+                UserDefaults.standard.set(usage.cachedTokens, forKey: "lastCachedTokens")
+            }
+        }
+    }
+    @Published var isCompressing: Bool = false
     
     // Conversation Management
     @Published var availableSessions: [ConversationSession] = []
@@ -121,10 +132,16 @@ class AIChatViewModel: ObservableObject {
                         baseURL: baseURL,
                         model: model,
                         messages: finalMessages
-                    ) { content, thinking in
+                    ) { [weak self] content, thinking, usage in
                         DispatchQueue.main.async {
-                            self.messages[assistantIndex].content = content
+                            guard let self = self else { return }
+                            if !content.isEmpty {
+                                self.messages[assistantIndex].content = content
+                            }
                             self.messages[assistantIndex].thinking = thinking.isEmpty ? nil : thinking
+                            if let u = usage {
+                                self.lastUsage = u
+                            }
                         }
                     }
                 } else {
@@ -141,6 +158,55 @@ class AIChatViewModel: ObservableObject {
             
             DispatchQueue.main.async {
                 self.isGenerating = false
+            }
+        }
+    
+    }
+
+    private func checkAndCompressMemoryIfNeeded() {
+        // threshold 256k tokens
+        guard let usage = lastUsage, !isCompressing else { return }
+        let total = usage.promptTokens + usage.completionTokens
+        if total > 256_000 {
+            performCompression()
+        }
+    }
+    
+    private func performCompression() {
+        // Keep the last 4 messages as hot memory
+        guard messages.count > 6 else { return }
+        isCompressing = true
+        
+        let hotCount = 4
+        let messagesToSummarize = Array(messages.dropLast(hotCount))
+        let hotMessages = Array(messages.suffix(hotCount))
+        
+        let apiKey = UserDefaults.standard.string(forKey: "aiAPIKey") ?? ""
+        let baseURL = UserDefaults.standard.string(forKey: "aiBaseURL") ?? "https://api.openai.com/v1"
+        // 使用当前正在进行生成的同一个模型来进行总结
+        let model = UserDefaults.standard.string(forKey: "aiModel_v2") ?? "gpt-3.5-turbo"
+        
+        Task { [weak self] in
+            guard let self = self else { return }
+            do {
+                let summary = try await AIChatService.shared.summarizeMessages(
+                    apiKey: apiKey,
+                    baseURL: baseURL,
+                    model: model,
+                    messagesToSummarize: messagesToSummarize
+                )
+                
+                DispatchQueue.main.async {
+                    let summaryMessage = ChatMessage(role: "system", content: "【历史对话压缩记忆】\n" + summary)
+                    self.messages = [summaryMessage] + hotMessages
+                    self.isCompressing = false
+                    self.saveCurrentSession()
+                }
+            } catch {
+                print("Compression failed: \(error)")
+                DispatchQueue.main.async {
+                    self.isCompressing = false
+                }
             }
         }
     }

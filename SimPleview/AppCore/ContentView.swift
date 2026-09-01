@@ -24,6 +24,9 @@ struct ContentView: View {
     @AppStorage("aiAvailableModels_v2") private var aiAvailableModels: String = "gpt-5.5,gpt-5.6"
     @AppStorage("aiModel_v2") private var aiModel: String = "gpt-5.5"
     @AppStorage("estimatedContextTokens") private var estimatedContextTokens: Int = 0
+    @AppStorage("lastPromptTokens") private var lastPromptTokens: Int = 0
+    @AppStorage("lastCompletionTokens") private var lastCompletionTokens: Int = 0
+    @AppStorage("lastCachedTokens") private var lastCachedTokens: Int = 0
     
     // [教程注释：获取系统环境]
     // 监听当前是白天(Light)还是黑夜(Dark)模式，用于后续底层渲染适配。
@@ -251,10 +254,31 @@ struct ContentView: View {
                         .frame(width: 220)
                         .labelsHidden()
                         
-                        let kTokens = Double(estimatedContextTokens) / 1000.0
-                        Text(String(format: "上下文: %.1fk / 1M", kTokens))
-                            .font(.caption)
-                            .foregroundColor(.secondary)
+                        if lastPromptTokens > 0 || lastCompletionTokens > 0 {
+                            let missTokens = max(0, lastPromptTokens - lastCachedTokens)
+                            let hitTokens = lastCachedTokens
+                            let outTokens = lastCompletionTokens
+                            
+                            HStack(spacing: 4) {
+                                if hitTokens > 0 {
+                                    Text(String(format: "命中:%.1fk", Double(hitTokens)/1000.0))
+                                        .foregroundColor(.green)
+                                }
+                                Text(String(format: "未命中:%.1fk", Double(missTokens)/1000.0))
+                                    .foregroundColor(.orange)
+                                Text(String(format: "输出:%.1fk", Double(outTokens)/1000.0))
+                                    .foregroundColor(.blue)
+                            }
+                            .font(.caption2)
+                            .padding(.horizontal, 4)
+                            .background(Color.gray.opacity(0.1))
+                            .cornerRadius(4)
+                        } else {
+                            let kTokens = Double(estimatedContextTokens) / 1000.0
+                            Text(String(format: "估算上下文: %.1fk", kTokens))
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                        }
                         
                         Button(action: {
                             withAnimation(.spring(response: 0.4, dampingFraction: 0.8)) {
