@@ -15,7 +15,7 @@ SimPleview 是一款完全通过 AI 辅助编程构建的 macOS PDF 阅读器。
 - **One-Click Blank Document Creation**: Creating a blank PDF from scratch in Preview is incredibly tedious. SimPleview provides intuitive shortcuts (Cmd+Shift+N) and menus to instantly generate blank PDFs or images in standard sizes (A4, A3, etc.) for quick sketches and notes.
 - **Page Insertion & Deletion**: Preview's native page management is excellent; this app retains that functionality while providing even more options via right-clicking the thumbnail.
 - **Side-by-Side Comparison**: You can easily pop out individual pages of the current PDF into a separate window to conveniently compare different sections of the same document.
-- **Open in Browser**: Instead of building heavy AI features into the reader itself, it provides a one-click "Open in Browser" button. Since most modern browsers now feature built-in AI reading assistants, you can directly leverage them for AI-assisted reading.
+- **Deep Native AI Integration**: Seamlessly integrates API-driven AI chat right next to your PDF. It tracks real-time token usage (Hits/Misses/Outputs), supports streaming responses, and features an automatic 256k-token context compression algorithm to maintain infinite conversation history without overflowing the context window. Conversations are persistently stored per-PDF and can be switched dynamically.
 - **Reveal in Finder**: A small but highly convenient feature to instantly locate your file.
 - **Hover to View Internal Links**: Quickly preview the target content by simply hovering over internal cross-reference links in the PDF, without losing your current reading position.
 - **Eye-Protection Background**: Provides a comfortable background color mode to reduce eye strain during long reading sessions.
@@ -29,7 +29,7 @@ SimPleview 是一款完全通过 AI 辅助编程构建的 macOS PDF 阅读器。
 - **一键新建空白文档**：在自带的“预览”中想要凭空新建一个空白 PDF 步骤非常繁琐。SimPleview 提供了直观的快捷键 (Cmd+Shift+N) 和菜单，可以直接生成 A4、A3 等标准纸张尺寸的空白 PDF 或图片，方便随时做草稿和笔记。
 - **插入与删除 PDF 页面**：自带“预览”的原生页面管理功能非常好用，当前 app 做了完整保留，并在缩略图的右键菜单中提供了更多实用的拓展选项。
 - **对比查看**：可以单独弹出当前 PDF 的特定页面，方便在同一个 PDF 文件内进行跨页对比查看。
-- **浏览器打开**：阅读器本身不提供臃肿的 AI 功能，而是提供“一键在浏览器打开”。如今各大主流浏览器都已经内置了强大的 AI 阅读助手，您可以直接借用浏览器来辅助阅读。
+- **深度原生的 AI 集成**：应用内嵌了强大的 AI 对话引擎，支持流式输出并精准追踪 Token 消耗量（命中/未命中/输出）。搭载自动记忆重整化机制，当上下文突破 256k 视界时，会自动在后台对历史记忆进行无损积分坍缩，实现无限续航。所有对话历史均基于各个 PDF 进行正交独立存储，并支持随文档自由切换。
 - **当前文件所在文件夹**：一个极为方便的小功能，一键直达文件所在目录。
 - **悬浮查看内部链接**：在 PDF 中只需将鼠标悬浮在内部跨页跳转链接上方，即可快速预览目标内容，无需来回点击打断阅读进度。
 - **护眼背景色**：提供舒适的背景色模式，有效缓解长时间阅读带来的视觉疲劳。
