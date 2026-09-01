@@ -40,6 +40,10 @@ class UIState: ObservableObject {
     @Published var isShowingAnnotationEditor = false
 
     
+    
+    // MARK: - AI Chat State
+    @Published var isAIChatPresented: Bool = false
+    @Published var chatBoxHeight: CGFloat = 300
     // MARK: - Tools Customization (工具栏自定义)
     
     // [核心概念：@AppStorage]

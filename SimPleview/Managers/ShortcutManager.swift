@@ -75,6 +75,7 @@ final class ShortcutManager: ObservableObject {
     @Published var save = AppShortcut(key: "s", modifiers: .command)
     @Published var closeWindow = AppShortcut(key: "w", modifiers: .command)
     @Published var openInBrowser = AppShortcut(key: "g", modifiers: .command)
+    @Published var toggleAIChat = AppShortcut(key: "'", modifiers: .control)
     
     // 新增
     @Published var burnIn = AppShortcut(key: "s", modifiers: [.command, .shift])
@@ -112,6 +113,7 @@ final class ShortcutManager: ObservableObject {
             if let v = dict["save"] { save = v }
             if let v = dict["closeWindow"] { closeWindow = v }
             if let v = dict["openInBrowser"] { openInBrowser = v }
+            if let v = dict["toggleAIChat"] { toggleAIChat = v }
             
             if let v = dict["burnIn"] { burnIn = v }
             if let v = dict["slideshow"] { slideshow = v }
@@ -142,6 +144,7 @@ final class ShortcutManager: ObservableObject {
             "save": save,
             "closeWindow": closeWindow,
             "openInBrowser": openInBrowser,
+            "toggleAIChat": toggleAIChat,
             "burnIn": burnIn,
             "slideshow": slideshow,
             "revealInFinder": revealInFinder,
@@ -174,6 +177,7 @@ final class ShortcutManager: ObservableObject {
         save = AppShortcut(key: "s", modifiers: .command)
         closeWindow = AppShortcut(key: "w", modifiers: .command)
         openInBrowser = AppShortcut(key: "g", modifiers: .command)
+        toggleAIChat = AppShortcut(key: "'", modifiers: .control)
         
         burnIn = AppShortcut(key: "s", modifiers: [.command, .shift])
         slideshow = AppShortcut(key: "f", modifiers: .control)

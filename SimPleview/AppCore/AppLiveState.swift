@@ -36,6 +36,14 @@ final class AppLiveState {
     var dropTargetIndex: Int? = nil
     var draggedIndices: Set<Int>? = nil
     
+
     // 选中的目录节点
     var selectedOutline: PDFOutline?
+    
+    // AI 辅助相关字数统计
+    var totalEnglishWords: Int? = nil
+    var totalChineseChars: Int? = nil
+    var selectedEnglishWords: Int? = nil
+    var selectedChineseChars: Int? = nil
+
 }

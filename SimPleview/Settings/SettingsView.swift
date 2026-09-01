@@ -94,15 +94,20 @@ struct SettingsView: View {
                 .tabItem {
                     Label(LS("Annotation"), systemImage: "highlighter")
                 }
-            
+                
+
             // MARK: - Record Tab (第四页：记录)
             RecordSettingsView()
                 .tabItem {
                     Label(LS("Record"), systemImage: "clock.arrow.circlepath")
                 }
-                // [动态权限锁]
-                // disabled 属性，如果我们发现通用设置里那根总开关关了，这一页的所有按钮都会变成灰色点不动！
                 .disabled(!enableReadingRecord)
+
+            // MARK: - AI Tab (新增：人工智能辅助)
+            SettingsAIView()
+                .tabItem {
+                    Label("AI", systemImage: "sparkles")
+                }
         }
         // [窗口刚性限制]
         // 设置菜单不同于阅读页面，它的内容是不变的，所以给它定死了一个最小框，防止用户把它缩成一团导致排版崩坏。

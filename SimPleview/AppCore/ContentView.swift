@@ -21,6 +21,10 @@ struct ContentView: View {
     // 同理，生成这个专属窗口自己的界面状态控制器。
     @StateObject var uiState = UIState()
     
+    @AppStorage("aiAvailableModels_v2") private var aiAvailableModels: String = "gpt-5.5,gpt-5.6"
+    @AppStorage("aiModel_v2") private var aiModel: String = "gpt-5.5"
+    @AppStorage("estimatedContextTokens") private var estimatedContextTokens: Int = 0
+    
     // [教程注释：获取系统环境]
     // 监听当前是白天(Light)还是黑夜(Dark)模式，用于后续底层渲染适配。
     @Environment(\.colorScheme) var colorScheme
@@ -89,8 +93,7 @@ struct ContentView: View {
                     RightSidebarView(state: state, uiState: uiState)
                         .frame(width: 250)
                 }
-            }
-        }
+            }        }
         .environment(state.liveState)
         // [核心概念：环境聚焦值传递]
         // 让整个应用里所有的“专注事件” (如菜单栏快捷键) 都能顺利找到我！
@@ -209,8 +212,82 @@ struct ContentView: View {
                     }
                 }
             }
+            .overlay(alignment: .bottom) {
+                if uiState.isAIChatPresented {
+                    AIChatView(state: state, uiState: uiState)
+                        .transition(.move(edge: .bottom))
+                        .zIndex(2)
+                }
+            }
+            // [新增：底部状态栏]
+            if state.fileURL != nil {
+                HStack {
+                    // 左侧字数统计
+                    Group {
+                        if let en = state.liveState.totalEnglishWords, let zh = state.liveState.totalChineseChars {
+                            Text("\(zh) 中字 / \(en) 英文")
+                        } else {
+                            Text("计算字数中...")
+                        }
+                        
+                        if let en = state.liveState.selectedEnglishWords, let zh = state.liveState.selectedChineseChars {
+                            Text(" | 选中: \(zh) 中字 / \(en) 英文")
+                        }
+                    }
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+                    
+                    Spacer()
+                    
+                    // 右侧 AI 控制
+                    HStack(spacing: 12) {
+                        let modelArray = aiAvailableModels.split(separator: ",").map { String($0).trimmingCharacters(in: .whitespacesAndNewlines) }
+                        
+                        Picker("", selection: $aiModel) {
+                            ForEach(modelArray, id: \.self) { model in
+                                Text(model).tag(model)
+                            }
+                        }
+                        .frame(width: 220)
+                        .labelsHidden()
+                        
+                        let kTokens = Double(estimatedContextTokens) / 1000.0
+                        Text(String(format: "上下文: %.1fk / 1M", kTokens))
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                        
+                        Button(action: {
+                            withAnimation(.spring(response: 0.4, dampingFraction: 0.8)) {
+                                uiState.isAIChatPresented.toggle()
+                            }
+                        }) {
+                            Image(systemName: "sparkles")
+                                .font(.system(size: 12, weight: .bold))
+                                .foregroundColor(uiState.isAIChatPresented ? .white : .primary)
+                                .padding(.horizontal, 10)
+                                .padding(.vertical, 6)
+                                .background(uiState.isAIChatPresented ? Color.blue : Color(NSColor.controlBackgroundColor))
+                                .cornerRadius(6)
+                                .shadow(color: Color.black.opacity(0.1), radius: 2, x: 0, y: 1)
+                        }
+                        .buttonStyle(.plain)
+                        .keyboardShortcut(shortcutManager.toggleAIChat.keyEquivalent, modifiers: shortcutManager.toggleAIChat.modifiers)
+                    }
+                    .font(.caption)
+                }
+                .padding(.horizontal, 12)
+                .frame(height: 28)
+                .background(Color(NSColor.windowBackgroundColor))
+                .overlay(
+                    Rectangle().frame(height: 1).foregroundColor(Color.gray.opacity(0.2)),
+                    alignment: .top
+                )
+            }
+
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+
+
         // [核心概念：原生文件选择器]
         // fileImporter 是一种通过系统统一调度来拉起文件管理器的方法（比 UIKit 的那些 delegate 代码简练太多了）。
         .fileImporter(isPresented: $isImporting, allowedContentTypes: [.pdf]) { result in

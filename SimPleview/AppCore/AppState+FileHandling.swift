@@ -131,6 +131,30 @@ extension AppState {
         self.liveState.totalPageCount = doc.pageCount
         self.rebuildPageAspectRatios()
         
+
+        // [新增：极低优先级异步计算文档总字数，绝不卡顿主线程]
+        self.liveState.totalEnglishWords = nil
+        self.liveState.totalChineseChars = nil
+        Task(priority: .background) {
+            var englishWords = 0
+            var chineseChars = 0
+            let pageCount = doc.pageCount
+            for i in 0..<pageCount {
+                if Task.isCancelled { break }
+                if let pageString = doc.page(at: i)?.string {
+                    englishWords += pageString.split(separator: " ").count
+                    chineseChars += pageString.filter { $0.isLetter && !$0.isASCII }.count
+                }
+                // 极速计算：仅在后台做微弱让步，不再硬核睡眠，速度提升百倍
+                if i % 10 == 0 { await Task.yield() }
+            }
+            if !Task.isCancelled {
+                self.liveState.totalEnglishWords = englishWords
+                self.liveState.totalChineseChars = chineseChars
+            }
+        }
+
+        
         let title = url.deletingPathExtension().lastPathComponent
         // 告诉阅读记录追踪器：“哥们开始看了，开始计时！”
         self.readingTracker.startTracking(documentID: title, documentTitle: title, pageIndex: self.liveState.currentPageIndex)

@@ -228,6 +228,24 @@ extension AppState {
             }
             .store(in: &cancellables)
         
+        // [新增：监听选中状态用于 AI 字数统计]
+        nc.publisher(for: .PDFViewSelectionChanged, object: pdfView)
+            .debounce(for: .milliseconds(300), scheduler: RunLoop.main)
+            .sink { [weak self] _ in
+                guard let self = self else { return }
+                if let selection = self.pdfView.currentSelection?.string, !selection.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    // 简单的中英文分离字数计算
+                    let englishWords = selection.split(separator: " ").count
+                    let chineseChars = selection.filter { $0.isLetter && !$0.isASCII }.count
+                    self.liveState.selectedEnglishWords = englishWords
+                    self.liveState.selectedChineseChars = chineseChars
+                } else {
+                    self.liveState.selectedEnglishWords = nil
+                    self.liveState.selectedChineseChars = nil
+                }
+            }
+            .store(in: &cancellables)
+
         nc.publisher(for: NSNotification.Name("PDFRefreshAnnotations"))
             .sink { [weak self] _ in self?.refreshAnnotations() }
             .store(in: &cancellables)
