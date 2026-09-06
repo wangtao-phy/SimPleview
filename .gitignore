@@ -76,3 +76,9 @@ Package.swift
 
 # 本地验证产物，不发布到源码仓库
 /Validation/
+
+# 本地回归工具保留使用，不发布到源码仓库
+/Tests/
+/scripts/run-pdfview-regression.sh
+/scripts/run-regressions.py
+/scripts/verify-build.sh
