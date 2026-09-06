@@ -63,8 +63,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     
     // App 完全启动后的回调
     func applicationDidFinishLaunching(_ notification: Notification) {
-        // [静态挂载 Method Swizzling]
-        let _ = PDFAnnotation.swizzleDrawMethod
+        // 标准 InkList 交给 PDFKit 渲染，避免全局交换系统方法影响导出与其他文档。
         
         NotificationCenter.default.addObserver(forName: NSNotification.Name("GlobalNewDocument"), object: nil, queue: .main) { _ in
             Task { @MainActor in
@@ -194,7 +193,15 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     
     // 拦截 Cmd+Q (彻底退出程序) 的瞬间
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
-        // 通知我们的状态引擎：程序要挂了，赶紧保存阅读进度！
+        NotificationCenter.default.post(name: Notification.Name("FlushAIConversations"), object: nil)
+        guard ConversationManager.shared.flush() else {
+            let alert = NSAlert()
+            alert.messageText = "对话尚未保存，已取消退出"
+            alert.informativeText = "请检查存储位置和磁盘空间后重试。"
+            alert.runModal()
+            return .terminateCancel
+        }
+        // 通知状态引擎结算阅读进度。
         AppState.isAppExiting = true
         // 清理由于打开 PDF 产生的临时缓存权限签标
         UserDefaults.standard.removeObject(forKey: "OpenedPDFBookmarks")
@@ -206,8 +213,11 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         
         for window in appWindows {
             // 首先保存脏数据
-            if let wc = window.windowController as? AppWindowController, let state = wc.appState, state.isDirty {
-                state.save(sync: true)
+            if let wc = window.windowController as? AppWindowController, let state = wc.appState, state.hasUnsavedChanges {
+                guard state.save(sync: true) else {
+                    AppState.isAppExiting = false
+                    return .terminateCancel
+                }
             }
             
             let winID = ObjectIdentifier(window)
@@ -238,9 +248,16 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             UserDefaults.standard.set(data, forKey: "SavedWindowGroups")
         }
         // 这些数据此前是纯异步写入，terminateNow 会让尚未开始的任务直接丢失。
-        ReadingTracker.shared.saveAllRecords(sync: true)
-        GlobalAuthorManager.shared.saveAuthors(sync: true)
-        
+        let recordsSaved = ReadingTracker.shared.saveAllRecords(sync: true)
+        let authorsSaved = GlobalAuthorManager.shared.saveAuthors(sync: true)
+        guard recordsSaved && authorsSaved else {
+            AppState.isAppExiting = false
+            let alert = NSAlert()
+            alert.messageText = "阅读记录或作者库尚未保存，已取消退出"
+            alert.informativeText = "请检查记录存储目录与磁盘空间后重试，内存中的修改已保留。"
+            alert.runModal()
+            return .terminateCancel
+        }
         return .terminateNow
     }
     
@@ -281,7 +298,15 @@ class WindowRegistry: NSObject, NSWindowDelegate, ObservableObject {
     // [新特性：拦截窗口/标签页关闭，未保存提示]
     func windowShouldClose(_ sender: NSWindow) -> Bool {
         if let wc = sender.windowController as? AppWindowController, let state = wc.appState {
-            if state.isDirty {
+            NotificationCenter.default.post(name: Notification.Name("FlushAIConversations"), object: state)
+            guard ConversationManager.shared.flush() else {
+                let alert = NSAlert()
+                alert.messageText = "对话尚未保存，已取消关闭"
+                alert.informativeText = "请检查存储位置和磁盘空间后重试。未保存的内容仍保留在内存中。"
+                alert.runModal()
+                return false
+            }
+            if state.hasUnsavedChanges {
                 let alert = NSAlert()
                 alert.messageText = "是否保存对文档的更改？"
                 alert.informativeText = "如果不保存，您的更改将会丢失。"
@@ -292,7 +317,7 @@ class WindowRegistry: NSObject, NSWindowDelegate, ObservableObject {
                 let response = alert.runModal()
                 
                 if response == .alertFirstButtonReturn {
-                    state.save(sync: true)
+                    guard state.save(sync: true) else { return false }
                 } else if response == .alertSecondButtonReturn {
                     return false
                 }

@@ -5,117 +5,85 @@ struct KaTeXWebView: NSViewRepresentable {
     let markdown: String
     @Binding var dynamicHeight: CGFloat
 
-    class Coordinator: NSObject, WKNavigationDelegate {
+    @MainActor
+    final class Coordinator: NSObject, WKNavigationDelegate {
         var parent: KaTeXWebView
-        var lastMarkdown: String? = nil
-        var isLoaded: Bool = false
-        
-        init(_ parent: KaTeXWebView) {
-            self.parent = parent
-        }
-        
+        var latest: String?
+        var rendered: String?
+        var loaded = false
+        var stopped = false
+        var inFlight = false
+        var pending: DispatchWorkItem?
+        init(_ parent: KaTeXWebView) { self.parent = parent }
+
         func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
-            isLoaded = true
-            if let markdown = lastMarkdown {
-                parent.evaluateMarkdown(markdown, on: webView, coordinator: self)
+            loaded = true
+            schedule(on: webView)
+        }
+
+        func webView(_ webView: WKWebView, decidePolicyFor action: WKNavigationAction) async -> WKNavigationActionPolicy {
+            // 只允许首次打开本地资源。用户点击的 HTTP 链接由系统浏览器打开，
+            // 模型生成的跳转以及 file/javascript 链接不能离开渲染资源目录。
+            if action.navigationType == .linkActivated {
+                if let url = action.request.url,
+                   ["https", "http"].contains(url.scheme?.lowercased() ?? "") { NSWorkspace.shared.open(url) }
+                return .cancel
+            } else {
+                return !loaded && action.request.url?.isFileURL == true ? .allow : .cancel
             }
         }
-    }
-    
-    func makeCoordinator() -> Coordinator {
-        Coordinator(self)
-    }
 
-    func makeNSView(context: Context) -> WKWebView {
-        let config = WKWebViewConfiguration()
-        let webView = WKWebView(frame: .zero, configuration: config)
-        webView.navigationDelegate = context.coordinator
-        webView.setValue(false, forKey: "drawsBackground")
-        loadInitialHTML(on: webView)
-        return webView
-    }
-
-    func loadInitialHTML(on webView: WKWebView) {
-        let htmlString = """
-        <!DOCTYPE html>
-        <html>
-        <head>
-            <meta charset="utf-8">
-            <style>
-                :root { color-scheme: light dark; }
-                body {
-                    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-                    font-size: 14px;
-                    line-height: 1.6;
-                    padding: 8px;
-                    margin: 0;
-                    background-color: transparent;
-                }
-                pre { background-color: rgba(128, 128, 128, 0.1); padding: 10px; border-radius: 5px; overflow-x: auto; }
-                code { font-family: Menlo, Monaco, Consolas, monospace; background-color: rgba(128, 128, 128, 0.1); padding: 2px 4px; border-radius: 3px; }
-            </style>
-            <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.8/dist/katex.min.css">
-            <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.8/dist/katex.min.js"></script>
-            <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.8/dist/contrib/auto-render.min.js"></script>
-            <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
-        </head>
-        <body>
-            <div id="content"></div>
-            <script>
-                function renderContent(mdText) {
-                    // Double the backslashes so marked.js doesn't consume them as escape characters
-                    let safeMd = mdText.replace(/\\\\/g, '\\\\\\\\');
-                    
-                    // Simple hack to prevent marked from turning _ into <em> inside math blocks
-                    // We temporarily replace _ with a placeholder inside $...$ or $$...$$
-                    // (For a robust production app, marked-katex-extension is better, but this handles 95% of cases)
-                    
-                    document.getElementById('content').innerHTML = marked.parse(safeMd);
-                    renderMathInElement(document.getElementById('content'), {
-                      delimiters: [
-                          {left: '$$', right: '$$', display: true},
-                          {left: '$', right: '$', display: false},
-                          {left: '\\\\[', right: '\\\\]', display: true},
-                          {left: '\\\\(', right: '\\\\)', display: false}
-                      ],
-                      throwOnError : false
-                    });
-                }
-            </script>
-        </body>
-        </html>
-        """
-        webView.loadHTMLString(htmlString, baseURL: nil)
-    }
-
-    func evaluateMarkdown(_ markdown: String, on webView: WKWebView, coordinator: Coordinator) {
-        if let base64 = markdown.data(using: .utf8)?.base64EncodedString() {
-            let js = """
-            try {
-                const mdText = decodeURIComponent(escape(window.atob('\(base64)')));
-                if (typeof renderContent === 'function') {
-                    renderContent(mdText);
-                }
-            } catch(e) {}
-            """
-            webView.evaluateJavaScript(js) { _, _ in
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-                    webView.evaluateJavaScript("document.documentElement.scrollHeight") { result, _ in
-                        if let height = result as? CGFloat {
-                            if abs(coordinator.parent.dynamicHeight - height) > 5 {
-                                coordinator.parent.dynamicHeight = height
-                            }
+        func schedule(on view: WKWebView) {
+            guard loaded, !stopped, !inFlight, latest != rendered, pending == nil else { return }
+            // 流式回复只保留最新文本；最多一个 JS 调用执行、一个延迟任务待处理，
+            // 避免每个 token 都创建闭包并长期持有 WKWebView。
+            let work = DispatchWorkItem { [weak self, weak view] in
+                guard let self, let view, !self.stopped, let text = self.latest else { return }
+                self.pending = nil
+                self.inFlight = true
+                self.rendered = text
+                view.callAsyncJavaScript("return renderContent(markdown);",
+                    arguments: ["markdown": text], in: nil, in: .page) { [weak self, weak view] result in
+                    guard let self, !self.stopped else { return }
+                    self.inFlight = false
+                    if case .success(let value) = result, let number = value as? NSNumber {
+                        let height = CGFloat(number.doubleValue)
+                        if height.isFinite, height > 0, abs(self.parent.dynamicHeight - height) > 2 {
+                            self.parent.dynamicHeight = min(30000, height)
                         }
                     }
+                    if let view { self.schedule(on: view) }
                 }
             }
+            pending = work
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1, execute: work)
         }
     }
 
-    func updateNSView(_ webView: WKWebView, context: Context) {
-        if context.coordinator.lastMarkdown == markdown { return }
-        context.coordinator.lastMarkdown = markdown
-        if !context.coordinator.isLoaded { return }
-        evaluateMarkdown(markdown, on: webView, coordinator: context.coordinator)
+    func makeCoordinator() -> Coordinator { Coordinator(self) }
+    func makeNSView(context: Context) -> WKWebView {
+        let config = WKWebViewConfiguration()
+        config.websiteDataStore = .nonPersistent()
+        let view = WKWebView(frame: .zero, configuration: config)
+        view.navigationDelegate = context.coordinator
+        view.setValue(false, forKey: "drawsBackground")
+        if let resources = Bundle.main.url(forResource: "ChatRenderer", withExtension: "bundle") {
+            view.loadFileURL(resources.appendingPathComponent("index.html"), allowingReadAccessTo: resources)
+        } else {
+            view.loadHTMLString("<p>聊天渲染资源缺失，请重新安装应用。</p>", baseURL: nil)
+        }
+        return view
+    }
+    func updateNSView(_ view: WKWebView, context: Context) {
+        context.coordinator.parent = self
+        context.coordinator.latest = markdown
+        context.coordinator.schedule(on: view)
+    }
+    static func dismantleNSView(_ view: WKWebView, coordinator: Coordinator) {
+        coordinator.stopped = true
+        coordinator.pending?.cancel()
+        coordinator.pending = nil
+        view.stopLoading()
+        view.navigationDelegate = nil
     }
 }

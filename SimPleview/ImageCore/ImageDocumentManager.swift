@@ -250,7 +250,7 @@ final class ImageDocumentManager {
     }
     
     @MainActor
-    static func promptSaveAs(pdfDocument: PDFDocument, originalURL: URL, completion: @escaping (URL?) -> Void) {
+    static func promptSaveAs(pdfDocument: PDFDocument, originalURL: URL) throws -> URL? {
         let panel = NSSavePanel()
         panel.title = NSLocalizedString("Save Image As", comment: "")
         let ext = originalURL.pathExtension.lowercased()
@@ -314,24 +314,16 @@ final class ImageDocumentManager {
         accessoryView.wantsLayer = true
         panel.accessoryView = accessoryView
         
-        // 防止阻塞，捕获 delegate 保持其存活
-        panel.begin { response in
-            if response == .OK, let url = panel.url {
-                let savedExt = url.pathExtension.lowercased()
-                let success: Bool
-                if savedExt == "pdf" {
-                    success = pdfDocument.write(to: url)
-                } else {
-                    success = exportPDFDocumentToOriginalImageFormat(pdfDocument: pdfDocument, originalURL: url, targetSize: delegate.targetSize)
-                }
-                completion(success ? url : nil)
-            } else {
-                completion(nil)
-            }
-            
-            // 为了保持 delegate 存活
-            _ = delegate
+        // runModal 阻止关闭/退出先于导出完成；局部强引用保证附件代理存活。
+        let response = withExtendedLifetime(delegate) { panel.runModal() }
+        guard response == .OK, let url = panel.url else { return nil }
+        if url.pathExtension.lowercased() == "pdf" {
+            try AtomicPDFWriter.write(pdfDocument, to: url)
+        } else if !exportPDFDocumentToOriginalImageFormat(pdfDocument: pdfDocument,
+                    originalURL: url, targetSize: delegate.targetSize) {
+            throw CocoaError(.fileWriteUnknown)
         }
+        return url
     }
     #endif
 }

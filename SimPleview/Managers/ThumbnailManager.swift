@@ -8,19 +8,10 @@ import Combine
 /// 所以我们需要一个专门的引擎，利用后台队列和缓存机制来解决这个问题。
 final class ThumbnailManager: ObservableObject {
     
-    // [原生缓冲池：重新采用稳定可靠的 NSCache]
-    // NSCache 是苹果提供的线程安全缓存，原生支持自动响应内存警告。
-    private let nscache = NSCache<NSNumber, PlatformImage>()
-    
-    // [强引用护城河 (性能模式专用)]
-    // 为了防止在“性能模式”下，系统因为 App 闲置而自动清空 NSCache 导致图片变灰，
-    // 我们用一个普通的字典来强行“保活”最近的图片，这就叫“双重保险”。
-    private var strongCache = [Int: PlatformImage]()
-    private var strongKeys = [Int]() // FIFO 记录放入顺序
-    private var strongKeySet = Set<Int>() // [P2优化] O(1) 去重判断
-    private var strongLimit: Int = 0
-    
-    // 防止对同一页重复发起渲染请求，同时保护 strongCache 不被多线程同时写入
+    private let cacheOwner = UUID()
+    private var cacheGeneration: UInt = 0
+    private var prefetchPausedUntil = Date.distantPast
+    // 防止对同一页重复发起请求；图像由 ThumbnailStore 统一持有。
     private var generatingIndices = Set<Int>()
     private let lock = OSAllocatedUnfairLock() // 采用性能最高的 OSAllocatedUnfairLock
     
@@ -64,54 +55,44 @@ final class ThumbnailManager: ObservableObject {
     }
     
     deinit {
+        let owner = cacheOwner
+        Task { @MainActor in ThumbnailStore.shared.remove(owner: owner) }
+        renderQueue.cancelAllOperations()
         if let observer = observer {
             NotificationCenter.default.removeObserver(observer)
         }
     }
     
     private func applyMemoryMode() {
-        lock.lock()
-        defer { lock.unlock() }
-        
-        let policy = currentMemoryMode.policy
-        nscache.countLimit = policy.thumbnailCountLimit
-        strongLimit = policy.usesStrongCacheRetention ? policy.thumbnailCountLimit : 0
-        
-        // 缩容修剪：如果从性能模式切到了节约模式，立刻砍掉溢出的多余强引用
-        while strongKeys.count > strongLimit {
-            let oldest = strongKeys.removeFirst()
-            strongKeySet.remove(oldest)
-            strongCache.removeValue(forKey: oldest)
-        }
+        clearCache()
+        hotReloadSubject.send()
     }
-    
+
     func getThumbnail(for index: Int) -> PlatformImage? {
-        // 首选去原生 NSCache 里拿（它最快，内部已处理好多线程安全）
-        if let img = nscache.object(forKey: NSNumber(value: index)) {
-            return img
-        }
-        // 如果 NSCache 被系统清空了，尝试去强引用池里拿
-        lock.lock()
-        defer { lock.unlock() }
-        return strongCache[index]
+        ThumbnailStore.shared.image(owner: cacheOwner, page: index)
     }
-    
+
     func removeThumbnail(for index: Int) {
-        nscache.removeObject(forKey: NSNumber(value: index))
-        lock.lock()
-        defer { lock.unlock() }
-        strongCache.removeValue(forKey: index)
-        strongKeys.removeAll { $0 == index }
-        strongKeySet.remove(index)
+        cancelThumbnail(for: index)
+        ThumbnailStore.shared.remove(owner: cacheOwner, page: index)
     }
-    
+
+    func handleMemoryPressure() {
+        prefetchPausedUntil = Date().addingTimeInterval(30)
+        clearCache()
+    }
+
     // [极速原子化更新]
     // 当在某一页上进行批注后，不需要重绘整个文档或者走后台队列。
     // 直接在主线程迅速拉取该页当前的原生图像并强制覆盖缓存，消耗极低！
     @MainActor
     func updateLiveThumbnail(for page: PDFPage, at index: Int) {
+        // 此刻的实时结果比排队中的旧快照更新，取消旧请求并移除它的提交资格。
+        cancelThumbnail(for: index)
         let maxEdge = currentMemoryMode.policy.thumbnailMaxEdge
         let pageBounds = page.bounds(for: .cropBox)
+        guard pageBounds.width.isFinite, pageBounds.height.isFinite,
+              pageBounds.width > 0, pageBounds.height > 0 else { return }
         let isRotated = page.rotation == 90 || page.rotation == 270
         let effectiveWidth = isRotated ? pageBounds.height : pageBounds.width
         let effectiveHeight = isRotated ? pageBounds.width : pageBounds.height
@@ -125,45 +106,32 @@ final class ThumbnailManager: ObservableObject {
             targetSize = CGSize(width: effectiveWidth * scale, height: maxEdge)
         }
         
-        // [清晰度修复] 乘以视网膜像素倍率，解决原生 thumbnail 接口默认输出 1x 导致模糊的问题
-        let retinaSize = CGSize(width: targetSize.width * 2.5, height: targetSize.height * 2.5)
-        let thumb = page.platformThumbnail(of: retinaSize, for: .cropBox)
+        // 策略给出最终像素边长；此处不再次乘倍率，以免每张图膨胀到十余 MiB。
+        let retinaSize = targetSize
+        guard let data = StandardInk.exportData(of: page), let copy = PDFDocument(data: data),
+              let visiblePage = copy.page(at: 0) else { return }
+        visiblePage.displaysAnnotations = page.displaysAnnotations
+        let thumb = visiblePage.platformThumbnail(of: retinaSize, for: .cropBox)
         
-        nscache.setObject(thumb, forKey: NSNumber(value: index))
-        
-        lock.lock()
-        if strongLimit > 0 {
-            strongCache[index] = thumb
-            if strongKeySet.insert(index).inserted {
-                strongKeys.append(index)
-            }
-            while strongKeys.count > strongLimit {
-                let oldest = strongKeys.removeFirst()
-                strongKeySet.remove(oldest)
-                strongCache.removeValue(forKey: oldest)
-            }
-        }
-        lock.unlock()
-        
+        ThumbnailStore.shared.insert(thumb, owner: cacheOwner, page: index)
+
         thumbnailUpdateSubject.send((index, thumb))
     }
 
     // [紧急制动]
     // 当文档关闭或页面发生大规模改变时，紧急杀掉所有正在排队画图的线程，清空一切。
     func clearCache() {
+        cacheGeneration &+= 1
         renderQueue.cancelAllOperations()
-        nscache.removeAllObjects()
+        ThumbnailStore.shared.remove(owner: cacheOwner)
         lock.lock()
         operations.removeAll()
-        strongCache.removeAll()
-        strongKeys.removeAll()
-        strongKeySet.removeAll()
         generatingIndices.removeAll()
         lock.unlock()
     }
     
     // [核心渲染逻辑]
-    func generateThumbnail(for _: PDFPage, at index: Int, in doc: PDFDocument, currentDocChecker: @escaping @MainActor @Sendable () -> Bool) {
+    func generateThumbnail(for page: PDFPage, at index: Int, in doc: PDFDocument, currentDocChecker: @escaping @MainActor @Sendable () -> Bool) {
         // 1. 原子性地检查并在生成集合中注册，消除 TOCTOU 竞态
         lock.lock()
         if generatingIndices.contains(index) {
@@ -187,6 +155,7 @@ final class ThumbnailManager: ObservableObject {
             renderQueue.cancelAllOperations()
             operations.removeAll()
             generatingIndices.removeAll()
+            generatingIndices.insert(index)
             // 注意这里不直接 return，允许这个最新的任务入队
         }
         lock.unlock()
@@ -194,10 +163,15 @@ final class ThumbnailManager: ObservableObject {
         let safeCurrentDocChecker = currentDocChecker
         let maxEdge = currentMemoryMode.policy.thumbnailMaxEdge
         
-        // Use nonisolated(unsafe) to safely pass doc reference across thread boundaries.
-        // PDFDocument is thread-safe for fetching pages.
-        nonisolated(unsafe) let safeDoc = doc
-        
+        // 在文档所有者上创建单页快照，后台只打开这份独立数据。
+        // 不能把当前显示的 PDFDocument/PDFPage 直接交给渲染队列。
+        guard let pageData = StandardInk.exportData(of: page) else {
+            markAsFinished(index, id: nil)
+            return
+        }
+
+        let showsAnnotations = page.displaysAnnotations
+        let generation = cacheGeneration
         let operationID = UUID()
         let operation = BlockOperation()
         operation.addExecutionBlock { [weak self, weak operation] in
@@ -210,13 +184,20 @@ final class ThumbnailManager: ObservableObject {
             autoreleasepool {
                 // [极其关键的卡顿修复]
                 // 在后台线程提取 page，彻底消除主线程因为初次解析 PDF 页面对象引发的严重掉帧！
-                guard let safePage = safeDoc.page(at: index) else {
+                guard let safeDoc = PDFDocument(data: pageData), let safePage = safeDoc.page(at: 0) else {
                     DispatchQueue.main.async { self.markAsFinished(index, id: operationID) }
                     return
                 }
                 
+                safePage.displaysAnnotations = showsAnnotations
+
                 // 4. 执行高性能渲染，按页面原始比例动态计算目标尺寸
                 let pageBounds = safePage.bounds(for: .cropBox)
+                guard pageBounds.width.isFinite, pageBounds.height.isFinite,
+                      pageBounds.width > 0, pageBounds.height > 0 else {
+                    DispatchQueue.main.async { self.markAsFinished(index, id: operationID) }
+                    return
+                }
                 // 修复旋转 bug：PDF 页面旋转后 bounds 不会改变，必须根据 rotation 手动交换宽高
                 let isRotated = safePage.rotation == 90 || safePage.rotation == 270
                 let effectiveWidth = isRotated ? pageBounds.height : pageBounds.width
@@ -234,10 +215,10 @@ final class ThumbnailManager: ObservableObject {
                     targetSize = CGSize(width: effectiveWidth * scale, height: maxEdge)
                 }
                 
-                // [清晰度修复] 乘以视网膜像素倍率，解决原生 thumbnail 接口默认输出 1x 导致模糊的问题
-                let retinaSize = CGSize(width: targetSize.width * 2.5, height: targetSize.height * 2.5)
+                // 策略给出最终像素边长；此处不再次乘倍率，以免每张图膨胀到十余 MiB。
+                let retinaSize = targetSize
                 
-                // 抛弃低效且会导致休眠唤醒崩溃的 dataRepresentation 黑客写法，直接使用安全的 platformThumbnail
+                // 这里只渲染独立单页文档，不访问主视图正在编辑的 PDFPage。
                 let thumb = safePage.platformThumbnail(of: retinaSize, for: .cropBox)
                 
                 guard !operation.isCancelled else {
@@ -248,30 +229,15 @@ final class ThumbnailManager: ObservableObject {
                 // 画好了，通知主线程更新 UI
                 DispatchQueue.main.async { [weak self] in
                     guard let self else { return }
-                    guard safeCurrentDocChecker() else {
+                    // 同一 PDFDocument 的页序也会改变；仅检查文档身份不足够。
+                    // 清缓存版本、请求身份和取消状态全部通过才允许按页码回填。
+                    guard !operation.isCancelled, self.cacheGeneration == generation,
+                          self.operations[index]?.id == operationID, safeCurrentDocChecker() else {
                         self.markAsFinished(index, id: operationID)
                         return
                     }
                     
-                    // 1. 存入安全的原生 NSCache
-                    self.nscache.setObject(thumb, forKey: NSNumber(value: index))
-                    
-                    // 2. 存入强引用护城河 (仅当开启保活时才存入)
-                    self.lock.lock()
-                    if self.strongLimit > 0 {
-                        self.strongCache[index] = thumb
-                        // [P2优化] 使用 Set 进行 O(1) 去重判断
-                        if self.strongKeySet.insert(index).inserted {
-                            self.strongKeys.append(index)
-                        }
-                        while self.strongKeys.count > self.strongLimit {
-                            let oldest = self.strongKeys.removeFirst()
-                            self.strongKeySet.remove(oldest)
-                            self.strongCache.removeValue(forKey: oldest)
-                        }
-                    }
-                    self.lock.unlock()
-                    
+                    ThumbnailStore.shared.insert(thumb, owner: self.cacheOwner, page: index)
                     self.thumbnailUpdateSubject.send((index, thumb))
                     self.markAsFinished(index, id: operationID)
                 }
@@ -311,6 +277,7 @@ final class ThumbnailManager: ObservableObject {
     // [智能预加载 (Prefetching)]
     // 当用户滚到第 10 页时，我们提前把 11-40 页的图画好。如果用户滚得很慢，他会感觉非常流畅丝滑。
     func prefetchThumbnails(pages: [(Int, PDFPage)], validRange: ClosedRange<Int>, in doc: PDFDocument, currentDocChecker: @escaping @MainActor @Sendable () -> Bool) {
+        guard Date() >= prefetchPausedUntil else { return }
         lock.lock()
         // 精细控制：把队列里“距离太远”的任务强行杀掉，把有限的 CPU 让给现在正需要的页面
         // 必须彻底从追踪字典中拔除，防止僵尸任务霸占名额导致后续需要的页面无法重新触发

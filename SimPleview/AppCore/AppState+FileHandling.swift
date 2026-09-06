@@ -7,100 +7,122 @@ extension AppState {
     
     // [逻辑流程：存盘操作接口]
     // 转发给内部的 documentManager。
-    // sync 参数决定是阻塞主线程同步保存，还是放后台异步保存。
-    func save(sync: Bool = false, immediate: Bool = false) {
-        documentManager.save(pdfView: pdfView, sync: sync, immediate: immediate)
+    // 保存事务同步返回实际结果；sync 保留为现有调用点的兼容参数。
+    var hasUnsavedChanges: Bool { isDirty || !pdfView.draftInkPaths.isEmpty }
+
+    @discardableResult
+    func save(sync: Bool = false, immediate: Bool = false) -> Bool {
+        // Cmd+S/Cmd+Q 不保证改变第一响应者，必须主动提交尚未落入 PDF 的草稿。
+        pdfView.commitDraftInk()
+        autosaveTask?.cancel()
+        autosaveTask = nil
+        return documentManager.save(pdfView: pdfView, sync: sync, immediate: immediate)
     }
     
+    /// 停止编辑两秒后写回原 PDF。任务只弱引用窗口，并验证文档加载代数和
+    /// 编辑版本；换文档、关闭窗口或手动保存后，过期任务不能再写旧内容。
+    func scheduleAutosave() {
+        autosaveTask?.cancel()
+        guard !isClosed, let url = fileURL, !ImageDocumentManager.isImageFile(url: url) else { return }
+        let generation = loadGeneration, revision = editRevision
+        autosaveTask = Task { @MainActor [weak self] in
+            do { try await Task.sleep(for: .seconds(2)) } catch { return }
+            guard let self, !Task.isCancelled, !self.isClosed,
+                  self.loadGeneration == generation, self.editRevision == revision,
+                  self.fileURL == url, self.isDirty, !self.isResolvingReload else { return }
+            self.autosaveTask = nil
+            // 不在尚未抬笔的事件追踪循环中取快照；抬笔回调会重新安排保存。
+            guard self.pdfView.currentDrawingPath == nil else { return }
+            guard let document = self.pdfView.makeAutosaveDocument() else {
+                self.documentManager.saveIssue = "无法生成完整的标注副本，修改仍保留在窗口中，请手动保存。"
+                return
+            }
+            self.documentManager.save(pdfView: self.pdfView, automatically: true, documentToSave: document)
+        }
+    }
+
     // [原生打印功能]
     func printDocument() {
         // 使用 PDFView 自带的原生打印接口，完美包含一切手写和矢量批注
         let printInfo = NSPrintInfo.shared
         printInfo.horizontalPagination = .fit
         printInfo.verticalPagination = .fit
-        pdfView.print(with: printInfo, autoRotate: true)
+        pdfView.commitDraftInk()
+        guard let document = pdfView.document,
+              let data = StandardInk.exportData(of: document), let copy = PDFDocument(data: data) else { return }
+        let printableView = PDFView()
+        printableView.document = copy
+        printableView.print(with: printInfo, autoRotate: true)
     }
     
     /// [核心概念：加载 PDF]
     /// 这是 App 启动后最重要的函数，负责将硬盘里的 PDF 文件塞入内存。
     func loadPDF(url: URL, isHotReloading: Bool = false) {
-        // [底层逻辑：App Sandbox 沙盒权限机制]
-        // 苹果系统的安全机制极其严格。如果这个 URL 是我们通过系统的弹窗选的，它会有“SecurityScopedResource”权限。
-        // 如果是历史记录里的，需要解析书签来恢复权限。这个 resolve 函数帮我们封装了底层复杂的权限申请。
+        guard !isClosed, !documentManager.isSaving, !isResolvingReload else { return }
+        if hasUnsavedChanges {
+            isResolvingReload = true
+            let alert = NSAlert()
+            alert.messageText = isHotReloading ? "文件已在外部更新" : "当前文档还有未保存的修改"
+            alert.informativeText = "保留当前修改会继续使用窗口中的版本；重新加载将放弃这些修改。可先取消并另存副本。"
+            alert.addButton(withTitle: "保留当前修改")
+            alert.addButton(withTitle: "放弃修改并重新加载")
+            let response = alert.runModal()
+            isResolvingReload = false
+            guard response == .alertSecondButtonReturn else {
+                hibernatedPosition = nil
+                return
+            }
+        }
         let targetURL = resolveSecurityURL(url: url)
-        
-        // 每一次加载都获得版本号；慢的旧请求只能自行释放资源，不能回写 UI。
         loadGeneration &+= 1
         let generation = loadGeneration
+        let revision = editRevision
         loadTask?.cancel()
-
-        // [性能优化：后台线程解析 PDF]
-        // 有些几百兆的学术巨作，如果在主线程打开，整个 App 会卡死好几秒。
-        // 所以我们在高优先级后台线程读取文件。
-        let task = Task.detached(priority: .userInitiated) { [weak self] in
+        loadTask = Task.detached(priority: .userInitiated) { [weak self] in
             guard !Task.isCancelled else { return }
-            // 开始申请访问这个文件的系统级授权
-            let accessResult: Bool? = await MainActor.run {
-                guard let self, self.loadGeneration == generation else { return nil }
-                return self.documentManager.handleDocumentAccess(url: targetURL)
-            }
-            guard let accessing = accessResult else { return }
-
-            guard !Task.isCancelled else {
-                await MainActor.run { [weak self] in
-                    self?.documentManager.releaseDocumentAccessIfCurrent(url: targetURL, wasAccessing: accessing)
-                }
-                return
-            }
-            
-            // [系统架构级决策：为什么必须使用 URL 而不能用 Data(mmap) 避开缓存]
-            // PDFKit 底层与基于 URL 的系统级全局缓存深度绑定。虽然这会导致关闭文档后内存看似无法立刻释放（表现为系统的 Purgeable 可回收缓存），
-            // 但如果强制使用 Data(contentsOf:) 初始化来试图绕过缓存，会触发两大致命退化：
-            // 1. PDFKit 会关闭底层的异步图块渲染（Asynchronous Tile Rendering），导致主线程被同步渲染阻塞（触发 UI 严重闪烁/白屏）。
-            // 2. doc.documentURL 会变成 nil，导致所有强依赖此属性的功能（如阅读记录追踪 ReadingTracker）直接报废。
-            // 因此，我们必须拥抱原生的 URL 加载模式，将内存的回收调度权完全交还给 macOS/iOS 的虚拟内存内核。
-            // [混合架构：图片包装]
-            let document: PDFDocument?
-            let isImage = ImageDocumentManager.isImageFile(url: targetURL)
-            if isImage {
-                document = ImageDocumentManager.createPDFDocument(fromImageURL: targetURL)
-            } else {
-                document = PDFDocument(url: targetURL)
-            }
-            
-            guard let doc = document else {
-                await MainActor.run { [weak self] in
-                    self?.documentManager.releaseDocumentAccessIfCurrent(url: targetURL, wasAccessing: accessing)
-                }
-                return
-            }
-            
-            // 如果遇到加密的 PDF（比如某些论文），尝试用空密码先解锁
-            if doc.isEncrypted { doc.unlock(withPassword: "") }
-            
-            // [逻辑流程：回归主线程极速更新 UI]
-            // PDF 读取完毕后，必须切回主线程进行 UI 绑定，让用户能够瞬间看到 PDF！
+            // 每个加载任务持有自己的安全访问租约。旧任务结束时只释放自己的
+            // startAccessing，不能按 URL 相等去释放另一个同 URL 新任务的权限。
+            let accessing = targetURL.startAccessingSecurityScopedResource()
+            defer { if accessing { targetURL.stopAccessingSecurityScopedResource() } }
+            let doc = ImageDocumentManager.isImageFile(url: targetURL)
+                ? ImageDocumentManager.createPDFDocument(fromImageURL: targetURL)
+                : PDFDocument(url: targetURL)
+            if let doc, doc.isEncrypted { doc.unlock(withPassword: "") }
             await MainActor.run {
-                guard let self, !Task.isCancelled, self.loadGeneration == generation else {
-                    // 新请求已经接管了授权；只释放仍归本请求持有的权限。
-                    if accessing { self?.documentManager.releaseDocumentAccessIfCurrent(url: targetURL, wasAccessing: accessing) }
+                guard let self, !self.isClosed, !Task.isCancelled,
+                      self.loadGeneration == generation else { return }
+                self.loadTask = nil
+                // 用户可能在后台解析期间又画了一笔。此检查必须在替换前执行，
+                // 即使开始加载时明确选择了放弃旧修改，也不能放弃后来新增的编辑。
+                guard self.editRevision == revision else {
+                    self.hibernatedPosition = nil
                     return
                 }
-                
-                // macOS: 每次打开新文件时，我们把它从“最近打开”的内部列表里清理掉，防止重复。
-                self.documentManager.removeFromOpenedRecent(url: self.fileURL)
-                
+                guard let doc, !doc.isLocked, doc.pageCount > 0 else {
+                    let alert = NSAlert()
+                    alert.messageText = "无法打开文档"
+                    alert.informativeText = "文件可能损坏、为空或需要密码。当前窗口中的文档已保留。"
+                    alert.runModal()
+                    return
+                }
+                self.pdfView.prepareForDocumentReplacement()
+                self.navigationManager.clearHistory()
+                self.selectedAnnotation = nil
+                self.searchManager.clear()
+                _ = self.documentManager.handleDocumentAccess(url: targetURL)
                 self.setupDocument(doc, url: targetURL, isHotReloading: isHotReloading)
             }
         }
-        loadTask = task
     }
-    
 
     // [教程注释：文件加载完毕后的基建配置]
     func setupDocument(_ doc: PDFDocument, url: URL, isHotReloading: Bool = false) {
+        let migratedInk = StandardInk.migrate(in: doc)
+        // 必须先关掉原生手绘层，再交给 PDFView，避免先创建模糊位图缓存。
+        StandardInk.prepareForScreen(in: doc)
         self.fileURL = url
         self.pdfView.document = doc
+        self.pdfView.setAnnotationsVisible(areAnnotationsVisible)
         
         if !isHotReloading {
             HistoryManager.shared.recordOpen(url: url)
@@ -127,37 +149,30 @@ extension AppState {
         // 3. 统一采用 cropBox 进行展示（这是学术界和出版界的标准，避免把出血线和裁切标记显示出来）
         self.pdfView.displayBox = .cropBox
         
-        self.isDirty = false
+        self.isDirty = migratedInk
         self.liveState.totalPageCount = doc.pageCount
         self.rebuildPageAspectRatios()
         
 
-        // [新增：极低优先级异步计算文档总字数，绝不卡顿主线程]
-        self.liveState.totalEnglishWords = nil
-        self.liveState.totalChineseChars = nil
-        Task(priority: .background) {
-            var englishWords = 0
-            var chineseChars = 0
-            let pageCount = doc.pageCount
-            for i in 0..<pageCount {
-                if Task.isCancelled { break }
-                if let pageString = doc.page(at: i)?.string {
-                    englishWords += pageString.split(separator: " ").count
-                    chineseChars += pageString.filter { $0.isLetter && !$0.isASCII }.count
-                }
-                // 极速计算：仅在后台做微弱让步，不再硬核睡眠，速度提升百倍
-                if i % 10 == 0 { await Task.yield() }
-            }
-            if !Task.isCancelled {
-                self.liveState.totalEnglishWords = englishWords
-                self.liveState.totalChineseChars = chineseChars
+        statisticsTask?.cancel()
+        liveState.totalEnglishWords = nil
+        liveState.totalChineseChars = nil
+        let documentID = ObjectIdentifier(doc)
+        // 普通 Task 会继承 MainActor；detached + 独立 URL 文档才真正隔离解析。
+        // 回写只短暂取得 self，关闭窗口不会被全文统计任务强引用保活。
+        statisticsTask = Task.detached(priority: .utility) { [weak self] in
+            guard let statistics = DocumentStatistics.read(url: url), !Task.isCancelled else { return }
+            await MainActor.run {
+                guard let self, !self.isClosed, !Task.isCancelled,
+                      self.pdfView.document.map(ObjectIdentifier.init) == documentID else { return }
+                self.liveState.totalEnglishWords = statistics.englishWords
+                self.liveState.totalChineseChars = statistics.chineseCharacters
+                self.statisticsTask = nil
             }
         }
 
-        
-        let title = url.deletingPathExtension().lastPathComponent
-        // 告诉阅读记录追踪器：“哥们开始看了，开始计时！”
-        self.readingTracker.startTracking(documentID: title, documentTitle: title, pageIndex: self.liveState.currentPageIndex)
+        readingTracker.prepareRecord(url: url)
+        updateReadingTracking()
         
         // [黑科技：监听外部文件篡改]
         // 用 DispatchSource 监听硬盘上的文件。如果此时用户用另外的 PDF 软件修改了这个文件并保存，
@@ -215,7 +230,14 @@ extension AppState {
             self.annotationManager.batchStack.removeAll() // 换了新文件，肯定要清空上个文件的撤销栈
             self.annotationManager.redoStack.removeAll()
             
-            let savedPage = UserDefaults.standard.integer(forKey: "PDFLastPage_" + url.lastPathComponent)
+            let pageKey = "PDFLastPage_" + DocumentIdentity.id(for: url)
+            let legacyPageKey = "PDFLastPage_" + url.lastPathComponent
+            if UserDefaults.standard.object(forKey: pageKey) == nil,
+               let legacy = UserDefaults.standard.object(forKey: legacyPageKey) {
+                UserDefaults.standard.set(legacy, forKey: pageKey)
+                UserDefaults.standard.removeObject(forKey: legacyPageKey)
+            }
+            let savedPage = UserDefaults.standard.integer(forKey: pageKey)
             self.goToPage(max(0, min(savedPage, max(0, doc.pageCount - 1))))
             self.thumbnailManager.clearCache()
             
@@ -226,13 +248,20 @@ extension AppState {
         }
     }
     
+    /// 只有当前活动窗口可以拥有全局秒表；后台加载/热重载只准备记录，不抢计时。
+    func updateReadingTracking() {
+        guard !isClosed, hostingWindow?.isKeyWindow == true, NSApp.isActive,
+              let url = fileURL else { return }
+        readingTracker.startTracking(documentID: DocumentIdentity.id(for: url),
+            documentTitle: url.deletingPathExtension().lastPathComponent,
+            pageIndex: liveState.currentPageIndex, owner: ObjectIdentifier(self))
+    }
+
     // [智能自动化：文献已读打签]
     // 这是个专为强迫症学者设计的功能。关闭文件时，检查各种信息（是否总结过？是否有打分？是否有作者信息？）
     // 如果全都有，说明这篇论文已经“精读”过了，自动在 macOS 底层用访达（Finder）给文件挂上一个橘黄色的“已精读”系统标签！
     func autoTagDocumentIfCompleted(url: URL) {
-        let title = url.deletingPathExtension().lastPathComponent
-        
-        if let record = ReadingTracker.shared.recordsCache[title] {
+        if let record = ReadingTracker.shared.recordsCache[DocumentIdentity.id(for: url)] {
             let hasDate = !record.articleDate.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
             let hasSummary = !record.articleSummary.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
             let hasRatings = !record.ratings.isEmpty

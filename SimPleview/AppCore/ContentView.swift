@@ -21,8 +21,7 @@ struct ContentView: View {
     // 同理，生成这个专属窗口自己的界面状态控制器。
     @StateObject var uiState = UIState()
     
-    @AppStorage("aiAvailableModels_v2") private var aiAvailableModels: String = "gpt-5.5,gpt-5.6"
-    @AppStorage("aiModel_v2") private var aiModel: String = "gpt-5.5"
+    @ObservedObject private var aiConfiguration = AIConfigurationStore.shared
     @AppStorage("estimatedContextTokens") private var estimatedContextTokens: Int = 0
     @AppStorage("lastPromptTokens") private var lastPromptTokens: Int = 0
     @AppStorage("lastCompletionTokens") private var lastCompletionTokens: Int = 0
@@ -128,6 +127,7 @@ struct ContentView: View {
         // 当窗口获得焦点：立即叫醒应用，取消休眠，让内存重组。
         .onReceive(NotificationCenter.default.publisher(for: NSWindow.didBecomeKeyNotification)) { notification in
             if let window = notification.object as? NSWindow, window === hostingWindow {
+                state.updateReadingTracking()
                 if state.isHibernating {
                     state.wakeUp()
                 } else {
@@ -139,6 +139,7 @@ struct ContentView: View {
         // 当窗口失去焦点（用户切去了微信或看网页）：开始倒计时准备内存休眠。
         .onReceive(NotificationCenter.default.publisher(for: NSWindow.didResignKeyNotification)) { notification in
             if let window = notification.object as? NSWindow, window === hostingWindow {
+                state.readingTracker.stopTracking(owner: ObjectIdentifier(state))
                 state.scheduleHibernation()
             }
         }
@@ -222,8 +223,8 @@ struct ContentView: View {
                         .zIndex(2)
                 }
             }
-            // [新增：底部状态栏]
-            if state.fileURL != nil {
+            // 放映时让页面占满可用空间；退出放映后自动恢复状态栏。
+            if state.fileURL != nil && !uiState.isSlideshowActive {
                 HStack {
                     // 左侧字数统计
                     Group {
@@ -242,18 +243,27 @@ struct ContentView: View {
                     
                     Spacer()
                     
+                    Button {
+                        state.save(immediate: true)
+                    } label: {
+                        Label(state.documentManager.saveIssue != nil ? "保存未完成" : (state.isDirty ? "待保存" : "已写入 PDF"),
+                              systemImage: state.documentManager.saveIssue != nil ? "exclamationmark.circle" : "doc.badge.arrow.up")
+                    }
+                    .buttonStyle(.borderless)
+                    .font(.caption)
+                    .help(state.documentManager.saveIssue ?? "标注直接保存在原 PDF 中。已写入表示本地保存成功，iCloud 同步由系统完成；点击立即保存。")
+
                     // 右侧 AI 控制
                     HStack(spacing: 12) {
-                        let modelArray = aiAvailableModels.split(separator: ",").map { String($0).trimmingCharacters(in: .whitespacesAndNewlines) }
-                        
-                        Picker("", selection: $aiModel) {
-                            ForEach(modelArray, id: \.self) { model in
-                                Text(model).tag(model)
+                        Picker("AI 模型", selection: Binding(get: { aiConfiguration.selectedModelID }, set: { aiConfiguration.select($0) })) {
+                            Text("请选择模型").tag(UUID?.none)
+                            ForEach(aiConfiguration.routes) { route in
+                                Text(route.label).tag(Optional(route.id))
                             }
                         }
-                        .frame(width: 220)
+                        .frame(width: 300)
                         .labelsHidden()
-                        
+
                         if lastPromptTokens > 0 || lastCompletionTokens > 0 {
                             let missTokens = max(0, lastPromptTokens - lastCachedTokens)
                             let hitTokens = lastCachedTokens
@@ -411,4 +421,3 @@ struct MacToolbarModifier: ViewModifier {
             )
     }
 }
-

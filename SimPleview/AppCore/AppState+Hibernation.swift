@@ -23,8 +23,8 @@ extension AppState {
         // [性能/自定义/节约模式统一]：从偏好设置里读取用户设定的阈值，默认 20 分钟
         let timeoutStr = UserDefaults.standard.string(forKey: "hibernationTimeoutStr") ?? "20"
         let trimmed = timeoutStr.trimmingCharacters(in: .whitespacesAndNewlines)
-        if !trimmed.isEmpty, let minutes = Double(trimmed), minutes > 0 {
-            timeoutSeconds = minutes * 60.0
+        if !trimmed.isEmpty, let minutes = Double(trimmed), minutes.isFinite, minutes > 0 {
+            timeoutSeconds = min(minutes, 7 * 24 * 60) * 60.0
         } else {
             return // 从不休眠
         }
@@ -54,7 +54,10 @@ extension AppState {
         guard let _ = fileURL, !isHibernating else { return }
         
         // 睡觉前，先把用户画到一半的批注存入硬盘！安全第一！
-        save(immediate: true)
+        // 图片的休眠仅清缓存，保留修改，不自动弹出另存为。
+        if let url = fileURL, !ImageDocumentManager.isImageFile(url: url), hasUnsavedChanges {
+            guard save(sync: true) else { return }
+        }
         
         if MemoryMode.current.policy.allowsHibernation {
             // [极致 O(1) 状态保存]

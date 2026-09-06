@@ -63,8 +63,7 @@ extension AppState {
         
         // 从偏好设置 UserDefaults 里读取设定的秒数
         let timeoutStr = UserDefaults.standard.string(forKey: "annotationRevertTimeoutStr") ?? "15"
-        let timeout = Double(timeoutStr.trimmingCharacters(in: .whitespacesAndNewlines)) ?? 15.0
-        let finalTimeout = timeout > 0 ? timeout : 15.0
+        let finalTimeout = ValidatedLimits.seconds(timeoutStr)
         
         // 创建一次性的并发任务，时间一到就把工具置空。
         annotationTimerTask = Task { @MainActor [weak self] in
@@ -116,6 +115,7 @@ extension AppState {
     // 把“同一批次”产生的碎块在逻辑上视为一个大批注，选中一个等于全选！
     #if os(macOS)
     func pdfView(_ pdfView: PDFView, willHitAnnotation annotation: PDFAnnotation, withEvent event: NSEvent) -> PDFAnnotation? {
+        guard (pdfView as? CustomPDFView)?.annotationsVisible != false else { return nil }
         if let bid = annotation.userName {
             DispatchQueue.main.async { [weak self] in
                 if self?.selectedAnnotation?.userName != bid {

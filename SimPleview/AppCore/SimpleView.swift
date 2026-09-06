@@ -169,6 +169,8 @@ struct SimpleViewApp: App {
         Settings {
             SettingsView()
         }
+        .defaultSize(width: 720, height: 780)
+        .windowResizability(.contentMinSize)
         .commands { appCommands }
     }
 }

@@ -18,6 +18,13 @@ struct AnnotationToolbarGroup: CustomizableToolbarContent {
                 .pickerStyle(.segmented)
                 .frame(width: 150)
                 ColorPickerMenu(state: state)
+                Button {
+                    state.areAnnotationsVisible.toggle()
+                } label: {
+                    Image(systemName: state.areAnnotationsVisible ? "eye" : "eye.slash")
+                }
+                .help(state.areAnnotationsVisible ? "隐藏全部标注" : "显示全部标注")
+                .accessibilityLabel(state.areAnnotationsVisible ? "隐藏全部标注" : "显示全部标注")
             }
             .disabled(state.fileURL == nil)
         }

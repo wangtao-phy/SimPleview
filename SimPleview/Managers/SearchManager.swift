@@ -62,21 +62,13 @@ final class SearchManager: ObservableObject {
 
         let startIndex = pdfView?.currentPage.map { document.index(for: $0) } ?? 0
         
-        // [异步编程：OperationBlock]
-        // 切入后台线程执行底层的文本扫描，支持被中途取消
-        // 将 PDFDocument 引用以 nonisolated(unsafe) 方式传入后台串行队列（与 ThumbnailManager 同款）。
-        // 仅做只读 dataRepresentation 序列化，安全。
-        nonisolated(unsafe) let searchDocument = document
+        // 快照创建与编辑同属主执行器。后台序列化“只读”也可能遍历可变对象，
+        // 因此必须先隔离输入，再进入搜索队列，避免与删页/批注/保存交叉访问。
+        guard let documentData = document.dataRepresentation() else { isSearching = false; return }
         let operation = BlockOperation()
         operation.addExecutionBlock { [weak self, weak operation] in
             // 刚进来就先查一下有没有被取消，不要浪费算力
             guard let operation = operation, !operation.isCancelled else { return }
-            // [性能修复] 全量序列化 dataRepresentation 移入后台串行队列，避免大 PDF 在主线程卡顿。
-            // PDFDocument 的只读序列化是线程安全的；searchQueue 为串行队列，不会与自身并发。
-            guard let documentData = searchDocument.dataRepresentation() else {
-                DispatchQueue.main.async { [weak self] in self?.isSearching = false }
-                return
-            }
             guard let safeDocument = PDFDocument(data: documentData) else {
                 DispatchQueue.main.async { [weak self] in self?.isSearching = false }
                 return
@@ -201,62 +193,24 @@ final class SearchManager: ObservableObject {
         if currentSearchIndex != index { currentSearchIndex = index }
         let match = searchResults[index]
         
-        // UI 更新和页面跳转必须在主线程执行
-        Task { @MainActor in
-            guard let pdfView = pdfView, let document = pdfView.document else { return }
-            guard match.pageIndex < document.pageCount, let page = document.page(at: match.pageIndex) else { return }
-            
-            // 【极限内存优化：坐标重组高亮】
-            // 因为内存中已经没有原生 `PDFSelection` 了，我们在这里使用 `match.boundsArray` 和 `page.selection(for: bounds)`
-            // 毫秒级动态拼装出一个高亮选区。这种用微小 CPU 计算换取成百上千兆常驻内存释放的策略非常值得。
-            var finalSelection: PDFSelection?
-            for bounds in match.boundsArray {
-                if let sel = page.selection(for: bounds) {
-                    if finalSelection == nil {
-                        finalSelection = sel
-                    } else {
-                        finalSelection?.add(sel)
-                    }
-                }
-            }
-            
-            if let selection = finalSelection {
-                // go(to:) 会让视图平滑滚动或直接跳转到该选区所在的页面
-                pdfView.go(to: selection)
-                // 告诉 PDFView，这是现在用户“选中的高亮区域”
-                pdfView.currentSelection = selection
-                
-                // [Skim 级特效：动态高亮平滑闪烁]
-                // 动态生成一堆高亮 Annotation 铺在目标位置上，并使用平滑动画让其褪色。
-                let flashAnnotations = match.boundsArray.map { bounds -> PDFAnnotation in
-                    let annot = PDFAnnotation(bounds: bounds, forType: .highlight, withProperties: nil)
-                    // 使用纯黄色，更加明亮醒目
-                    annot.color = NSColor.yellow.withAlphaComponent(1.0)
-                    // [防污染] 标记为临时闪烁批注：不打印、只读，并在收集逻辑中排除
-                    annot.userName = "SEARCH_FLASH"
-                    annot.shouldPrint = false
-                    annot.isReadOnly = true
-                    page.addAnnotation(annot)
-                    return annot
-                }
-                
-                // 使用 Task.sleep 实现平滑褪色动画 (0.5秒内褪色完毕)
-                let totalSteps = 12 // 12 帧，每帧 0.04 秒 ≈ 0.5 秒动画
-                for step in 1...totalSteps {
-                    try? await Task.sleep(nanoseconds: 40_000_000)
-                    let alpha = CGFloat(1.0 - Double(step) / Double(totalSteps))
-                    for annot in flashAnnotations {
-                        annot.color = NSColor.yellow.withAlphaComponent(alpha)
-                    }
-                }
-                
-                for annot in flashAnnotations {
-                    page.removeAnnotation(annot)
-                }
+        guard let pdfView, let document = pdfView.document,
+              match.pageIndex >= 0, match.pageIndex < document.pageCount,
+              let page = document.page(at: match.pageIndex) else { return }
+        var selection: PDFSelection?
+        for bounds in match.boundsArray {
+            if let part = page.selection(for: bounds) {
+                if let current = selection { current.add(part) } else { selection = part }
             }
         }
+        if let selection {
+            // 搜索定位属于视图状态，不能临时添加 PDFAnnotation：用户可能在
+            // 动画结束之前保存文件，使所谓 SEARCH_FLASH 永久写入 PDF。
+            // 使用 PDFView 原生选区动画，也无需任务在半秒内强持有旧页面。
+            pdfView.go(to: selection)
+            pdfView.setCurrentSelection(selection, animate: true)
+        }
     }
-    
+
     // 清空重置
     func clear() {
         searchQueue.cancelAllOperations()

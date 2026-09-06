@@ -97,11 +97,7 @@ extension AppState {
                     if self.liveState.currentPageIndex != index {
                         self.liveState.currentPageIndex = index
                         
-                        // 开始记录这新的一页花了多少时间阅读
-                        if let doc = self.pdfView.document, let url = doc.documentURL {
-                            let title = url.deletingPathExtension().lastPathComponent
-                            self.readingTracker.startTracking(documentID: title, documentTitle: title, pageIndex: index)
-                        }
+                        self.updateReadingTracking()
                     }
                 }
             }
@@ -174,21 +170,12 @@ extension AppState {
                 
                 if let url = self.fileURL {
                     // 把页码存入磁盘，下次打开回到这里
-                    UserDefaults.standard.set(index, forKey: "PDFLastPage_" + url.lastPathComponent)
+                    UserDefaults.standard.set(index, forKey: "PDFLastPage_" + DocumentIdentity.id(for: url))
                 }
             }
             .store(in: &cancellables)
             
-        // 监听到系统真的要退出了，马上发起急救式保存
-        nc.publisher(for: NSApplication.willTerminateNotification)
-            .sink { [weak self] _ in
-                AppState.isAppExiting = true
-                if self?.isDirty == true {
-                    self?.save(sync: true)
-                }
-            }
-            .store(in: &cancellables)
-            
+        // 保存由 applicationShouldTerminate 统一完成，可取消的阶段才能处理失败。
         nc.publisher(for: NSWindow.willEnterFullScreenNotification)
             .sink { [weak self] _ in self?.pdfView.autoScales = false }
             .store(in: &cancellables)
@@ -296,7 +283,7 @@ extension AppState {
         let source = DispatchSource.makeMemoryPressureSource(eventMask: [.warning, .critical], queue: .main)
         source.setEventHandler { [weak self] in
             guard let self = self else { return }
-            let event = source.data
+            let event = self.memoryPressureSource?.data ?? []
             
             // 如果不是节约模式，不激进清理
             guard MemoryMode.current.policy.aggressivePurgeOnClose else { return }

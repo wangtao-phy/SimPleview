@@ -591,7 +591,7 @@ final class AnnotationManager: ObservableObject {
     @discardableResult
     func syncBatchColor(for annot: PDFAnnotation, in document: PDFDocument?, pdfView: PDFView?) -> Bool {
         guard let batchID = annot.userName, let doc = document else { return false }
-        let color = annot.color
+        let color = StandardInk.displayColor(of: annot)
         var changed = false
         // 【极致 O(1) 优化】相邻页检索
         if let basePage = annot.page {
@@ -601,8 +601,8 @@ final class AnnotationManager: ObservableObject {
             
             for i in start..<end {
                 if let page = doc.page(at: i) {
-                    for a in page.annotations where a.userName == batchID && a != annot && a.color != color {
-                        a.color = color
+                    for a in page.annotations where a.userName == batchID && a != annot && StandardInk.displayColor(of: a) != color {
+                        StandardInk.setColor(color, to: a)
                         changed = true
                     }
                 }

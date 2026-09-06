@@ -11,7 +11,14 @@ final class DocumentManager: ObservableObject {
     
     // [核心数据：基础文件状态]
     /// 当前打开的 PDF 文件的本地 URL
-    @Published var fileURL: URL?
+    @Published var fileURL: URL? {
+        didSet {
+            savedFileVersion = fileURL.flatMap { try? AtomicPDFWriter.FileVersion(url: $0) }
+            saveIssue = nil
+        }
+    }
+    private var savedFileVersion: AtomicPDFWriter.FileVersion?
+    @Published var saveIssue: String?
     
     /// 标记当前文档是否包含未保存的修改 (比如你刚画了一条线)
     @Published var isDirty: Bool = false
@@ -22,7 +29,7 @@ final class DocumentManager: ObservableObject {
     
     // [保存防抖]
     /// 用于防抖动 (Debounce) 的保存任务，避免频繁修改导致频繁磁盘 I/O，损坏 SSD 寿命
-    private var saveWorkItem: DispatchWorkItem?
+    private(set) var isSaving = false
     
     /// 监听外部文件被其他应用修改的监听器
     var fileMonitor: FileMonitor? {
@@ -50,109 +57,55 @@ final class DocumentManager: ObservableObject {
         #endif
     }
     
-    // MARK: - Safe Background Saving (安全后台保存机制)
-    
-    // [核心引擎：多线程调度]
-    // (已移除 saveQueue，因为 PDFKit 的 write(to:) 如果不在 MainActor 执行，极易在与 PDFView 渲染并发时引发崩溃)
-
-    /// 将对 PDF 的修改保存到磁盘
-    /// - Parameters:
-    ///   - pdfView: 当前对应的 PDFView
-    ///   - sync: 是否需要强制同步保存 (例如应用即将退出或休眠时，必须等它写完)
-    ///   - immediate: 是否跳过防抖时间，立即在后台异步保存
-    func save(pdfView: PDFView?, sync: Bool = false, immediate: Bool = false) {
-        guard let url = fileURL, let document = pdfView?.document else { return }
-
-        // 快速判断是否为图片 (避免频繁的文件系统调用)
-        let ext = url.pathExtension.lowercased()
-        let isImage = ["png", "jpg", "jpeg", "heic", "tiff", "tif", "gif", "bmp", "webp"].contains(ext)
-
-        // 如果文件没有被修改：
-        // 对于普通 PDF，直接跳过以节省性能
-        // 对于图片，只有在用户明确触发保存（Cmd+S 会传入 immediate=true 或 sync=true）时，才允许弹出另存为窗口
-        if !isDirty {
-            if !isImage || (!sync && !immediate) {
-                return
+    /// 保存和关闭共用一个同步结果。图片使用应用模态另存为面板，直到用户完成
+    /// 或取消才返回；调用者不能把“面板已出现”误认为“文件已经保存”。
+    /// isSaving 防止面板的嵌套事件循环重入保存。后台休眠不弹图片导出面板。
+    @discardableResult
+    func save(pdfView: PDFView?, sync: Bool = false, immediate: Bool = false,
+              automatically: Bool = false, documentToSave: PDFDocument? = nil) -> Bool {
+        guard !isSaving else { return false }
+        guard let url = fileURL, let document = documentToSave ?? pdfView?.document else { return !isDirty }
+        let isImage = ImageDocumentManager.isImageFile(url: url)
+        guard isDirty || (isImage && immediate) else { return true }
+        if isImage && !sync && !immediate { return false }
+        if automatically && (isImage || savedFileVersion == nil) {
+            saveIssue = "尚未写入 PDF，请使用保存按钮选择保存位置。"
+            return false
+        }
+        isSaving = true
+        let monitor = fileMonitor
+        monitor?.isSelfSaving = true
+        let accessing = url.startAccessingSecurityScopedResource()
+        defer {
+            if accessing { url.stopAccessingSecurityScopedResource() }
+            isSaving = false
+            monitor?.updateLastKnownModDate()
+            // 只操作本次保存对应的监视器，不影响随后打开的新文档。
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) { [weak monitor] in
+                monitor?.isSelfSaving = false
             }
         }
-
-        // 每次触发保存时，先把之前倒计时的任务取消掉（这就是典型的 Debounce 防抖逻辑）
-        saveWorkItem?.cancel()
-
-        // 提取闭包：这是真正的存盘核心动作
-        // 【重大恶性 Bug 修复：放弃直接原地覆盖，采用绝对安全的原子化替换保存】
-        // 以前的代码认为直接 write(to: originalURL) 可以触发增量保存从而保护 LaTeX。
-        // 但实际上，当 PDFKit 决定无法进行增量保存（例如删除了页面、重排了页面）时，它会强行进行全量重写 (Full Rewrite)。
-        // 此时由于目标 URL 是它当前正在 mmap(内存映射) 读取的原文件，这会导致原文件被 O_TRUNC 截断清空！
-        // 当渲染引擎试图从被清空的原文件中读取未缓存的页面内容流 (/Contents) 时，会读到 0 字节，从而将一个完全空白的页面写入新文件！
-        // 这就是为什么“重新打开pdf时某个页面全白了，但标注还在”的根本原因。
-        // 解法：先写入系统的临时文件夹，然后再原子化替换原文件。这 100% 杜绝了内存映射截断的问题！
-        let workItem = DispatchWorkItem { [weak self] in
-            // 在写入前请求系统的安全写入权限
-            let accessing = url.startAccessingSecurityScopedResource()
-            defer { if accessing { url.stopAccessingSecurityScopedResource() } }
-
-            // 通知主线程我们正在进行自我保存，避免文件监视器误报
-            self?.fileMonitor?.isSelfSaving = true
-            
-            // [重大修复]：绝对不能使用 tempURL 进行间接替换！
-            // PDFKit 一旦发现 targetURL != originalURL，就会强行进行 Full Rewrite（全量重构）。
-            // 苹果的 Full Rewrite 引擎存在极大的缺陷，会直接剥离和破坏 LaTeX 等复杂文档中的 Type 3 和 subset 字体，导致公式字母全灭。
-            // 必须直接 write(to: url) 才能触发苹果底层的 Incremental Save（增量保存），这样 100% 保护原文档不被破坏。
-            // 之前出现的 White Page Bug，是因为在 Global 后台线程执行 write，导致与主线程 PDFView 渲染产生竞态。
-            // 现在我们已经将 workItem 强制在 MainActor 执行，彻底杜绝了 White Page 的问题！
-            // [混合架构：图片包装导出]
-            if ImageDocumentManager.isImageFile(url: url) {
-                // 如果是后台静默保存，对于图片我们直接忽略，不影响原文件，也不弹窗打扰用户
-                guard sync || immediate else {
-                    self?.fileMonitor?.isSelfSaving = false
-                    return
-                }
-                
-                #if os(macOS)
-                ImageDocumentManager.promptSaveAs(pdfDocument: document, originalURL: url) { savedURL in
-                    if savedURL != nil {
-                        self?.isDirty = false
-                        self?.fileMonitor?.updateLastKnownModDate()
-                    }
-                    self?.fileMonitor?.isSelfSaving = false
-                }
-                #endif
-                return
-            }
-            
-            let finalSuccess = document.write(to: url)
-            if finalSuccess {
-                self?.fileMonitor?.updateLastKnownModDate()
-                self?.isDirty = false
-                self?.saveWorkItem = nil
-                // 延迟恢复：给 DispatchSource 事件足够的清空时间
-                DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
-                    self?.fileMonitor?.isSelfSaving = false
-                }
+        do {
+            if isImage {
+                guard try ImageDocumentManager.promptSaveAs(pdfDocument: document, originalURL: url) != nil else { return false }
             } else {
-                self?.fileMonitor?.isSelfSaving = false
+                try AtomicPDFWriter.write(document, to: url, expectedVersion: automatically ? savedFileVersion : nil)
             }
-        }
-
-        saveWorkItem = workItem
-
-        // [主线程防抖序列化]：
-        // 绝对不能将 `document.write` 移到后台线程！
-        // 经过验证，因为 PDFKit 内部线程安全机制的缺陷，在后台执行 write(to:) 会与主线程渲染产生严重竞态，
-        // 导致应用在删除批注后保存时直接崩溃，或引发 White Page Bug！
-        // 只能强制在 MainActor 执行，通过 500ms 的精细防抖来减轻卡顿。
-        if sync {
-            // 退出流程要求 write 已经完成；不能仅仅排到下一轮主事件循环。
-            workItem.perform()
-        } else if immediate {
-            DispatchQueue.main.async(execute: workItem)
-        } else {
-            // 500ms 精细防抖，尽可能聚拢高频变动，只在最后停顿后执行一次主程序列化
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5, execute: workItem)
+            savedFileVersion = try? AtomicPDFWriter.FileVersion(url: url)
+            saveIssue = nil
+            isDirty = false
+            return true
+        } catch {
+            saveIssue = error.localizedDescription
+            // 自动保存失败保留脏标记并在状态栏提示，不反复弹模态窗口打断输入。
+            guard !automatically else { return false }
+            let alert = NSAlert(error: error)
+            alert.messageText = "保存失败，修改仍保留在窗口中"
+            alert.runModal()
+            return false
         }
     }
-    
+
     // MARK: - Security Scoped Resources Access
     
     // 负责申请和释放沙盒权限，防止应用崩溃
@@ -180,17 +133,18 @@ final class DocumentManager: ObservableObject {
     
     // 程序退出时的终极清理
     func closeAll() {
-        // [极致内存斩杀] 彻底注销系统级文件监听器，打破 NSFileCoordinator 的强引用死锁
+        // 停止事件源；描述符由取消回调独立关闭，随后释放安全访问租约。
         fileMonitor?.stop()
         fileMonitor = nil
         
         macOSAccessingURL?.stopAccessingSecurityScopedResource()
+        macOSAccessingURL = nil
     }
 }
 
 // MARK: - File Monitor for External Changes (外部文件变更监听)
 /// [教程注释：极客级文件监听器 (File Monitor)]
-/// `FileMonitor` 基于 `NSFilePresenter` 实现对当前正在阅读的 PDF 文件的外部监听。
+/// FileMonitor 使用 DispatchSource 的 vnode 事件监视当前文件，原子替换后重建监听。
 /// 为什么要这个？因为我们的用户可能是科研工作者，他们可能一边用我们的 App 看文献，一边在 iCloud 或者别的同步盘里修改这个文件。
 /// 如果文件在外面变了，我们要能瞬间察觉，并且自动刷新页面！
 class FileMonitor: NSObject {
@@ -198,7 +152,7 @@ class FileMonitor: NSObject {
     var onDidChange: (() -> Void)?
     
     private var lastKnownModDate: Date?
-    private var fileDescriptor: CInt = -1
+    private var acknowledgedModDate: Date?
     nonisolated(unsafe) private var source: DispatchSourceFileSystemObject?
     /// 实例级防抖任务，替代全局 cancelPreviousPerformRequests，避免多窗口互相干扰
     nonisolated(unsafe) private var debounceWorkItem: DispatchWorkItem?
@@ -209,6 +163,7 @@ class FileMonitor: NSObject {
         self.url = url
         super.init()
         self.lastKnownModDate = getModDate()
+        self.acknowledgedModDate = lastKnownModDate
         startMonitoring()
     }
     
@@ -216,7 +171,7 @@ class FileMonitor: NSObject {
         guard !isStopped, source == nil else { return }
         // [极限性能优化] 使用底层的 kqueue (vnode) 机制监听文件变更
         // 放弃笨重且经常漏报的 NSFilePresenter。DispatchSource 直接监听内核级别的写入事件。
-        fileDescriptor = open(url.path, O_EVTONLY)
+        let fileDescriptor = open(url.path, O_EVTONLY)
         guard fileDescriptor != -1 else { return }
         
         // 【关键逻辑：支持原子保存】预览 App 等现代软件保存时不是直接覆盖，而是写入临时文件后重命名替换（原子保存）。
@@ -264,10 +219,11 @@ class FileMonitor: NSObject {
             }
         }
         
-        source?.setCancelHandler { [weak self] in
-            guard let self = self else { return }
-            close(self.fileDescriptor)
-            self.fileDescriptor = -1
+        // cancel() 只提交异步取消请求；此时监视器可能已经被窗口释放。
+        // 回调只拥有本次打开的 FD，不依赖 self，也不会误关重启后的新 FD。
+        // FD 的所有权转交给 source，只有这一处 close，stop/deinit 可重复取消。
+        source?.setCancelHandler {
+            close(fileDescriptor)
         }
         
         source?.resume()
@@ -288,16 +244,25 @@ class FileMonitor: NSObject {
     }
     
     func updateLastKnownModDate() {
-        DispatchQueue.main.async {
-            self.lastKnownModDate = self.getModDate()
-        }
+        lastKnownModDate = getModDate()
+        acknowledgedModDate = lastKnownModDate
     }
-    
-    /// 标记当前是否为本应用自身在保存，若是则不触发重载
+
     var isSelfSaving = false
-    
+
     private func triggerChange() {
-        guard !isSelfSaving else { return }
+        guard !isStopped else { return }
+        if isSelfSaving {
+            // 保存抑制窗口期间的外部更新不能直接丢弃，稍后重新比较磁盘版本。
+            debounceWorkItem?.cancel()
+            let retry = DispatchWorkItem { [weak self] in self?.triggerChange() }
+            debounceWorkItem = retry
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1, execute: retry)
+            return
+        }
+        let date = getModDate()
+        guard date != acknowledgedModDate else { return }
+        acknowledgedModDate = date
         onDidChange?()
     }
     deinit {

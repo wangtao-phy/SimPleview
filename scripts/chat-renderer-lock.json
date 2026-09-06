@@ -1,0 +1,17 @@
+{
+  "dompurify": {
+    "version": "3.4.14",
+    "url": "https://registry.npmjs.org/dompurify/-/dompurify-3.4.14.tgz",
+    "integrity": "sha512-dVoH9z+MY+C9IilgGCk3YfFqjLi3fChm2OiKJMzh6axrJ5qwxqWaZamgmHrpv22CN/KdbZJuGEGgfQoL00LTdg=="
+  },
+  "katex": {
+    "version": "0.18.5",
+    "url": "https://registry.npmjs.org/katex/-/katex-0.18.5.tgz",
+    "integrity": "sha512-1FU5H3RjGJVj6GT9fMjf2uMIXmPQp232aXS3UEeQzf0dxefHg/CKMvNB3DuOC46LFG/E5PNxrE8dOwB782FDGg=="
+  },
+  "marked": {
+    "version": "18.0.11",
+    "url": "https://registry.npmjs.org/marked/-/marked-18.0.11.tgz",
+    "integrity": "sha512-HnslJfsZkRPBDJRHvVtAaWlZHEpSu7u8LgQuJCELjRKuWR+hpq4A7sLq3p8HaI9ypVoXDXxV34CsQJEe1+J5Aw=="
+  }
+}

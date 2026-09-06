@@ -22,7 +22,7 @@ final class MemoryManager {
         let source = DispatchSource.makeMemoryPressureSource(eventMask: [.warning, .critical], queue: .main)
         
         source.setEventHandler { [weak self] in
-            let event = source.data
+            let event = self?.memoryPressureSource?.data ?? []
             if event.contains(.warning) {
                 self?.handleMemoryPressure(level: "Warning")
             }
@@ -51,7 +51,7 @@ final class MemoryManager {
         Task { @MainActor in
             for weakState in AppState.allInstances {
                 if let state = weakState.value {
-                    state.thumbnailManager.clearCache()
+                    state.thumbnailManager.handleMemoryPressure()
                 }
             }
         }

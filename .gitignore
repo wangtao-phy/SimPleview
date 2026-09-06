@@ -73,3 +73,6 @@ iOSInjectionProject/
 # Swift Package Manager configuration
 .swiftpm/
 Package.swift
+
+# 本地验证产物，不发布到源码仓库
+/Validation/

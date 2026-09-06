@@ -22,10 +22,11 @@ struct ReadingRecordView: View {
     private var currentRecordBinding: Binding<DocumentRecord>? {
         guard let url = state.fileURL else { return nil }
         let title = url.deletingPathExtension().lastPathComponent
-        guard tracker.recordsCache[title] != nil else { return nil }
+        let id = DocumentIdentity.id(for: url)
+        guard tracker.recordsCache[id] != nil else { return nil }
         
         return Binding<DocumentRecord>(
-            get: { tracker.recordsCache[title] ?? DocumentRecord(documentID: title, documentTitle: title) },
+            get: { tracker.recordsCache[id] ?? DocumentRecord(documentID: id, documentTitle: title) },
             set: { tracker.updateRecord($0) }
         )
     }
@@ -56,7 +57,7 @@ struct ReadingRecordView: View {
                                 // 然后我们根据测出来的宽度 (geometry.size.width) 和预设的分段数 (segments)，
                                 // 动态算出一个个彩色小方块的精准宽度，保证刚好填满整个屏幕。
                                 GeometryReader { geometry in
-                                    let segments = Int(heatmapSegments)
+                                    let segments = ValidatedLimits.count(heatmapSegments, fallback: 50, range: 1...500)
                                     let pageCount = state.pdfView.document?.pageCount ?? 1
                                     
                                     // 计算每个彩色小块在逻辑上代表了多少页

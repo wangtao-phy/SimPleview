@@ -56,6 +56,8 @@ extension CustomPDFView {
                         // 误触检测：如果整个线条极短（点了一下没拖动），直接丢弃
                         if path.bounds.width > 2 || path.bounds.height > 2 || path.elementCount > 3 {
                             self.draftInkPaths.append(path)
+                            // 草稿也是未保存修改，供关闭、重载和编辑版本校验使用。
+                            self.onSaveRequired?()
                             self.draftInkPage = page
                             self._threadSafeDraftInkPaths = self.draftInkPaths
                         }
@@ -97,54 +99,7 @@ extension CustomPDFView {
                 let pageIndex = document.index(for: page) + 1 // 1-based page
                 
                 DispatchQueue.global(qos: .userInitiated).async {
-                    let task = Process()
-                    task.launchPath = "/usr/bin/env"
-                    
-                    // 配置 PATH 环境变量以确保能找到 synctex
-                    let pathEnv = ProcessInfo.processInfo.environment["PATH"] ?? ""
-                    let fullPath = "/Library/TeX/texbin:/usr/local/bin:/opt/homebrew/bin:" + pathEnv
-                    var env = ProcessInfo.processInfo.environment
-                    env["PATH"] = fullPath
-                    task.environment = env
-                    
-                    task.arguments = [
-                        "synctex",
-                        "edit",
-                        "-o", "\(pageIndex):\(synctexX):\(synctexY):\(fileURL.path)"
-                    ]
-                    
-                    let pipe = Pipe()
-                    task.standardOutput = pipe
-                    do {
-                        try task.run()
-                        task.waitUntilExit()
-                        
-                        let data = pipe.fileHandleForReading.readDataToEndOfFile()
-                        if let output = String(data: data, encoding: .utf8) {
-                            var inputPath = ""
-                            var line = ""
-                            for textLine in output.components(separatedBy: .newlines) {
-                                if textLine.hasPrefix("Input:") {
-                                    inputPath = String(textLine.dropFirst(6))
-                                } else if textLine.hasPrefix("Line:") {
-                                    line = String(textLine.dropFirst(5))
-                                }
-                            }
-                            
-                            if !inputPath.isEmpty && !line.isEmpty {
-                                // 找到了源码，尝试用 VSCode 打开并跳转到对应行
-                                let codeTask = Process()
-                                codeTask.launchPath = "/bin/sh"
-                                codeTask.arguments = [
-                                    "-c",
-                                    "PATH=\"/usr/local/bin:/opt/homebrew/bin:$PATH\"; if command -v code >/dev/null; then code -g \"\(inputPath):\(line)\"; elif [ -f \"/Applications/Visual Studio Code.app/Contents/Resources/app/bin/code\" ]; then \"/Applications/Visual Studio Code.app/Contents/Resources/app/bin/code\" -g \"\(inputPath):\(line)\"; else open -a \"Visual Studio Code\" \"\(inputPath)\"; fi"
-                                ]
-                                try codeTask.run()
-                            }
-                        }
-                    } catch {
-                        Swift.print("SyncTeX failed to run: \(error)")
-                    }
+                    SyncTeXLauncher.edit(pdfURL: fileURL, page: pageIndex, x: synctexX, y: synctexY)
                 }
                 return // 阻止 PDFKit 默认的鼠标框选行为
             }
@@ -158,6 +113,11 @@ extension CustomPDFView {
         
         let pagePoint = convert(viewPoint, to: page)
         
+        guard page.displaysAnnotations else {
+            super.mouseDown(with: event)
+            return
+        }
+
         // --- 签名缩放与拖拽拦截 ---
         var hitSignatureForMove: PDFAnnotation? = nil
         
@@ -457,7 +417,7 @@ extension CustomPDFView {
         let clickRect = CGRect(x: pagePoint.x - 2, y: pagePoint.y - 2, width: 4, height: 4)
         
         // 获取当前页所有支持的批注（利用 reversed 惰性遍历，杜绝 filter 造成的数组内存分配开销）
-        let annotations = page.annotations.reversed()
+        let annotations = (page.displaysAnnotations ? page.annotations : []).reversed()
         
         // 1. 优先检测是否点中了“当前选中批注”的【边框】或【右下角图标】
         // 图标的位置会向下凸出 bounds，全局惰性扫描保证图标不会被漏掉
@@ -522,11 +482,10 @@ extension CustomPDFView {
     }
     
     // MARK: - 墨迹多笔划成组结账逻辑
-    func commitDraftInk() {
-        guard !self.draftInkPaths.isEmpty, let page = self.draftInkPage, let batchID = self.currentDrawingBatchID else {
-            return
-        }
-        
+    /// 自动保存和正式提交共享同一份矢量构建逻辑。只创建新批注，不修改
+    /// 草稿、撤销栈或当前页面；自动保存不会把用户正在连写的笔划提前结账。
+    func makeDraftInkAnnotation() -> PDFAnnotation? {
+        guard !draftInkPaths.isEmpty, let batchID = currentDrawingBatchID else { return nil }
         var combinedBounds = self.draftInkPaths[0].bounds
         for p in self.draftInkPaths.dropFirst() {
             combinedBounds = combinedBounds.union(p.bounds)
@@ -541,46 +500,35 @@ extension CustomPDFView {
         border.lineWidth = self._threadSafeLineWidth
         annot.border = border
         
-        // [极客级性能优化]
-        // 将真实坐标序列化（保持在 page 坐标系下，无视缩放）
-        // 使用 [String] + joined() 代替 += 避免数万次内存重新分配，将速度提升百倍
-        var pointsArr = [String]()
-        pointsArr.reserveCapacity(2000)
-        
-        for p in self.draftInkPaths {
-            for i in 0..<p.elementCount {
-                var pts = [NSPoint](repeating: .zero, count: 3)
-                let type = p.element(at: i, associatedPoints: &pts)
-                if type == .moveTo {
-                    pointsArr.append("M,\(pts[0].x),\(pts[0].y);")
-                } else if type == .lineTo {
-                    pointsArr.append("L,\(pts[0].x),\(pts[0].y);")
-                }
-            }
+        // 实际坐标只写一份标准 InkList，不再重复保存长文本坐标。
+        // 保留空字符串作为本应用手绘标记，兼容已有的矢量渲染识别逻辑；
+        // 旧 PDF 中的完整 /SimPlePath 仍由 StandardInk 的读取迁移逻辑支持。
+        annot.setValue("", forAnnotationKey: PDFAnnotationKey(rawValue: "/SimPlePath"))
+        StandardInk.setColor(annot.color, to: annot)
+        StandardInk.add(pagePaths: draftInkPaths, to: annot)
+        return annot
+    }
+
+    /// 带草稿的自动保存使用独立文档副本，磁盘含最新笔迹，屏幕仍可逐笔撤销。
+    /// PDF 中只增加标准矢量 InkList 与识别标记，不生成整页图片。
+    func makeAutosaveDocument() -> PDFDocument? {
+        guard let document else { return nil }
+        guard !draftInkPaths.isEmpty else { return document }
+        guard let page = draftInkPage, page.document === document,
+              let annotation = makeDraftInkAnnotation(),
+              let data = StandardInk.exportData(of: document), let copy = PDFDocument(data: data),
+              let target = copy.page(at: document.index(for: page)) else { return nil }
+        target.addAnnotation(annotation)
+        return copy
+    }
+
+    func commitDraftInk() {
+        guard !self.draftInkPaths.isEmpty, let page = self.draftInkPage, let batchID = self.currentDrawingBatchID else {
+            return
         }
-        
-        let pointsStr = pointsArr.joined()
-        
-        // [严重恶性 Bug 修复：32KB 字符串极限截断导致的白屏毁坏 PDF]
-        // 由于我们将多笔画作合并为一个批注，导致其序列化后的字符串轻易突破 PDF 规范中对于 Dictionary String 的绝对物理极限 (32,767 bytes)。
-        // 苹果底层的 CoreGraphics 遇到超限字符串时，可能会强行截断，这在增量保存时会导致整个页面的 /Contents 流被破坏，从而导致页面不可逆转的白屏！
-        // 解法：按 30,000 个字符为一块进行物理切分，分别存入 /SimPlePath, /SimPlePath1, /SimPlePath2...
-        
-        let chunkSize = 30000
-        var chunkIndex = 0
-        var currentIndex = pointsStr.startIndex
-        
-        while currentIndex < pointsStr.endIndex {
-            let nextIndex = pointsStr.index(currentIndex, offsetBy: chunkSize, limitedBy: pointsStr.endIndex) ?? pointsStr.endIndex
-            let chunk = String(pointsStr[currentIndex..<nextIndex])
-            
-            let keyStr = chunkIndex == 0 ? "/SimPlePath" : "/SimPlePath\(chunkIndex)"
-            annot.setValue(chunk, forAnnotationKey: PDFAnnotationKey(rawValue: keyStr))
-            
-            currentIndex = nextIndex
-            chunkIndex += 1
-        }
-        
+
+        guard let annot = makeDraftInkAnnotation() else { return }
+        StandardInk.prepareForScreen(annot)
         page.addAnnotation(annot)
         
         if let doc = page.document {

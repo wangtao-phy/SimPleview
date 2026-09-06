@@ -12,7 +12,7 @@ extension CustomPDFView {
         let pagePoint = convert(viewPoint, to: page)
         
         // 如果右键点在了一个批注上...
-        if let annotation = page.annotation(at: pagePoint) {
+        if page.displaysAnnotations, let annotation = page.annotation(at: pagePoint) {
             lastClickedAnnotation = annotation
             initialAnnotationColor = annotation.color
             
@@ -78,7 +78,7 @@ extension CustomPDFView {
 
     @objc private func handleColorChange(_ sender: NSMenuItem) {
         guard let info = sender.representedObject as? [String: Any], let annotation = info["annotation"] as? PDFAnnotation, let color = info["color"] as? NSColor else { return }
-        annotation.color = color
+        StandardInk.setColor(color, to: annotation)
         syncBatchColor(for: annotation)
         onColorChanged?(color, annotation.type ?? "")
     }

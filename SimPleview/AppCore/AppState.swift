@@ -26,10 +26,27 @@ final class AppState: NSObject, ObservableObject, PDFViewDelegate {
     // [核心概念：响应式视图容器]
     // 整个 App 最核心的组件就是这个 PDFView，它是苹果官方提供的重量级 PDF 渲染引擎。
     @Published var pdfView = CustomPDFView()
+    @Published var areAnnotationsVisible = true {
+        didSet {
+            guard areAnnotationsVisible != oldValue else { return }
+            if !areAnnotationsVisible {
+                // 隐藏前结束编辑并提交草稿，避免看不见的对象仍能被拖动/删除。
+                activeType = .none
+                pdfView.activeType = .none
+                selectedAnnotation = nil
+            }
+            pdfView.setAnnotationsVisible(areAnnotationsVisible)
+            // 缩略图同步切换；缓存代数变化会拒绝尚未完成的旧显示状态结果。
+            thumbnailManager.clearCache()
+            thumbnailManager.hotReloadSubject.send()
+        }
+    }
     @Published var documentVersion = UUID()
     // 页面结构变化信号（插入/删除/重排页），用于视图层在菜单关闭 + go(to:) 完成后重新聚焦缩略图列表。
     // 与 documentVersion 分开：documentVersion 会触发全量重建（闪白），而此信号只用于焦点恢复。
-    @Published var pageStructureChanged = UUID()
+    @Published var pageStructureChanged = UUID() {
+        didSet { pdfView.setAnnotationsVisible(areAnnotationsVisible) }
+    }
     
     // [Phase 1: 高频状态剥离]
     // 曾经的 @Published var dropTargetIndex 等已移入 liveState，实现精准属性级刷新
@@ -95,6 +112,7 @@ final class AppState: NSObject, ObservableObject, PDFViewDelegate {
     @Published var activeType: AnnotationType = AnnotationType.none {
         didSet {
             if activeType != AnnotationType.none {
+                areAnnotationsVisible = true
                 applyAnnotation()
                 resetAnnotationTimer()
             } else {
@@ -133,12 +151,21 @@ final class AppState: NSObject, ObservableObject, PDFViewDelegate {
     }
     
     
+    var documentID: String? { fileURL.map(DocumentIdentity.id) }
+
     var fileName: String {
         return fileURL?.lastPathComponent ?? L("Untitled")
     }
+    var autosaveTask: Task<Void, Never>?
+
     var isDirty: Bool {
         get { documentManager.isDirty }
-        set { documentManager.isDirty = newValue }
+        set {
+            if newValue { editRevision &+= 1 }
+            documentManager.isDirty = newValue
+            if newValue { scheduleAutosave() }
+            else { autosaveTask?.cancel(); autosaveTask = nil }
+        }
     }
     
     // (这些属性已移入 liveState 中进行细粒度观测)
@@ -225,8 +252,12 @@ final class AppState: NSObject, ObservableObject, PDFViewDelegate {
     var annotationJumpTask: Task<Void, Never>? // 用于节约模式下防抖跳转
     var thumbnailJumpTask: Task<Void, Never>?  // 用于节约模式下缩略图导航防抖
     /// 当前文档加载任务。用 generation 和取消共同保证慢请求不会覆盖较新的文档。
+    var statisticsTask: Task<Void, Never>?
     var loadTask: Task<Void, Never>?
     var loadGeneration: UInt = 0
+    var editRevision: UInt = 0
+    var isClosed = false
+    var isResolvingReload = false
     
     // [核心概念：Combine 的垃圾桶]
     // AnyCancellable 的集合。在使用 Combine 框架监听事件时，如果不把监听者“存”起来，它出了作用域就会立马失效。
@@ -283,6 +314,12 @@ final class AppState: NSObject, ObservableObject, PDFViewDelegate {
     // 专门用来应对 PDFKit 贪婪的底层缓存策略。当窗口关闭时，我们不能仅仅依靠系统 GC，
     // 必须手动把底层的文档指针拔掉，强制 CoreGraphics 吐出几百兆的瓦片缓存。
     func cleanup() {
+        guard !isClosed else { return }
+        isClosed = true
+        autosaveTask?.cancel()
+        autosaveTask = nil
+        loadGeneration &+= 1
+        cancelHibernation()
         // 节约模式下关闭文档时强制清空 CoreAnimation 缓存
         if MemoryMode.current.policy.aggressivePurgeOnClose {
             #if os(macOS)
@@ -291,6 +328,7 @@ final class AppState: NSObject, ObservableObject, PDFViewDelegate {
             #endif
         }
         
+        pdfView.prepareForDocumentReplacement()
         pdfView.document = nil
         pdfView.removeFromSuperview()
         
@@ -304,16 +342,20 @@ final class AppState: NSObject, ObservableObject, PDFViewDelegate {
         annotationTimerTask?.cancel()
         annotationJumpTask?.cancel()
         thumbnailJumpTask?.cancel()
+        statisticsTask?.cancel()
+        statisticsTask = nil
         loadTask?.cancel()
         loadTask = nil
         
         // 结算阅读时长并停止追踪，防止 sessionStartTime 残留
-        readingTracker.stopTracking()
+        readingTracker.stopTracking(owner: ObjectIdentifier(self))
         
         // [内存防漏防御：强行斩断业务数据关联]
         // 彻底清空可能对 PDFPage 和 PDFDocument 造成强引用的批注和历史记录，防止循环引用导致文档内存无法释放
         allAnnotations.removeAll()
         batchStack.removeAll()
+        redoStack.removeAll()
+        selectedAnnotation = nil
         navigationManager.clearHistory()
         
         if MemoryMode.current.policy.aggressivePurgeOnClose {
@@ -346,6 +388,7 @@ final class AppState: NSObject, ObservableObject, PDFViewDelegate {
     }
 
     deinit {
+        statisticsTask?.cancel()
         // [内存防漏兜底] 即便 cleanup() 未被调用，对象销毁时也确保底层内存压力源被取消
         memoryPressureSource?.cancel()
         memoryPressureSource = nil

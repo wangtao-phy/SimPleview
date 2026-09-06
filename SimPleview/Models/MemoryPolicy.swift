@@ -11,18 +11,12 @@ protocol MemoryPolicy {
     var pageShadowsEnabled: Bool { get }
     
     // MARK: - 缓存级策略
-    /// 缩略图内存缓存最大数量
-    var thumbnailCountLimit: Int { get }
     /// 缩略图最大生成边长
     var thumbnailMaxEdge: CGFloat { get }
-    /// 是否开启强引用保活机制（防止系统过度清理）
-    var usesStrongCacheRetention: Bool { get }
     
     // MARK: - 交互级策略
     /// 侧边栏极速滚动时，是否为了防抖而延迟跳转（防渲染风暴）
     var delaysNavigationJumps: Bool { get }
-    /// 是否实时向 PDF 写入批注（所见即所得 vs 关闭时才写入）
-    var syncAnnotationsInRealtime: Bool { get }
     
     // MARK: - 休眠级策略
     /// 文档关闭时，是否要激进地清空整个 Thumbnail 缓存？
@@ -32,20 +26,17 @@ protocol MemoryPolicy {
 }
 
 /// 性能模式：对标 macOS Preview.app
-/// 极高的渲染质量、激进的内存占用、实时响应、关闭防抖延迟。
+/// 较高渲染质量和直接跳转；缩略图仍受全应用字节预算约束。
 struct PerformanceMemoryPolicy: MemoryPolicy {
     var interpolationQuality: PDFInterpolationQuality { .high }
     var pageShadowsEnabled: Bool { true }
     
-    // [极致视觉优化]：提供极大的缓存以保证 ProMotion 等高刷屏滚动时绝对不掉帧
-    var thumbnailCountLimit: Int { 1000 }
-    var thumbnailMaxEdge: CGFloat { 1024 }
-    var usesStrongCacheRetention: Bool { true }
+    // 最终像素边长。缓存容量由 ThumbnailStore 统一按字节计费。
+    var thumbnailMaxEdge: CGFloat { 640 }
     
     var delaysNavigationJumps: Bool { false }
-    var syncAnnotationsInRealtime: Bool { true }
     
-    var aggressivePurgeOnClose: Bool { false } // 关文档不清理，再次打开可能秒开
+    var aggressivePurgeOnClose: Bool { true } // 关闭后释放该窗口缓存
     var allowsHibernation: Bool { false }
 }
 
@@ -56,12 +47,9 @@ struct SavingMemoryPolicy: MemoryPolicy {
     var pageShadowsEnabled: Bool { false }
     
     // [极限内存节约]：极大地缩减缩略图的占用大小和缓存数量，以空间换取极低的常驻内存
-    var thumbnailCountLimit: Int { 20 }
-    var thumbnailMaxEdge: CGFloat { 128 }
-    var usesStrongCacheRetention: Bool { false }
+    var thumbnailMaxEdge: CGFloat { 320 }
     
     var delaysNavigationJumps: Bool { true }
-    var syncAnnotationsInRealtime: Bool { false }
     
     var aggressivePurgeOnClose: Bool { true } // 关文档必须清理全部缓存
     var allowsHibernation: Bool { true }

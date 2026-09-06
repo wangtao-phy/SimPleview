@@ -33,7 +33,7 @@ extension DocumentManager {
     private func performBurnIn(document: PDFDocument, targetURL: URL) {
         // PDFKit 文档正被 PDFView 使用，不能把它直接交给 detached task。
         // 先在主线程取得快照，后台只操作自己的 PDFDocument 副本。
-        guard let documentData = document.dataRepresentation() else { return }
+        guard let documentData = StandardInk.exportData(of: document) else { return }
         Task.detached(priority: .userInitiated) {
             guard let safeDoc = PDFDocument(data: documentData) else { return }
             let tempURL = targetURL.deletingLastPathComponent()

@@ -109,9 +109,9 @@ struct SettingsView: View {
                     Label("AI", systemImage: "sparkles")
                 }
         }
-        // [窗口刚性限制]
-        // 设置菜单不同于阅读页面，它的内容是不变的，所以给它定死了一个最小框，防止用户把它缩成一团导致排版崩坏。
-        .frame(minWidth: 500, maxWidth: .infinity, minHeight: 500, maxHeight: .infinity)
+        // 窗口只有最小可用尺寸，允许用户拉高/拉宽；AI 页由单层滚动区域适配内容。
+        .frame(minWidth: 640, idealWidth: 720, maxWidth: .infinity,
+               minHeight: 560, idealHeight: 780, maxHeight: .infinity)
         #if os(macOS)
         // [底层窗口配置渗透]
         // 监听 "在标签页中打开" 设置，如果变化，直接深入 Mac 系统核心去篡改 NSWindow 的全局属性。

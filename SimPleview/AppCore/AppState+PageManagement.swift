@@ -209,7 +209,8 @@ extension AppState {
         do {
             try FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
             let fileURL = tempDir.appendingPathComponent("dragger.pdf") // 这个名字不重要，因为拖拽松手后由系统命名
-            return newDoc.write(to: fileURL) ? fileURL : nil // 写进硬盘
+            try AtomicPDFWriter.write(newDoc, to: fileURL)
+            return fileURL
         } catch {
             return nil
         }

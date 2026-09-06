@@ -8,34 +8,44 @@ SimPleview 是一款完全通过 AI 辅助编程构建的 macOS PDF 阅读器。
 
 ##  Features vs. Apple Preview / 相比自带“预览”的优势功能
 
-- **Background Memory Hibernation**: Apple's Preview keeps all open PDFs fully loaded in memory. SimPleview automatically detects background windows that have been inactive for a long time and puts them into a hibernation state to save RAM.
+- **Background Memory Hibernation**: Idle background windows clear thumbnail caches and reduce activity. The PDFDocument/PDFView remain loaded; hibernation does not guarantee release of all document memory.
 - **Customizable Annotation Colors**: The original motivation for this app was to break free from the rigid, fixed underline colors in Preview, allowing complete freedom in choosing annotation colors.
 - **Signature Management**: Signatures are now stored and managed in a dedicated, fixed folder for quick and convenient access.
 - **Reading History & Tracking**: It tracks the time spent reading each PDF and allows for manual management of an author library.
 - **One-Click Blank Document Creation**: Creating a blank PDF from scratch in Preview is incredibly tedious. SimPleview provides intuitive shortcuts (Cmd+Shift+N) and menus to instantly generate blank PDFs or images in standard sizes (A4, A3, etc.) for quick sketches and notes.
 - **Page Insertion & Deletion**: Preview's native page management is excellent; this app retains that functionality while providing even more options via right-clicking the thumbnail.
 - **Side-by-Side Comparison**: You can easily pop out individual pages of the current PDF into a separate window to conveniently compare different sections of the same document.
-- **Deep Native AI Integration**: Seamlessly integrates API-driven AI chat right next to your PDF. It tracks real-time token usage (Hits/Misses/Outputs), supports streaming responses, and features an automatic 256k-token context compression algorithm to maintain infinite conversation history without overflowing the context window. Conversations are persistently stored per-PDF and can be switched dynamically.
+- **Deep Native AI Integration**: Multiple API profiles with independent Keychain credentials and exact model routing. Chat appears sentence by sentence, supports pause/continue, and serializes generation across windows. Vision models can read every PDF page in sequential image batches and produce a document summary. Per-document sessions preserve original history; request summaries can omit details. Markdown and formulas render with bundled scripts. See [AI setup and verification](AI_FEATURES.md).
 - **Reveal in Finder**: A small but highly convenient feature to instantly locate your file.
 - **Hover to View Internal Links**: Quickly preview the target content by simply hovering over internal cross-reference links in the PDF, without losing your current reading position.
 - **Eye-Protection Background**: Provides a comfortable background color mode to reduce eye strain during long reading sessions.
 - **Tab Management & Grouping**: Easily manage multiple open PDFs with a dedicated tab group interface, allowing you to organize, rename, and group your reading sessions, with automatic state persistence.
 - **History Management**: Easily browse and manage recently opened PDFs, with support for clearing records and quickly locating files in Finder.
 
-- **后台内存休眠**：自带的“预览”会将所有打开的 PDF 完整驻留在内存中。而 SimPleview 会自动侦测长期在后台静置的窗口，将其进入休眠状态以节省资源。
+- **后台内存休眠**：长期闲置的后台窗口清理缩略图缓存并减少活动；PDFDocument/PDFView 仍保留，休眠不等于卸载文档或释放全部内存。
 - **标注自由切换颜色**：这个 app 的初衷便是解放自带“预览”中定死的下划线颜色，实现真正的自由标色。
 - **签名管理**：现在所有的签名统一存放在一个固定的文件夹下，方便随时调用与管理。
 - **阅读记录**：可以记录 PDF 的阅读时长，也可以手动管理属于您自己的作者库。
 - **一键新建空白文档**：在自带的“预览”中想要凭空新建一个空白 PDF 步骤非常繁琐。SimPleview 提供了直观的快捷键 (Cmd+Shift+N) 和菜单，可以直接生成 A4、A3 等标准纸张尺寸的空白 PDF 或图片，方便随时做草稿和笔记。
 - **插入与删除 PDF 页面**：自带“预览”的原生页面管理功能非常好用，当前 app 做了完整保留，并在缩略图的右键菜单中提供了更多实用的拓展选项。
 - **对比查看**：可以单独弹出当前 PDF 的特定页面，方便在同一个 PDF 文件内进行跨页对比查看。
-- **深度原生的 AI 集成**：应用内嵌了强大的 AI 对话引擎，支持流式输出并精准追踪 Token 消耗量（命中/未命中/输出）。搭载自动记忆重整化机制，当上下文突破 256k 视界时，会自动在后台对历史记忆进行无损积分坍缩，实现无限续航。所有对话历史均基于各个 PDF 进行正交独立存储，并支持随文档自由切换。
+- **深度原生的 AI 集成**：支持多 API 独立密钥与精确模型切换、逐句回答、暂停与续答，全应用按顺序生成。视觉模型可分批读取 PDF 的全部页面并生成全文总结。支持独立文档会话、原子持久化与可配置的上下文预算；历史摘要可能丢失细节，原始记录保留。密钥存在钥匙串中，Markdown 与公式使用本地脚本渲染。详见 [AI 配置与验证说明](AI_FEATURES.md)。
 - **当前文件所在文件夹**：一个极为方便的小功能，一键直达文件所在目录。
 - **悬浮查看内部链接**：在 PDF 中只需将鼠标悬浮在内部跨页跳转链接上方，即可快速预览目标内容，无需来回点击打断阅读进度。
 - **护眼背景色**：提供舒适的背景色模式，有效缓解长时间阅读带来的视觉疲劳。
 - **标签页管理与分组**：通过专属的标签页悬浮窗轻松管理多个打开的 PDF，支持自由组合、拖拽、重命名分组，并且会自动记住您退出前打开的窗口组。
 - **历史记录管理**：轻松浏览和管理最近打开过的 PDF，支持清理历史记录以及在访达中快速定位文件。
 ---
+
+## 标注保存
+
+- 普通高亮、下划线、删除线及笔记直接写入原 PDF，停止编辑两秒后自动保存；状态栏可查看保存状态或立即保存。
+- 新手绘只保存标准 PDF 矢量路径和一个识别标记，不重复存储文本坐标，不降低采样精度、不栅格化页面。旧版文件仍可读取。
+- 标注工具栏的眼睛按钮同时控制页面和缩略图的标注显示；隐藏时保存仍保留标注。
+- “已写入 PDF”表示本地保存成功；跨电脑使用需等待 iCloud 等同步工具完成同步。检测到外部修改时暂停自动保存，避免静默覆盖。
+- 签名维持原有本地管理和烧录流程，不属于普通标注的跨电脑保存范围。
+
+本地构建及回归方法见 [测试说明](Tests/README.md)。
 
 ## 📥 Installation & Usage / 安装与使用指南
 

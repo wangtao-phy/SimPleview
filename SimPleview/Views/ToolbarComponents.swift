@@ -137,7 +137,7 @@ struct AnnotationEditorView: View {
                 ForEach([("蓝色", PlatformColor.platformBlue), ("红色", PlatformColor.platformRed), ("黄色", PlatformColor.platformYellow), ("绿色", PlatformColor.platformGreen), ("紫色", PlatformColor.platformPurple)], id: \.0) { name, color in
                     Button(action: {
                         if let annot = state.selectedAnnotation {
-                            annot.color = color
+                            StandardInk.setColor(color, to: annot)
                             // 极品细节：不仅改这条的颜色，还要用 syncBatchColor 找出同一个字的其他笔画一起改掉！
                             state.pdfView.syncBatchColor(for: annot)
                             

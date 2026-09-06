@@ -229,6 +229,7 @@ struct ThumbnailItem: View, Equatable {
     
     // 恢复标准的 @State 状态驱动模式
     @State private var thumbnail: PlatformImage?
+    @State private var isVisible = false
     
     static func == (lhs: ThumbnailItem, rhs: ThumbnailItem) -> Bool { 
         // 只能比较外界传入的不可变属性。
@@ -280,18 +281,26 @@ struct ThumbnailItem: View, Equatable {
         .padding(.horizontal, 10).contentShape(Rectangle())
         // 接收来自画图线程通过 Combine 发回来的“画好了”信号！
         .onReceive(state.thumbnailUpdateSubject) { payload in 
-            if payload.0 == index { 
+            if isVisible && payload.0 == index {
                 thumbnail = payload.1 
             } 
         }
         // 接收热重载的“唤醒”信号！仅当前可见的 ThumbnailItem 会收到此信号，触发自身的精准重绘
         .onReceive(state.thumbnailManager.hotReloadSubject) { _ in
-            thumbnail = nil // [强制释放可能被系统回收了底层位图的旧 NSImage]
-            state.generateThumbnail(for: index)
+            thumbnail = nil
+            if isVisible { state.generateThumbnail(for: index) }
         }
-        // 修复灰白问题的关键：滚出屏幕时，仅仅取消排队任务即可，坚决不要把 thumbnail 设为 nil！
-        // 因为 NSCache 和强引用池会自动管理底层内存的抛弃与保留，SwiftUI 这里自然持有即可。
+        // LazyVStack 可能保留离屏行及其订阅，通知本身不代表该行可见。
+        // 显式可见性门禁阻止热重载/预取通知重新填满离屏强引用。
+        .onAppear {
+            isVisible = true
+            thumbnail = state.getThumbnail(for: index)
+            if thumbnail == nil { state.generateThumbnail(for: index) }
+        }
         .onDisappear {
+            isVisible = false
+            // SwiftUI 可保留滚出屏幕的行；释放行级引用才能让全局缓存预算生效。
+            thumbnail = nil
             state.cancelThumbnailGeneration(for: index)
         }
         .contextMenu {

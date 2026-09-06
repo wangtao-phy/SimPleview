@@ -2,6 +2,7 @@ import SwiftUI
 @preconcurrency import PDFKit
 
 import AppKit
+import os
 
 // MARK: - Custom PDF View Subclass
 
@@ -12,6 +13,43 @@ import AppKit
 /// - macOS 平台的高性能非阻塞原生路径实时绘制。
 /// - "替身批注法" (Ghost Annotation Method) 实现的 O(1) 性能选区边框。
 class CustomPDFView: PDFView {
+    nonisolated let renderSnapshot = OSAllocatedUnfairLock(initialState: PDFRenderSnapshot())
+    var isPublishingRenderSnapshot = false
+    nonisolated(unsafe) var renderObserver: NSObjectProtocol?
+
+    /// 只改变 PDFPage 的绘图开关，不写入批注 /F，也不移除批注。
+    /// PDFKit 序列化不会保存此页面开关，因此隐藏时保存/打印仍包含标注。
+    var annotationsVisible = true
+
+    func setAnnotationsVisible(_ visible: Bool) {
+        annotationsVisible = visible
+        if !visible {
+            currentSelectedBatchID = nil
+            lastClickedAnnotation = nil
+            cleanupMenuObservers()
+        }
+        if let document {
+            for index in 0..<document.pageCount { document.page(at: index)?.displaysAnnotations = visible }
+        }
+        layoutDocumentView()
+        setPlatformNeedsDisplay()
+        documentView?.needsDisplay = true
+    }
+
+    override var needsDisplay: Bool {
+        didSet { if needsDisplay { publishRenderSnapshot() } }
+    }
+
+    override func setNeedsDisplay(_ invalidRect: NSRect) {
+        publishRenderSnapshot()
+        super.setNeedsDisplay(invalidRect)
+    }
+
+    override func layout() {
+        super.layout()
+        publishRenderSnapshot()
+    }
+
     
     // MARK: - Dependencies & Communication
     
@@ -36,8 +74,8 @@ class CustomPDFView: PDFView {
     var hoverTask: Task<Void, Never>?
     var hoverPopover: NSPopover?
     var currentHoveredLink: PDFAnnotation?
-    nonisolated(unsafe) var _threadSafeHoveredLinkBounds: CGRect?
-    nonisolated(unsafe) var _threadSafeHoveredLinkPage: PDFPage?
+    var _threadSafeHoveredLinkBounds: CGRect?
+    var _threadSafeHoveredLinkPage: PDFPage?
     
     // macOS 原生手绘的实时状态缓存
     var currentDrawingPath: NSBezierPath?
@@ -50,18 +88,18 @@ class CustomPDFView: PDFView {
     var resizeStartBounds: CGRect = .zero
     var resizeStartMouse: NSPoint = .zero
     
-    nonisolated(unsafe) var _threadSafeDrawingPath: NSBezierPath?
-    nonisolated(unsafe) var _threadSafeDrawingPage: PDFPage?
+    var _threadSafeDrawingPath: NSBezierPath?
+    var _threadSafeDrawingPage: PDFPage?
     
     // 手绘：缓存连续多笔划，在 commit 时才一次性写入 PDFAnnotation
     var draftInkPaths: [NSBezierPath] = [] {
         didSet { _threadSafeDraftInkPaths = draftInkPaths }
     }
-    nonisolated(unsafe) var _threadSafeDraftInkPaths: [NSBezierPath] = []
+    var _threadSafeDraftInkPaths: [NSBezierPath] = []
     var draftInkPage: PDFPage? {
         didSet { _threadSafeDraftInkPage = draftInkPage }
     }
-    nonisolated(unsafe) var _threadSafeDraftInkPage: PDFPage?
+    var _threadSafeDraftInkPage: PDFPage?
     
     // [防误触] 用户在画图时，如果不小心按了 Cmd+A，原生 PDFKit 会无视状态直接全选文本。
     // 这会导致画面闪烁或者误触发其他逻辑，我们在这里直接拦截掉！
@@ -72,10 +110,40 @@ class CustomPDFView: PDFView {
         super.selectAll(sender)
     }
     
+    /// 仅在用户确认放弃修改、旧文档即将被替换时调用。避免草稿仍引用旧 PDFPage。
+    func discardDraftInk() {
+        draftInkPaths = []
+        draftInkPage = nil
+        currentDrawingPath = nil
+        currentDrawingPage = nil
+        currentDrawingBatchID = nil
+        _threadSafeDrawingPath = nil
+        _threadSafeDrawingPage = nil
+    }
+
+    /// 文件替换和关闭共用的引用释放点。弹窗、悬停和拖动状态都可能拥有旧页；
+    /// 先关观察者/弹窗，再清状态，避免重载后回调修改已不属于当前文档的批注。
+    func prepareForDocumentReplacement() {
+        cleanupMenuObservers()
+        discardDraftInk()
+        lastClickedAnnotation = nil
+        initialAnnotationColor = nil
+        currentHoveredLink = nil
+        _threadSafeHoveredLinkBounds = nil
+        _threadSafeHoveredLinkPage = nil
+        resizingAnnotation = nil
+        resizeHandleCorner = nil
+        currentSelectedBatchID = nil
+        clearSelection()
+        highlightedSelections = nil
+        renderSnapshot.withLock { $0 = PDFRenderSnapshot() }
+    }
+
     // 支持在草稿阶段（还没 commit）的单笔撤销
     func undoDraftInk() -> Bool {
         guard !draftInkPaths.isEmpty else { return false }
         draftInkPaths.removeLast()
+        onSaveRequired?() // 撤销已自动保存的草稿，也要把删除结果同步写盘。
         if draftInkPaths.isEmpty {
             draftInkPage = nil
         }
@@ -84,6 +152,7 @@ class CustomPDFView: PDFView {
     }
     
     deinit {
+        if let renderObserver { NotificationCenter.default.removeObserver(renderObserver) }
         if let obs = menuObserver {
             NotificationCenter.default.removeObserver(obs)
         }
@@ -104,8 +173,8 @@ class CustomPDFView: PDFView {
         }
     }
     
-    /// 用于后台线程（如缩略图生成器）安全读取的批次标识符快照。
-    nonisolated(unsafe) var _threadSafeBatchID: String?
+    /// 主执行器内的兼容字段；后台渲染只读取 renderSnapshot，不读取本字段。
+    var _threadSafeBatchID: String?
     
     // 给 SwiftUI 外层调用的闭包钩子
     var onAnnotationSelected: ((PDFAnnotation?) -> Void)?
@@ -120,11 +189,13 @@ class CustomPDFView: PDFView {
             _threadSafeInkColor = inkColor
         }
     }
-    nonisolated(unsafe) var _threadSafeInkColor: PlatformColor = .systemBlue
+    var _threadSafeInkColor: PlatformColor = .systemBlue
     
     #if os(macOS)
     // [P1优化] 缓存 SF Symbol 图标，避免在高频 draw 方法中每帧重建
-    nonisolated(unsafe) var _cachedNoteIcon: NSImage?
+    var _cachedNoteCGImage: CGImage?
+    var _cachedNoteIconPixels = 0
+    var _cachedNoteIconTint: NSColor?
     #endif
     
     // 当前状态（是在看书、划线、还是手写？）
@@ -136,17 +207,17 @@ class CustomPDFView: PDFView {
             _threadSafeActiveType = activeType
         }
     }
-    nonisolated(unsafe) var _threadSafeActiveType: AnnotationType = .none
+    var _threadSafeActiveType: AnnotationType = .none
     
     var lineWidth: CGFloat = 3.0 {
         didSet {
             _threadSafeLineWidth = lineWidth
         }
     }
-    nonisolated(unsafe) var _threadSafeLineWidth: CGFloat = 3.0
+    var _threadSafeLineWidth: CGFloat = 3.0
 
     // [护眼背景色状态]
-    nonisolated(unsafe) var _threadSafePageBackgroundColor: PDFPageBackgroundColor = .default
+    var _threadSafePageBackgroundColor: PDFPageBackgroundColor = .default
 
     
     // [颜色批次同步]
@@ -154,6 +225,7 @@ class CustomPDFView: PDFView {
     func syncBatchColor(for annot: PDFAnnotation) {
         guard let batchID = annot.userName, let doc = document else { return }
         let color = annot.color
+        StandardInk.setColor(color, to: annot)
         // 【极致 O(1) 优化】相邻页检索
         if let basePage = annot.page {
             let baseIndex = doc.index(for: basePage)
@@ -163,15 +235,13 @@ class CustomPDFView: PDFView {
             for i in start..<end {
                 if let page = doc.page(at: i) {
                     for a in page.annotations where a.userName == batchID && a != annot {
-                        a.color = color
+                        StandardInk.setColor(color, to: a)
                     }
                 }
             }
         }
+        onSaveRequired?() // 右键改色也是文档编辑，必须触发保存。
         setPlatformNeedsDisplay() // 命令底层重绘 PDF
     }
     
 }
-
-
-

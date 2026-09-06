@@ -1,6 +1,7 @@
 import Foundation
 import SwiftUI
 import Combine
+import os
 
 /// [教程注释：零开销时间追踪器 (ReadingTracker)]
 /// 这是一个统计你看了一篇文献多久的神器。
@@ -16,12 +17,15 @@ class ReadingTracker: ObservableObject {
     
     /// 脏标记(Dirty Flag)：用来记住哪些记录被人改过但还没存到硬盘上。
     var dirtyRecords: Set<String> = []
+    @Published var lastError: String?
+    private let writeFailures = OSAllocatedUnfairLock(initialState: [String: String]())
     
     /// 当前用户正在看的那个文件的记录，方便在全局 UI 里直接绑定展示。
     @Published var currentRecord: DocumentRecord?
     
     // [秒表引擎的心脏]
     private var currentDocumentID: String?
+    private var trackingOwner: ObjectIdentifier?
     private var currentPageIndex: Int?
     private var sessionStartTime: Date? // 秒表按下的那一刻
     
@@ -38,7 +42,8 @@ class ReadingTracker: ObservableObject {
             return URL(fileURLWithPath: path)
         }
         set {
-            saveAllRecords() // 在搬家前，先在老房子里存档
+            // 目录切换会清空内存，旧目录必须实际保存成功才能继续。
+            guard saveAllRecords(sync: true), GlobalAuthorManager.shared.saveAuthors(sync: true) else { return }
             
             if let newValue = newValue {
                 UserDefaults.standard.set(newValue.path, forKey: "readingRecordCustomPath")
@@ -95,9 +100,7 @@ class ReadingTracker: ObservableObject {
     
     private func handleAppActivated() {
         // 如果切回来的时候用户还在读文章，重新按下秒表
-        if currentDocumentID != nil && currentPageIndex != nil {
-            self.sessionStartTime = Date()
-        }
+        (NSApp.keyWindow?.windowController as? AppWindowController)?.appState?.updateReadingTracking()
     }
     
     private func createDirectoryIfNeeded() {
@@ -112,12 +115,36 @@ class ReadingTracker: ObservableObject {
         return saveDirectoryURL.appendingPathComponent("\(safeTitle).json")
     }
     
+    /// 旧记录无法区分同名文件，只在首次遇到该旧标题时迁移；保留 Legacy 备份。
+    /// 先落盘新 ID，再移动旧记录，失败时保留原文件并报告，避免静默清空数据。
+    func prepareRecord(url: URL) {
+        let id = DocumentIdentity.id(for: url)
+        let title = url.deletingPathExtension().lastPathComponent
+        let destination = fileURL(for: id)
+        let legacy = fileURL(for: title)
+        if !FileManager.default.fileExists(atPath: destination.path),
+           FileManager.default.fileExists(atPath: legacy.path) {
+            do {
+                saveAllRecords(sync: true)
+                var record = try JSONDecoder().decode(DocumentRecord.self, from: Data(contentsOf: legacy))
+                record.documentID = id
+                record.documentTitle = title
+                try JSONEncoder().encode(record).write(to: destination, options: .atomic)
+                let backup = saveDirectoryURL.appendingPathComponent("Legacy", isDirectory: true)
+                try FileManager.default.createDirectory(at: backup, withIntermediateDirectories: true)
+                try FileManager.default.moveItem(at: legacy, to: backup.appendingPathComponent("\(UUID().uuidString)-\(legacy.lastPathComponent)"))
+                recordsCache.removeValue(forKey: title)
+            } catch { NSLog("阅读记录迁移失败：%@", error.localizedDescription) }
+        }
+        _ = loadRecord(for: id, displayTitle: title)
+    }
+
     func updateRecord(_ record: DocumentRecord) {
         recordsCache[record.documentID] = record
         dirtyRecords.insert(record.documentID) // 盖上脏标记的戳
     }
     
-    func loadRecord(for title: String) -> DocumentRecord {
+    func loadRecord(for title: String, displayTitle: String? = nil) -> DocumentRecord {
         var recordToReturn: DocumentRecord
         
         if let cached = recordsCache[title] {
@@ -130,10 +157,10 @@ class ReadingTracker: ObservableObject {
                     let decoder = JSONDecoder()
                     recordToReturn = try decoder.decode(DocumentRecord.self, from: data)
                 } catch {
-                    recordToReturn = DocumentRecord(documentID: title, documentTitle: title)
+                    recordToReturn = DocumentRecord(documentID: title, documentTitle: displayTitle ?? title)
                 }
             } else {
-                recordToReturn = DocumentRecord(documentID: title, documentTitle: title)
+                recordToReturn = DocumentRecord(documentID: title, documentTitle: displayTitle ?? title)
             }
         }
         
@@ -175,87 +202,67 @@ class ReadingTracker: ObservableObject {
         if needsRefresh { DispatchQueue.main.async { self.objectWillChange.send() } }
     }
     
-    // [高性能存储流水线]
-    func saveAllRecords(sync: Bool = false) {
-        // 存之前先结算一下当前秒表累计的最后一点时间
+    /// 主线程取值快照，串行队列原子落盘。失败键保存在锁内而不是异步回调中，
+    /// 因此退出时同步等待后即可得到真实结果，不会赶在失败回调之前退出。
+    @discardableResult
+    func saveAllRecords(sync: Bool = false) -> Bool {
         commitCurrentTime()
-        
-        guard !dirtyRecords.isEmpty else { return }
-        
-        // 第一步：在主线程，迅速把所有需要保存的记录“快照”复制一份（因为是 struct，复制极快），
-        // 然后立刻清空脏标记，放过主线程，防止阻塞 UI！
-        var recordsToSave: [DocumentRecord] = []
-        let targetDirectory = self.saveDirectoryURL
-        
-        // [P1修复] 复制脏标记快照，仅在写入成功后才清除对应标记
-        let dirtySnapshot = dirtyRecords
-        dirtyRecords.removeAll()
-        for docID in dirtySnapshot {
-            if let record = recordsCache[docID] {
-                recordsToSave.append(record)
-            }
-        }
-        
-        // 第二步：拿着数据的快照，跑去后台线程进行 CPU 密集型的 JSON 编码和硬盘读写操作
-        let writeRecords: @Sendable () -> Void = { [recordsToSave] in
-            let encoder = JSONEncoder()
-            encoder.outputFormatting = .prettyPrinted
-            
-            var allAuthorsToUpsert: [(String, AuthorInfo)] = []
-            
-            for record in recordsToSave {
-                let safeTitle = record.documentID.replacingOccurrences(of: "/", with: "-")
-                let url = targetDirectory.appendingPathComponent("\(safeTitle).json")
-                
-                // 将编码 (CPU 密集型操作) 和写入 (I/O) 全部放在后台，绝不卡顿
-                if let data = try? encoder.encode(record) {
+        let failedIDs = writeFailures.withLock { Set($0.keys) }
+        let ids = dirtyRecords.union(failedIDs)
+        let snapshots = ids.compactMap { recordsCache[$0] }
+        dirtyRecords.subtract(ids)
+        let target = saveDirectoryURL
+        let failures = writeFailures
+        if !snapshots.isEmpty {
+            // 作者信息先在主执行器更新，退出时的 saveAuthors 才能包含本轮修改。
+            GlobalAuthorManager.shared.upsert(snapshots.flatMap { record in
+                record.authors.map { (record.documentID, $0) }
+            })
+            persistenceQueue.async {
+                for record in snapshots {
                     do {
-                        try data.write(to: url, options: .atomic)
-                    } catch {
-                        Task { @MainActor in
-                            ReadingTracker.shared.dirtyRecords.insert(record.documentID)
-                        }
-                    }
-                }
-                
-                for author in record.authors {
-                    allAuthorsToUpsert.append((record.documentID, author))
-                }
-            }
-            
-            // 顺便把这些作者信息也丢给全局作者数据库进行“投喂”
-            if !allAuthorsToUpsert.isEmpty {
-                DispatchQueue.main.async {
-                    // 全局作者库是基于 SwiftUI @Published，写入动作应该在主线程发起（内部有优化）
-                    GlobalAuthorManager.shared.upsert(allAuthorsToUpsert)
-                    GlobalAuthorManager.shared.recalculateArticleCounts()
+                        let name = record.documentID.replacingOccurrences(of: "/", with: "-")
+                        try JSONEncoder().encode(record).write(to: target.appendingPathComponent(name + ".json"), options: .atomic)
+                        _ = failures.withLock { $0.removeValue(forKey: record.documentID) }
+                    } catch { failures.withLock { $0[record.documentID] = error.localizedDescription } }
                 }
             }
         }
         if sync {
-            persistenceQueue.sync(execute: writeRecords)
-        } else {
-            persistenceQueue.async(execute: writeRecords)
+            persistenceQueue.sync {}
+            // 前一轮异步写入可能刚刚失败：重新取最新内存值重试，不能恢复旧快照。
+            let retryIDs = failures.withLock { Set($0.keys) }.subtracting(ids)
+            if !retryIDs.isEmpty {
+                dirtyRecords.formUnion(retryIDs)
+                return saveAllRecords(sync: true)
+            }
+            let error = failures.withLock { $0.values.first }
+            lastError = error.map { "阅读记录保存失败：" + $0 }
+            return error == nil
         }
+        return true // 异步调用仅代表已排队；关闭/退出必须使用 sync。
     }
-    
+
     // MARK: - Tracking Logic (核心追踪器)
     
     /// 当用户打开了文件、切换了标签、翻了页，都会触发它。
-    func startTracking(documentID: String, documentTitle: String, pageIndex: Int) {
+    func startTracking(documentID: String, documentTitle: String, pageIndex: Int, owner: ObjectIdentifier) {
         let enableReadingRecord = UserDefaults.standard.bool(forKey: "enableReadingRecord")
-        guard enableReadingRecord else { return }
+        guard enableReadingRecord else { stopTracking(owner: owner); return }
+        if trackingOwner == owner, currentDocumentID == documentID,
+           currentPageIndex == pageIndex, sessionStartTime != nil { return }
         
         // 我们刚翻到新的一页，意味着旧的那一页被看完了！先把旧的那页的时间结算掉！
         commitCurrentTime()
         
         // 初始化新的秒表数据
-        let fileID = documentTitle
+        let fileID = documentID
+        trackingOwner = owner
         self.currentDocumentID = fileID
         self.currentPageIndex = pageIndex
         self.sessionStartTime = Date() // 按下秒表
         
-        self.currentRecord = loadRecord(for: fileID)
+        self.currentRecord = loadRecord(for: fileID, displayTitle: documentTitle)
     }
     
     /// 计算从按下秒表到现在过了多久，把它加到总阅读时间里。
@@ -286,7 +293,10 @@ class ReadingTracker: ObservableObject {
         self.sessionStartTime = Date()
     }
     
-    func stopTracking() {
+    func stopTracking(owner: ObjectIdentifier) {
+        // 关闭后台窗口不能停止另一个窗口的计时器。
+        guard trackingOwner == owner else { return }
+        trackingOwner = nil
         commitCurrentTime()
         self.currentDocumentID = nil
         self.currentPageIndex = nil

@@ -1,22 +1,9 @@
 import SwiftUI
 import PDFKit
+import os
 
 #if os(macOS)
 import AppKit
-
-private nonisolated(unsafe) var inkPathAssociatedKey: UInt8 = 0
-
-// 缓存的护眼色 CGColor（device RGB 色彩空间），避免每个瓦片渲染时重复创建 NSColor 并做色彩空间转换
-nonisolated let eyeCareGreenCGColor: CGColor = NSColor(red: 0.78, green: 0.93, blue: 0.8, alpha: 1.0).cgColor
-nonisolated let eyeCareYellowCGColor: CGColor = NSColor(red: 0.96, green: 0.9, blue: 0.75, alpha: 1.0).cgColor
-nonisolated let eyeCareWhiteCGColor: CGColor = NSColor.white.cgColor
-
-extension PDFAnnotation {
-    nonisolated var cachedInkBezierPath: NSBezierPath? {
-        get { objc_getAssociatedObject(self, &inkPathAssociatedKey) as? NSBezierPath }
-        set { objc_setAssociatedObject(self, &inkPathAssociatedKey, newValue, .OBJC_ASSOCIATION_RETAIN) }
-    }
-}
 
 extension CustomPDFView {
     // MARK: - macOS Custom Menu Logic
@@ -42,6 +29,13 @@ extension CustomPDFView {
         super.viewWillMove(toSuperview: newSuperview)
         if newSuperview == nil {
             cleanupMenuObservers()
+            if let renderObserver { NotificationCenter.default.removeObserver(renderObserver) }
+            renderObserver = nil
+        } else if renderObserver == nil {
+            renderObserver = NotificationCenter.default.addObserver(forName: .PDFViewVisiblePagesChanged,
+                object: self, queue: .main) { [weak self] _ in
+                MainActor.assumeIsolated { self?.publishRenderSnapshot() }
+            }
         }
     }
     
@@ -78,348 +72,61 @@ extension CustomPDFView {
     /// 由于 `PDFView.draw(_:to:)` 是 ObjC API，Swift 6 在 `DefaultActorIsolation=MainActor` 模式下
     /// 会隐式检查主线程，若不加 `nonisolated` 标记，将在真机上触发 `dispatch_assert_queue_fail` 致命崩溃。
     nonisolated override func draw(_ page: PDFPage, to context: CGContext) {
-        // [核心性能修复] 我们必须调用原生的 super.draw 以利用 PDFKit 的瓦片缓存渲染，
-        // 否则如果用 page.draw(with:to:) 会强制从头解析整个矢量页面，导致手绘时巨幅掉帧（一卡一卡、一段一段）。
-        // 由于在 Swift 6 下，PDFView 是 @MainActor，而此方法由 PDFKit 的后台线程调用，不能直接 super.draw。
-        // 我们利用底层 ObjC 消息机制，绕过 Swift 6 编译器的强制检查：
-        let sel = #selector(PDFView.draw(_:to:))
-        let imp = class_getMethodImplementation(class_getSuperclass(CustomPDFView.self), sel)
-        typealias DrawFunc = @convention(c) (AnyObject, Selector, PDFPage, CGContext) -> Void
-        let drawFunc = unsafeBitCast(imp, to: DrawFunc.self)
-        drawFunc(self, sel, page, context)
-        
-        // [核心功能：护眼背景色滤镜]
-        let bgColor = self._threadSafePageBackgroundColor
-        if bgColor != .default {
-            context.saveGState()
-            
-            // 应用页面变换（含旋转与 cropBox 映射），再填充未旋转的 cropBox，
-            // 确保旋转页面时护眼色也能覆盖整页（否则未旋转的 bounds 在旋转后的坐标下会盖不全）。
-            context.concatenate(page.transform(for: .cropBox))
-            let bounds = page.bounds(for: .cropBox)
-            
-            switch bgColor {
-            case .green:
-                context.setFillColor(eyeCareGreenCGColor)
-                context.setBlendMode(.multiply)
-                context.fill(bounds)
-            case .yellow:
-                context.setFillColor(eyeCareYellowCGColor)
-                context.setBlendMode(.multiply)
-                context.fill(bounds)
-            case .black:
-                context.setFillColor(eyeCareWhiteCGColor)
-                context.setBlendMode(.difference)
-                context.fill(bounds)
-            default:
-                break
-            }
-            context.restoreGState()
+        // PDFKit 从瓦片线程调用 ObjC 渲染钩子。super 的实现由 PDFKit 管理；
+        // 自定义部分只读取一次锁保护快照，不访问主线程的数组、批注或路径。
+        let selector = #selector(PDFView.draw(_:to:))
+        let implementation = class_getMethodImplementation(PDFView.self, selector)
+        typealias Draw = @convention(c) (AnyObject, Selector, PDFPage, CGContext) -> Void
+        let snapshot = renderSnapshot.withLock { $0 }
+        // 先绘制页面及其余原生批注，再仅绘制一次手绘矢量路径。若不屏蔽
+        // 本次调用中的原生手绘，半透明笔迹会加深，边缘也会出现缓存重影。
+        VectorInkDrawingScope.perform(suppressing: snapshot.pages[ObjectIdentifier(page)]?.vectorInkIDs ?? []) {
+            unsafeBitCast(implementation, to: Draw.self)(self, selector, page, context)
         }
-        
-        // 【性能优化】：将主题色获取提取到循环外
-        let accentColor: NSColor
-        if #available(macOS 10.14, *) {
-            accentColor = NSColor.controlAccentColor
-        } else {
-            accentColor = NSColor.systemBlue
-        }
-        let strokeColor = accentColor.withAlphaComponent(0.8)
-        let tintColor = accentColor.withAlphaComponent(0.85)
-        
-        NSGraphicsContext.saveGraphicsState()
-        NSGraphicsContext.current = NSGraphicsContext(cgContext: context, flipped: false)
-        
-        // 提前全量获取一次 annotations，避免在循环中重复触发 PDFKit 内部可能存在的数组重构和跨语言调用开销
-        let allAnnotations = page.annotations
-        
-        let batchID = self._threadSafeBatchID ?? ""
-        
-        // 第一次遍历：查找最底部的批注
-        var lowestAnnotation: PDFAnnotation? = nil
-        var currentLowestY: CGFloat = .greatestFiniteMagnitude
-        for a in allAnnotations where a.userName == batchID {
-            let y = a.bounds.minY
-            if y < currentLowestY {
-                currentLowestY = y
-                lowestAnnotation = a
-            }
-        }
-        
-        // [P1优化] 使用缓存的 SF Symbol 图标，避免在高频 draw 方法中每帧重新创建
-        if _cachedNoteIcon == nil {
-            if #available(macOS 11.0, *), let image = NSImage(systemSymbolName: "note.text", accessibilityDescription: nil) {
-                if #available(macOS 12.0, *) {
-                    let config = NSImage.SymbolConfiguration(hierarchicalColor: tintColor)
-                    _cachedNoteIcon = image.withSymbolConfiguration(config) ?? image
-                } else {
-                    _cachedNoteIcon = image
-                }
-            }
-        }
-        let noteIcon = _cachedNoteIcon
-        
-        let isSignature = batchID.hasPrefix("S-")
-        
+        guard let content = snapshot.pages[ObjectIdentifier(page)] else { return }
         context.saveGState()
-        context.concatenate(page.transform(for: .cropBox))
-        
-        // 第二次遍历：绘制所有线框
-        for a in allAnnotations where a.userName == batchID {
-            let generousBounds = a.bounds.insetBy(dx: -4, dy: -4)
-            
-            if isSignature {
-                // 利用底层 ObjC 消息机制，绕过 Swift 6 @MainActor 的隔离检查读取 scaleFactor
-                let sfGetter = class_getInstanceMethod(PDFView.self, #selector(getter: PDFView.scaleFactor))!
-                let sfImp = method_getImplementation(sfGetter)
-                typealias GetterType = @convention(c) (AnyObject, Selector) -> CGFloat
-                let getScaleFactor = unsafeBitCast(sfImp, to: GetterType.self)
-                let sf = getScaleFactor(self, #selector(getter: PDFView.scaleFactor))
-                
-                // 恢复最初的实线圆角边框
-                let visualInset: CGFloat = 8.0 / sf
-                let generousBounds = a.bounds.insetBy(dx: -visualInset, dy: -visualInset)
-                let path = NSBezierPath(roundedRect: generousBounds, xRadius: 4, yRadius: 4)
-                path.lineWidth = 1.5 / sf
-                strokeColor.setStroke()
-                path.stroke()
-                
-                // 四个角落的蓝色拖拽圆点
-                let handleSize: CGFloat = 8.0 / sf
-                let handleRadius = handleSize / 2.0
-                let corners = [
-                    NSPoint(x: generousBounds.minX, y: generousBounds.minY),
-                    NSPoint(x: generousBounds.maxX, y: generousBounds.minY),
-                    NSPoint(x: generousBounds.minX, y: generousBounds.maxY),
-                    NSPoint(x: generousBounds.maxX, y: generousBounds.maxY)
-                ]
-                
-                NSColor.white.setFill()
-                strokeColor.setStroke()
-                for corner in corners {
-                    let rect = NSRect(x: corner.x - handleRadius, y: corner.y - handleRadius, width: handleSize, height: handleSize)
-                    let circle = NSBezierPath(ovalIn: rect)
-                    circle.lineWidth = 1.0 / sf
-                    circle.fill()
-                    circle.stroke()
-                }
-            } else {
-                // 按照用户要求：选区范围稍微扩大，线框本身不需太粗，不带填充
-                let path = NSBezierPath(roundedRect: generousBounds, xRadius: 4, yRadius: 4)
-                path.lineWidth = 1.5 // 恢复优雅的细线
-                
-                // 绘制边框
-                strokeColor.setStroke()
-                path.stroke()
-                
-                // 只要一个是属于最底部的块，我们就在它的右下角绘制唯一的便签图标
-                if a === lowestAnnotation {
-                    if let finalIcon = noteIcon {
-                        // 将图标锚定在框的右下角内部
-                        let iconRect = NSRect(
-                            x: generousBounds.maxX - 20,
-                            y: generousBounds.minY - 20,
-                            width: 20,
-                            height: 20
-                        )
-                        finalIcon.draw(in: iconRect)
-                    }
-                }
-            }
-        }
-        context.restoreGState()
-        
-        // 1.5 绘制鼠标悬停的内部链接阴影/高亮
-        if let hoverBounds = self._threadSafeHoveredLinkBounds,
-           let hoverPage = self._threadSafeHoveredLinkPage,
-           hoverPage == page {
+        defer { context.restoreGState() }
+        context.concatenate(content.transform)
+        context.setShouldAntialias(true)
+        if snapshot.background != 0 {
             context.saveGState()
-            context.concatenate(page.transform(for: .cropBox))
-            
-            let path = NSBezierPath(roundedRect: hoverBounds.insetBy(dx: -1, dy: -1), xRadius: 2, yRadius: 2)
-            
-            let shadow = NSShadow()
-            shadow.shadowColor = accentColor.withAlphaComponent(0.4)
-            shadow.shadowOffset = .zero
-            shadow.shadowBlurRadius = 4.0
-            shadow.set()
-            
-            accentColor.withAlphaComponent(0.1).setFill()
-            path.fill()
-            
-            context.restoreGState()
-        }
-        
-        
-
-        // 2. 实时渲染当前正在拖拽产生的、还没有被 PDFDocument 真正收录为 Annotation 的平滑手绘轨迹
-        if self._threadSafeActiveType == .ink,
-           let path = self._threadSafeDrawingPath,
-           let drawingPage = self._threadSafeDrawingPage,
-           drawingPage == page {
-            NSGraphicsContext.saveGraphicsState()
-            NSGraphicsContext.current = NSGraphicsContext(cgContext: context, flipped: false)
-            
-            context.saveGState()
-            context.concatenate(page.transform(for: .cropBox))
-            
-            self._threadSafeInkColor.setStroke()
-            path.lineWidth = self._threadSafeLineWidth
-            path.lineCapStyle = .round
-            path.lineJoinStyle = .round
-            path.stroke()
-            
-            context.restoreGState()
-            
-            context.restoreGState()
-            NSGraphicsContext.restoreGraphicsState()
-        }
-        
-        // 2.5 实时渲染尚未成组的草稿线条集合
-        if self._threadSafeActiveType == .ink,
-           !self._threadSafeDraftInkPaths.isEmpty,
-           let draftPage = self._threadSafeDraftInkPage, // 此处直接读取即可
-           draftPage == page {
-            NSGraphicsContext.saveGraphicsState()
-            NSGraphicsContext.current = NSGraphicsContext(cgContext: context, flipped: false)
-            
-            context.saveGState()
-            context.concatenate(page.transform(for: .cropBox))
-            
-            self._threadSafeInkColor.setStroke()
-            for draftPath in self._threadSafeDraftInkPaths {
-                draftPath.lineWidth = self._threadSafeLineWidth
-                draftPath.lineCapStyle = .round
-                draftPath.lineJoinStyle = .round
-                draftPath.stroke()
+            switch snapshot.background {
+            case 1:
+                context.setFillColor(CGColor(red: 0.78, green: 0.93, blue: 0.8, alpha: 1))
+                context.setBlendMode(.multiply)
+            case 2:
+                context.setFillColor(CGColor(red: 0.96, green: 0.9, blue: 0.75, alpha: 1))
+                context.setBlendMode(.multiply)
+            default:
+                context.setFillColor(CGColor(gray: 1, alpha: 1))
+                context.setBlendMode(.difference)
             }
-            
+            context.fill(content.bounds)
             context.restoreGState()
-            
-            NSGraphicsContext.restoreGraphicsState()
         }
-
-        // 3. [核心黑科技] 渲染由于 macOS PDFKit Bug 无法写入 /InkList 的自定义笔迹，以及重载后变回普通批注的签名！
-        // [超级性能优化]：使用 cachedInkBezierPath 彻底消灭 O(N) 字符串切分，实现 0 allocation 60FPS 渲染！
-        for annot in allAnnotations {
-            let isInk = (annot.type ?? "") == "Ink"
-            let isLoadedSignature = !isInk && (annot.userName ?? "").hasPrefix("S-") && !(annot is VectorSignatureAnnotation)
-            
-            if !isInk && !isLoadedSignature { continue }
-            
-            let bPath: NSBezierPath
-            if let cached = annot.cachedInkBezierPath {
-                bPath = cached
-            } else {
-                var pathStr = ""
-                var chunkIndex = 0
-                while true {
-                    let keyStr = chunkIndex == 0 ? "/SimPlePath" : "/SimPlePath\(chunkIndex)"
-                    if let chunk = annot.value(forAnnotationKey: PDFAnnotationKey(rawValue: keyStr)) as? String {
-                        pathStr += chunk
-                        chunkIndex += 1
-                    } else {
-                        break
-                    }
-                }
-                
-                if pathStr.isEmpty { continue }
-                
-                let pairs = pathStr.split(separator: ";")
-                guard !pairs.isEmpty else { continue }
-                
-                let newPath = NSBezierPath()
-                for (i, pair) in pairs.enumerated() {
-                    let coords = pair.split(separator: ",")
-                    if coords.count == 3 {
-                        let type = coords[0]
-                        if let x = Double(coords[1]), let y = Double(coords[2]) {
-                            let point = NSPoint(x: x, y: y)
-                            if type == "M" { newPath.move(to: point) }
-                            else if type == "L" { newPath.line(to: point) }
-                        }
-                    } else if coords.count == 2 {
-                        if let x = Double(coords[0]), let y = Double(coords[1]) {
-                            let point = NSPoint(x: x, y: y)
-                            if i == 0 { newPath.move(to: point) }
-                            else { newPath.line(to: point) }
-                        }
-                    }
-                }
-                annot.cachedInkBezierPath = newPath
-                bPath = newPath
-            }
-            
-            NSGraphicsContext.saveGraphicsState()
-            NSGraphicsContext.current = NSGraphicsContext(cgContext: context, flipped: false)
-            
+        for stroke in content.strokes {
             context.saveGState()
-            context.concatenate(page.transform(for: .cropBox))
-            
-            if isLoadedSignature {
-                // 恢复原生高清抗锯齿
-                context.saveGState()
-                context.interpolationQuality = .high
-                context.setShouldAntialias(true)
-                
-                // 签名路径是 0~1 的归一化坐标，所以我们要将画布坐标系拉伸到批注框大小
-                let transform = NSAffineTransform()
-                transform.translateX(by: annot.bounds.minX, yBy: annot.bounds.minY)
-                transform.scaleX(by: annot.bounds.width, yBy: annot.bounds.height)
-                transform.concat()
-                
-                annot.color.setFill()
-                bPath.fill()
-                
-                context.restoreGState()
-            } else {
-                annot.color.setStroke()
-                bPath.lineWidth = annot.border?.lineWidth ?? 3.0
-                bPath.lineCapStyle = .round
-                bPath.lineJoinStyle = .round
-                bPath.stroke()
-            }
-            
-            context.restoreGState()
-            
-            NSGraphicsContext.restoreGraphicsState()
-        }
-
-        // 4. [核心黑科技] 强制拦截 VectorSignatureAnnotation 进行原生高清渲染！
-        // 绕过 PDFKit 内部可能存在的低清晰度位图缓存机制
-        for annot in allAnnotations {
-            if let vectorAnnot = annot as? VectorSignatureAnnotation {
-                NSGraphicsContext.saveGraphicsState()
-                NSGraphicsContext.current = NSGraphicsContext(cgContext: context, flipped: false)
-                // 移除 applyRotation(to: context)，修复签名随页面旋转的 Bug
-                
-                context.saveGState()
-                context.interpolationQuality = .high
-                context.setShouldAntialias(true)
-                
-                // [修复]: 必须应用页面的 cropBox transform，否则在页面旋转或带有 cropBox 时会导致坐标系漂移！
-                if let page = annot.page {
-                    let transform = page.transform(for: .cropBox)
-                    // 由于 macOS 上的 CoreGraphics API 需要使用 CGAffineTransform，而 page.transform 返回的是 NSAffineTransform (或者已经是 CGAffineTransform，在 Swift 5 中两者可以混用，但在某些旧 macOS 上可能需要转换，PDFKit 在 Swift 中直接返回 CGAffineTransform)
-                    // 实际上在 Swift 中 PDFPage.transform(for:) 返回的是 CGAffineTransform
-                    context.concatenate(transform)
-                }
-                
-                context.translateBy(x: vectorAnnot.bounds.minX, y: vectorAnnot.bounds.minY)
-                context.scaleBy(x: vectorAnnot.bounds.width, y: vectorAnnot.bounds.height)
-                
-                context.setFillColor(vectorAnnot.themeColor.cgColor)
-                context.addPath(vectorAnnot.vectorPath)
+            context.addPath(stroke.path)
+            if stroke.fill {
+                context.setFillColor(stroke.color)
                 context.fillPath()
-                
-                context.restoreGState()
-                NSGraphicsContext.restoreGraphicsState()
+            } else {
+                context.setStrokeColor(stroke.color)
+                context.setLineWidth(max(0.1, stroke.width))
+                context.setLineCap(.round)
+                context.setLineJoin(.round)
+                context.strokePath()
             }
+            context.restoreGState()
         }
-
-        NSGraphicsContext.restoreGraphicsState()
+        for icon in content.noteIcons {
+            context.saveGState()
+            context.interpolationQuality = .high
+            context.draw(icon.image, in: icon.rect)
+            context.restoreGState()
+        }
     }
-    
+
     // 【核心碰撞算法】：判断鼠标是否精准点击了边框的边缘地带或右下角图标
     func showAnnotationPopover(for annotation: PDFAnnotation, at viewPoint: NSPoint, in view: NSView) {
         // 先彻底关闭并释放前一个 popover，防止僵尸悬浮窗残留或重叠

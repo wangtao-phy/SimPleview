@@ -115,7 +115,9 @@ class GlobalAuthorManager: ObservableObject {
     static let shared = GlobalAuthorManager()
     
     // 存放在内存里的数据库核心。键 (Key) 是作者的全名。
-    @Published var authors: [String: GlobalAuthor] = [:]
+    @Published var authors: [String: GlobalAuthor] = [:] { didSet { revision &+= 1 } }
+    private let writeFailure = OSAllocatedUnfairLock<String?>(initialState: nil)
+    private var revision: UInt64 = 0
     private let persistenceQueue = DispatchQueue(label: "com.simpleview.global-author-writer", qos: .utility)
     
     private init() {
@@ -158,6 +160,7 @@ class GlobalAuthorManager: ObservableObject {
     /// 将每一篇文献里登记的作者，反向汇总给这个作者本人，从而纠正他的 `documentIDs` 集合。
     func recalculateArticleCounts() {
         let directoryURL = ReadingTracker.shared.saveDirectoryURL
+        let generation = revision
         // [专家级防泄漏]
         DispatchQueue.global(qos: .background).async { [weak self] in
             do {
@@ -191,7 +194,8 @@ class GlobalAuthorManager: ObservableObject {
                 
                 // 比对并写入
                 DispatchQueue.main.async {
-                    guard let self = self else { return }
+                    guard let self, self.revision == generation,
+                          ReadingTracker.shared.saveDirectoryURL == directoryURL else { return }
                     var changed = false
                     for (name, existing) in self.authors {
                         let actualDocs = authorToDocs[name] ?? []
@@ -213,8 +217,10 @@ class GlobalAuthorManager: ObservableObject {
     }
     
     // 将整个内存库一次性序列化并进行原子保存 (Atomic Save)
-    func saveAuthors(sync: Bool = false) {
+    @discardableResult
+    func saveAuthors(sync: Bool = false) -> Bool {
         let url = fileURL
+        let failures = writeFailure
         let currentAuthors = self.authors // Copy value type for thread safety 值拷贝，保护线程安全
         let writeAuthors: @Sendable () -> Void = {
             do {
@@ -222,8 +228,9 @@ class GlobalAuthorManager: ObservableObject {
                 encoder.outputFormatting = .prettyPrinted
                 let data = try encoder.encode(currentAuthors)
                 try data.write(to: url, options: .atomic)
+                failures.withLock { $0 = nil }
             } catch {
-                // Ignore
+                failures.withLock { $0 = error.localizedDescription }
             }
         }
         if sync {
@@ -231,42 +238,41 @@ class GlobalAuthorManager: ObservableObject {
         } else {
             persistenceQueue.async(execute: writeAuthors)
         }
+        return !sync || failures.withLock { $0 == nil }
     }
     
     // [混合体操作：插入或更新 (Upsert)]
     /// 当用户正在阅读一篇文献并保存其信息时，触发此函数。
     /// 它会自动抽取出里面的作者数据喂给这个全局库：有则更新简历，无则新建档案。
     func upsert(_ authorsToUpsert: [(String, AuthorInfo)]) {
-        DispatchQueue.main.async {
-            var changed = false
-            for (docID, author) in authorsToUpsert {
-                let name = author.name.trimmingCharacters(in: .whitespacesAndNewlines)
-                guard !name.isEmpty else { continue }
-                
-                if var existing = self.authors[name] {
-                    // 更新现有档案：看看是否有新的简介，以及这篇论文是不是新增给他的
-                    let bioChanged = existing.bio != author.bio
-                    let newDocAdded = existing.documentIDs.insert(docID).inserted
-                    
-                    if bioChanged || newDocAdded {
-                        existing.bio = author.bio
-                        existing.lastUsed = Date() // 提高这名作者的热度
-                        self.authors[name] = existing
-                        changed = true
-                    }
-                } else {
-                    // 全新作者建档
-                    self.authors[name] = GlobalAuthor(firstName: author.firstName, lastName: author.lastName, bio: author.bio, lastUsed: Date(), documentIDs: [docID])
+        var changed = false
+        for (docID, author) in authorsToUpsert {
+            let name = author.name.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !name.isEmpty else { continue }
+
+            if var existing = self.authors[name] {
+                // 更新现有档案：看看是否有新的简介，以及这篇论文是不是新增给他的
+                let bioChanged = existing.bio != author.bio
+                let newDocAdded = existing.documentIDs.insert(docID).inserted
+
+                if bioChanged || newDocAdded {
+                    existing.bio = author.bio
+                    existing.lastUsed = Date() // 提高这名作者的热度
+                    self.authors[name] = existing
                     changed = true
                 }
-            }
-            
-            if changed {
-                self.saveAuthors()
+            } else {
+                // 全新作者建档
+                self.authors[name] = GlobalAuthor(firstName: author.firstName, lastName: author.lastName, bio: author.bio, lastUsed: Date(), documentIDs: [docID])
+                changed = true
             }
         }
+
+        if changed {
+            self.saveAuthors()
+        }
     }
-    
+
     // 删除作者档案
     func delete(name: String) {
         if self.authors.removeValue(forKey: name) != nil {
@@ -335,9 +341,8 @@ class GlobalAuthorManager: ObservableObject {
     
     // 从头重新刷新所有数据
     func reload() {
-        DispatchQueue.main.async {
-            self.authors.removeAll()
-            self.loadAuthors()
-        }
+        persistenceQueue.sync {}
+        self.authors.removeAll()
+        self.loadAuthors()
     }
 }

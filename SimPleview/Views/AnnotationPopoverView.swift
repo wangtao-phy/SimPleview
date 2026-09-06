@@ -73,17 +73,14 @@ struct AnnotationPopoverView: View {
                         onContentsChanged(annotation, text)
                     }
                 }
-                .onReceive(Just(text)) { newValue in
-                    // [P0修复] isSyncing 防护：阻断 onReceive→objectWillChange→body→onReceive 的潜在无限循环
-                    guard !isSyncing else { return }
-                    // 性能模式：极速实时同步（所见即所得）
-                    if MemoryMode.current.policy.syncAnnotationsInRealtime {
-                        if newValue != annotation.simPleNote {
-                            isSyncing = true
-                            onContentsChanged(annotation, newValue)
-                            DispatchQueue.main.async { isSyncing = false }
-                        }
-                    }
+                .onChange(of: text) { _, newValue in
+                    // 备注必须立即进入文档并标脏。若节约模式只在弹窗消失时
+                    // 提交，Cmd+S/Cmd+Q 可能在 onDisappear 之前保存甚至退出。
+                    // 使用 onChange，避免在 body 的 Just 发布中递归修改状态。
+                    guard !isSyncing, newValue != annotation.simPleNote else { return }
+                    isSyncing = true
+                    onContentsChanged(annotation, newValue)
+                    isSyncing = false
                 }
                 .onAppear {
                     // 每次被赋予全新的 showID 时，触发 onAppear 强行抓取真实的 contents

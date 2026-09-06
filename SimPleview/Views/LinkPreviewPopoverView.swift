@@ -62,11 +62,10 @@ struct LinkPreviewPopoverView: View {
     private func generateThumbnail() {
         guard let dest = resolvedDestination, let page = dest.page else { return }
         
-        nonisolated(unsafe) let safeDest = dest
-        nonisolated(unsafe) let safePage = page
-        
+        guard let pageData = StandardInk.exportData(of: page) else { return }
+        let point = dest.point
         DispatchQueue.global(qos: .userInitiated).async {
-            let point = safeDest.point
+            guard let document = PDFDocument(data: pageData), let safePage = document.page(at: 0) else { return }
             let pageBounds = safePage.bounds(for: .cropBox)
             
             let cropWidth = pageBounds.width
@@ -86,6 +85,9 @@ struct LinkPreviewPopoverView: View {
             let scale: CGFloat = 2.0
             
             let pixelSize = NSSize(width: cropRect.width * scale, height: cropRect.height * scale)
+            guard pixelSize.width.isFinite, pixelSize.height.isFinite,
+                  pixelSize.width > 0, pixelSize.height > 0,
+                  pixelSize.width <= 4096, pixelSize.height <= 4096 else { return }
             let image = NSImage(size: pixelSize)
             
             image.lockFocus()
@@ -184,4 +186,3 @@ struct SelectableImageView: NSViewRepresentable {
 }
 #endif
 #endif
-
