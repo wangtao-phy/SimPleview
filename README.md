@@ -1,91 +1,80 @@
 # SimPleview
 
-SimPleview is a macOS PDF reader built entirely through AI-assisted programming. While macOS comes with a built-in "Preview" app, some of its features can be rigid or underutilized. This application extends and optimizes the specific functionalities most commonly used by its author.
+SimPleview 是通过 AI 辅助编程开发的 PDF 阅读与标注应用，现有 macOS 和 iPadOS 两个版本。iPadOS 版还支持创建和整理 PDF 笔记本。两个版本使用独立的 Xcode 工程。
 
-SimPleview 是一款完全通过 AI 辅助编程构建的 macOS PDF 阅读器。虽然 macOS 自带了“预览 (Preview)”应用，但部分功能非常死板，部分功能没能发挥应有的长处。这个 app 对其中部分作者常用的功能进行了拓展与优化。
+SimPleview is a PDF reader and annotation app developed with AI-assisted programming. It has macOS and iPadOS versions. The iPadOS version also supports creating and organizing PDF notebooks. Each version has a separate Xcode project.
 
-运行要求：Apple Silicon（M 系列芯片）Mac，macOS 26.6 或更新版本。当前 macOS 构建仅包含 arm64，不支持 Intel Mac。
+## 运行要求 / Requirements
 
----
+| 版本 / Platform | 系统与设备 / System and device | 工程 / Project |
+| --- | --- | --- |
+| macOS | macOS 26.6+，Apple Silicon（M 系列）；不支持 Intel Mac / Apple Silicon only | `SimPleview.xcodeproj` |
+| iPadOS | iPadOS 18+，iPad | `iPad/SimPleviewPad.xcodeproj` |
 
-##  Features vs. Apple Preview / 相比自带“预览”的优势功能
+## 功能 / Features
 
-- **Background Memory Hibernation**: Idle background windows clear thumbnail caches and reduce activity. The PDFDocument/PDFView remain loaded; hibernation does not guarantee release of all document memory.
-- **Customizable Annotation Colors**: The original motivation for this app was to break free from the rigid, fixed underline colors in Preview, allowing complete freedom in choosing annotation colors.
-- **Signature Management**: Signatures are now stored and managed in a dedicated, fixed folder for quick and convenient access.
-- **Reading History & Tracking**: It tracks the time spent reading each PDF and allows for manual management of an author library.
-- **One-Click Blank Document Creation**: Creating a blank PDF from scratch in Preview is incredibly tedious. SimPleview provides intuitive shortcuts (Cmd+Shift+N) and menus to instantly generate blank PDFs or images in standard sizes (A4, A3, etc.) for quick sketches and notes.
-- **Page Insertion & Deletion**: Preview's native page management is excellent; this app retains that functionality while providing even more options via right-clicking the thumbnail.
-- **Side-by-Side Comparison**: You can easily pop out individual pages of the current PDF into a separate window to conveniently compare different sections of the same document.
-- **Deep Native AI Integration**: Multiple API profiles with independent Keychain credentials and exact model routing. Chat appears sentence by sentence, supports pause/continue, and serializes generation across windows. Vision models can read every PDF page in sequential image batches and produce a document summary. Per-document sessions preserve original history; request summaries can omit details. Markdown and formulas render with bundled scripts. See [AI setup and verification](AI_FEATURES.md).
-- **Reveal in Finder**: A small but highly convenient feature to instantly locate your file.
-- **Hover to View Internal Links**: Quickly preview the target content by simply hovering over internal cross-reference links in the PDF, without losing your current reading position.
-- **Eye-Protection Background**: Provides a comfortable background color mode to reduce eye strain during long reading sessions.
-- **Tab Management & Grouping**: Easily manage multiple open PDFs with a dedicated tab group interface, allowing you to organize, rename, and group your reading sessions, with automatic state persistence.
-- **History Management**: Easily browse and manage recently opened PDFs, with support for clearing records and quickly locating files in Finder.
+- **PDF 阅读与标注**：页面缩略图、搜索、页面管理、高亮、下划线、删除线、文字笔记和手绘。
+- **标注保存**：普通标注写入 PDF，可在其他设备读取；可切换全部标注的显示与隐藏。
+- **AI 对话**：支持多个兼容 Chat Completions 的 API，分别配置密钥和模型 ID。回答按句显示，可暂停；使用视觉模型时可主动读取当前页或整份 PDF。详见 [AI 功能说明（macOS）](AI_FEATURES.md) 和 [iPad 版说明](iPad/README.md)。
+- **macOS**：另有签名管理、阅读记录、内部链接悬停预览、独立对比窗口、标签分组和在 Finder 中显示文件。闲置后台窗口会清理缓存，但不卸载整份 PDF。
+- **iPadOS**：使用 PencilKit 手写，可创建空白、横线、方格、点阵笔记本，用文件夹整理。支持 Apple Pencil，也可启用手指书写。未移植 Mac 的签名库和 Finder 操作。
 
-- **后台内存休眠**：长期闲置的后台窗口清理缩略图缓存并减少活动；PDFDocument/PDFView 仍保留，休眠不等于卸载文档或释放全部内存。
-- **标注自由切换颜色**：这个 app 的初衷便是解放自带“预览”中定死的下划线颜色，实现真正的自由标色。
-- **签名管理**：现在所有的签名统一存放在一个固定的文件夹下，方便随时调用与管理。
-- **阅读记录**：可以记录 PDF 的阅读时长，也可以手动管理属于您自己的作者库。
-- **一键新建空白文档**：在自带的“预览”中想要凭空新建一个空白 PDF 步骤非常繁琐。SimPleview 提供了直观的快捷键 (Cmd+Shift+N) 和菜单，可以直接生成 A4、A3 等标准纸张尺寸的空白 PDF 或图片，方便随时做草稿和笔记。
-- **插入与删除 PDF 页面**：自带“预览”的原生页面管理功能非常好用，当前 app 做了完整保留，并在缩略图的右键菜单中提供了更多实用的拓展选项。
-- **对比查看**：可以单独弹出当前 PDF 的特定页面，方便在同一个 PDF 文件内进行跨页对比查看。
-- **深度原生的 AI 集成**：支持多 API 独立密钥与精确模型切换、逐句回答、暂停与续答，全应用按顺序生成。视觉模型可分批读取 PDF 的全部页面并生成全文总结。支持独立文档会话、原子持久化与可配置的上下文预算；历史摘要可能丢失细节，原始记录保留。密钥存在钥匙串中，Markdown 与公式使用本地脚本渲染。详见 [AI 功能说明](AI_FEATURES.md)。
-- **当前文件所在文件夹**：一个极为方便的小功能，一键直达文件所在目录。
-- **悬浮查看内部链接**：在 PDF 中只需将鼠标悬浮在内部跨页跳转链接上方，即可快速预览目标内容，无需来回点击打断阅读进度。
-- **护眼背景色**：提供舒适的背景色模式，有效缓解长时间阅读带来的视觉疲劳。
-- **标签页管理与分组**：通过专属的标签页悬浮窗轻松管理多个打开的 PDF，支持自由组合、拖拽、重命名分组，并且会自动记住您退出前打开的窗口组。
-- **历史记录管理**：轻松浏览和管理最近打开过的 PDF，支持清理历史记录以及在访达中快速定位文件。
----
+- **PDF reading and annotation**: Thumbnails, search, page management, highlights, underlines, strikeouts, text notes, and handwriting.
+- **Annotation storage**: Standard annotations are saved in the PDF for use on other devices. Annotations can be shown or hidden together.
+- **AI chat**: Multiple Chat Completions-compatible APIs with separate keys and model IDs, sentence-by-sentence display, and pause. Page images are sent to a vision model when the user requests current-page or whole-document reading.
+- **macOS**: Signature management, reading records, internal-link previews, comparison windows, tab groups, and Reveal in Finder. Idle background windows clear caches while keeping the PDF loaded.
+- **iPadOS**: PencilKit handwriting, blank/lined/grid/dotted notebooks, and folder organization. Supports Apple Pencil and optional finger drawing. The Mac signature library and Finder actions are not included.
 
-## 标注保存
+## 安装 / Installation
 
-- 普通高亮、下划线、删除线及笔记直接写入原 PDF，停止编辑两秒后自动保存；状态栏可查看保存状态或立即保存。
-- 新手绘只保存标准 PDF 矢量路径和一个识别标记，不重复存储文本坐标，不降低采样精度、不栅格化页面。旧版文件仍可读取。
-- 标注工具栏的眼睛按钮同时控制页面和缩略图的标注显示；隐藏时保存仍保留标注。
-- “已写入 PDF”表示本地保存成功；跨电脑使用需等待 iCloud 等同步工具完成同步。检测到外部修改时暂停自动保存，避免静默覆盖。
-- 签名维持原有本地管理和烧录流程，不属于普通标注的跨电脑保存范围。
+### macOS
 
-本地构建：用 Xcode 打开 `SimPleview.xcodeproj`，选择 `SimPleview` scheme 和本机 Mac 后编译运行；发布版本使用 `Product > Archive`，默认仅构建 Apple Silicon 架构。
+1. 从 [Releases](https://github.com/wangtao-phy/SimPleview/releases) 下载 macOS 安装包，打开 DMG，将 `SimPleview.app` 拖入“应用程序”。
+2. 启动应用。如果系统提示开发者无法验证，确认下载来源后，在“系统设置 → 隐私与安全性”中按系统提示选择“仍要打开”。
+3. 从源码运行：下载完整仓库，用 Xcode 打开根目录的 `SimPleview.xcodeproj`，选择 `SimPleview` scheme 和 `My Mac`，按 `⌘R`。归档使用 `Product → Archive`。
 
-## 📥 Installation & Usage / 安装与使用指南
+Download the macOS DMG from [Releases](https://github.com/wangtao-phy/SimPleview/releases) and drag `SimPleview.app` into Applications. If macOS cannot verify the developer, check the download source and follow the prompt in System Settings → Privacy & Security. To build from source, open the root `SimPleview.xcodeproj`, select the `SimPleview` scheme and `My Mac`, then press `⌘R`. Use Product → Archive for an archive build.
 
-**[English]**
-If you download the pre-compiled `.dmg` file from the Releases page, you may encounter a macOS Gatekeeper warning ("App is damaged and can't be opened" or "Unidentified developer") because this is an independently published, unsigned open-source application.
-To open it:
-1. Drag the `SimPleview.app` from the DMG to your `Applications` folder.
-2. Go to **System Settings > Privacy & Security**, scroll down, and click **"Open Anyway"** for SimPleview.
-3. Alternatively, right-click the App and select **"Open"**.
-4. (Advanced) If macOS claims the app is "damaged", run this command in Terminal to clear the quarantine attributes: `xattr -cr /Applications/SimPleview.app`
+### iPadOS
 
-**[中文]**
-如果您直接从 Releases 页面下载了打包好的 `.dmg` 安装包，在打开时可能会遇到 macOS 的安全拦截（提示“应用已损坏，打不开”或“来自未知开发者”）。这是因为本应用为个人发布的开源软件，未向苹果官方签发开发者证书。
-解决方法：
-1. 请务必先将 DMG 里面的 `SimPleview.app` 拖入到您的「应用程序 (Applications)」文件夹中。
-2. 打开 Mac 的**系统设置 > 隐私与安全性**，向下滑动，找到拦截提示并点击**“仍要打开”**。
-3. 或者，在访达中右键（或按住 Control 键点击）该 App，然后在弹出的菜单中选择**“打开”**。
-4. （高阶技巧）如果 macOS 仍然无理取闹地提示“应用已损坏”，请打开“终端 (Terminal)”，输入以下命令彻底清除苹果的隔离属性，然后即可完美运行：
-   `xattr -cr /Applications/SimPleview.app`
+以下是通过 Xcode 从源码安装到自己 iPad 的方法。需要一台能运行 Xcode 的 Mac、iPad 和 Apple 账户；macOS 的 DMG 不能安装到 iPad。工程已用 Xcode 27 Beta 编译验证，所用 Xcode 还需支持 iPad 上的系统版本。
 
----
+1. 下载完整仓库（GitHub 页面选择 `Code → Download ZIP` 后解压，或使用 `git clone`）。
+2. 用 Xcode 打开 `iPad/SimPleviewPad.xcodeproj`，不要打开根目录的 Mac 工程。
+3. 在 `Xcode → Settings → Accounts` 中登录自己的 Apple 账户。
+4. 选择工程中的 `SimPleviewPad` target，进入 `Signing & Capabilities`，勾选 `Automatically manage signing`，将 `Team` 改为自己的团队或 `Personal Team`。若提示 Bundle Identifier 已被占用，将其改为自己的唯一标识，例如 `com.yourname.simpleviewpad`。
+5. 用数据线连接 iPad，解锁并确认“信任此电脑”。在 iPad 的“设置 → 隐私与安全性 → 开发者模式”中启用开发者模式，按提示重启并确认。如果没有该选项，先在 Xcode 中完成设备连接。参见 [Apple 开发者模式说明](https://developer.apple.com/documentation/xcode/enabling-developer-mode-on-a-device)。
+6. 在 Xcode 顶部选择 `SimPleviewPad` scheme 和已连接的 iPad，按 `⌘R`。首次运行时等待 Xcode 完成设备准备、签名和安装；设备应保持解锁。如果 iPad 提示需要信任开发者，在“设置 → 通用 → VPN 与设备管理”中按提示操作。
+7. 安装完成后，iPad 上的应用名称为“SimPleview 笔记”。以后可直接从主屏幕打开。只想在 Mac 上试用界面时，可把运行目标改为 iPad 模拟器。
 
-##  Tech Stack / 技术细节
+免费 `Personal Team` 可用于个人设备测试，但描述文件会在签发 7 天后到期，需要重新连接 Xcode 编译安装。更新时使用原来的团队和 Bundle Identifier，不要先删除应用；应用内的笔记应另有备份。参见 [Apple 账户与签名限制](https://developer.apple.com/help/account/basics/about-your-developer-account)。
 
+To install the iPadOS version from source, you need a Mac with Xcode, an iPad, and an Apple Account. The macOS DMG cannot be installed on an iPad. The project has been built with Xcode 27 Beta; Xcode must also support the OS version on your device.
 
-- **Language**: Swift 6
-- **Frameworks**: SwiftUI, AppKit, PDFKit
-- **Development Method**: The entire code construction and deep optimization were accomplished through AI programming. The human author solely played the role of a Product Manager.
+1. Download and extract the whole repository, or clone it with Git.
+2. Open `iPad/SimPleviewPad.xcodeproj` in Xcode.
+3. Sign in under Xcode → Settings → Accounts. Select the `SimPleviewPad` target → Signing & Capabilities, enable automatic signing, and select your own Team or Personal Team. If the bundle ID is unavailable, replace it with a unique ID such as `com.yourname.simpleviewpad`.
+4. Connect and unlock your iPad, trust the Mac, and enable Developer Mode under Settings → Privacy & Security. Follow the restart and confirmation prompts.
+5. Select the `SimPleviewPad` scheme and your iPad, then press `⌘R`. Complete any device preparation or developer-trust prompts. The installed app is named “SimPleview 笔记”. An iPad simulator can also be selected for local testing.
 
+Personal Team provisioning expires after 7 days and requires rebuilding and reinstalling through Xcode. Keep the same team and bundle ID for updates, avoid deleting the app first, and keep a separate copy of your notebooks. See the Apple links above for Developer Mode and provisioning details.
 
-- **语言**：Swift 6
-- **框架**：SwiftUI，AppKit，PDFKit
-- **开发方式**：全程通过 AI 编程完成代码构建与深度优化，本人在此过程中仅扮演项目经理的角色。
+## 文件、标注与同步 / Files, annotations, and sync
 
----
+- **macOS**：普通标注在停止编辑两秒后自动保存到原 PDF，也可手动保存；检测到外部修改时暂停自动保存。签名保留原有的本地管理和烧录流程。
+- **iPadOS**：“打开文件”直接打开并修改系统“文件”中的原 PDF；“导入 PDF 副本”另存一份到笔记目录。新笔记本默认保存在应用文档目录，也可通过“选择笔记目录”选择文件提供商允许访问的文件夹。
+- **跨设备**：两端打开同一份 iCloud Drive PDF，并等待同步完成后再切换设备。保存成功仅表示本地写入完成，应用不自动合并两台设备同时编辑产生的冲突。
+- **手绘**：使用标准 PDF 矢量笔迹。iPad 另存原生编辑数据用于继续编辑；也可导出笔迹写入页面的通用矢量 PDF。通用导出不保留逐笔编辑及原文件的交互结构，详见 [iPad 文件与笔迹说明](iPad/README.md#文件与笔迹)。扫描页面本身仍是图片。
 
-## 📄 License & Notes / 说明
+On macOS, standard annotations are saved to the original PDF after two seconds without editing, or manually. On iPadOS, “打开文件” opens the original file in place; “导入 PDF 副本” creates a separate copy. To work across devices, open the same iCloud Drive PDF and wait for sync before switching devices. A successful save confirms a local write, not completed cloud sync; simultaneous edits are not merged automatically. Handwriting uses standard PDF vector ink. The iPad version also keeps native editing data and offers a separate vector export; see the iPad documentation for its limits.
 
+## 技术与仓库内容 / Technical details
+
+使用 Swift 6、SwiftUI 和 PDFKit；macOS 使用 AppKit，iPadOS 使用 UIKit 和 PencilKit。两个工程的源码和资源分别管理。仓库保留编译需要的资源及第三方许可证；本地测试、调试文件、用户配置和构建产物不随源码提交。
+
+Built with Swift 6, SwiftUI, and PDFKit, using AppKit on macOS and UIKit/PencilKit on iPadOS. The projects keep separate source and resource directories. Required runtime resources and third-party licenses are included; local tests, debug files, user settings, and build products are excluded.
+
+## License & Notes / 说明
 
 The source code of this application is open to everyone for learning and personal use, but commercial use is strictly prohibited. Users are encouraged to build upon this framework and leverage AI to add customized features that suit their own preferences. If you use code from this project, please provide proper attribution by citing the source.
 

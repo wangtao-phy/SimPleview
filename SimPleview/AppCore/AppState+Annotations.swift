@@ -22,10 +22,8 @@ extension AppState {
         
         // 核心执行：把它交给我们写的 annotationManager。如果它返回 true 表示打标注成功。
         if annotationManager.applyAnnotation(type: activeType, pdfView: pdfView, onThumbnailUpdate: { [weak self] index in
-            // [性能优化极速更新] 直接在主线程拉取当前页原生图像并原子化替换缓存，避免序列化和后台排队
-            if let page = self?.pdfView.document?.page(at: index) {
-                self?.thumbnailManager.updateLiveThumbnail(for: page, at: index)
-            }
+            // 仅通知可见缩略图重新申请，编辑回调不承担同步绘图。
+            self?.thumbnailManager.invalidateThumbnail(at: index)
         }) {
             isDirty = true // 将文档打上“被弄脏(已被编辑，需要保存)”的标记
         }
@@ -34,9 +32,7 @@ extension AppState {
     
     func deleteAnnotation(_ annotation: PDFAnnotation) {
         if annotationManager.deleteAnnotation(annotation, in: pdfView.document, pdfView: pdfView, onThumbnailUpdate: { [weak self] index in
-            if let page = self?.pdfView.document?.page(at: index) {
-                self?.thumbnailManager.updateLiveThumbnail(for: page, at: index)
-            }
+            self?.thumbnailManager.invalidateThumbnail(at: index)
         }) {
             isDirty = true
         }

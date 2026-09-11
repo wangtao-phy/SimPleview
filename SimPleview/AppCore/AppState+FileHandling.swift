@@ -59,10 +59,16 @@ extension AppState {
     /// 这是 App 启动后最重要的函数，负责将硬盘里的 PDF 文件塞入内存。
     func loadPDF(url: URL, isHotReloading: Bool = false) {
         guard !isClosed, !documentManager.isSaving, !isResolvingReload else { return }
+        // 外部更新不打断阅读，也不能静默丢弃窗口中的未保存标注。
+        // 保留当前版本；用户主动打开文档时仍走下面的修改确认流程。
+        if isHotReloading && hasUnsavedChanges {
+            hibernatedPosition = nil
+            return
+        }
         if hasUnsavedChanges {
             isResolvingReload = true
             let alert = NSAlert()
-            alert.messageText = isHotReloading ? "文件已在外部更新" : "当前文档还有未保存的修改"
+            alert.messageText = "当前文档还有未保存的修改"
             alert.informativeText = "保留当前修改会继续使用窗口中的版本；重新加载将放弃这些修改。可先取消并另存副本。"
             alert.addButton(withTitle: "保留当前修改")
             alert.addButton(withTitle: "放弃修改并重新加载")
@@ -99,6 +105,10 @@ extension AppState {
                     return
                 }
                 guard let doc, !doc.isLocked, doc.pageCount > 0 else {
+                    // 原子替换、重新编译或云同步期间，路径可能暂时不可读。
+                    // 热重载失败只保留现有文档；即使文件永久移除也不弹窗或关闭窗口。
+                    self.hibernatedPosition = nil
+                    guard !isHotReloading else { return }
                     let alert = NSAlert()
                     alert.messageText = "无法打开文档"
                     alert.informativeText = "文件可能损坏、为空或需要密码。当前窗口中的文档已保留。"

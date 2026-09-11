@@ -81,8 +81,10 @@ extension AppState {
     func setupObservers() {
         let nc = NotificationCenter.default
         
-        // 监听 PDF 翻页系统通知
-        nc.publisher(for: .PDFViewPageChanged)
+        // 只监听本窗口。必须在读取 PDFView 或进入 MainActor 闭包之前切回主队列；
+        // NotificationCenter 会在发布线程同步投递，不能假设 PDFKit 总在主线程发通知。
+        nc.publisher(for: .PDFViewPageChanged, object: pdfView)
+            .receive(on: DispatchQueue.main)
             .compactMap { [weak self] _ in self?.pdfView.currentPage }
             .compactMap { [weak self] page -> Int? in
                 guard let doc = self?.pdfView.document, page.document === doc else { return nil }
@@ -104,7 +106,7 @@ extension AppState {
             .store(in: &cancellables)
             
         // 监听可见区域变化（包括微小的滚动），如果处于非活动状态但用户还在阅读，应重置休眠倒计时
-        nc.publisher(for: .PDFViewVisiblePagesChanged)
+        nc.publisher(for: .PDFViewVisiblePagesChanged, object: pdfView)
             .debounce(for: .milliseconds(500), scheduler: RunLoop.main)
             .sink { [weak self] _ in
                 guard let self = self else { return }
@@ -117,7 +119,7 @@ extension AppState {
             .store(in: &cancellables)
 
         // 监听文本选择事件
-        nc.publisher(for: .PDFViewSelectionChanged)
+        nc.publisher(for: .PDFViewSelectionChanged, object: pdfView)
             .debounce(for: .milliseconds(200), scheduler: RunLoop.main)
             .sink { [weak self] _ in
                 guard let self = self else { return }
@@ -151,8 +153,8 @@ extension AppState {
             .debounce(for: .milliseconds(400), scheduler: RunLoop.main) 
             .sink { [weak self] index in
                 guard let self = self else { return }
-                // 预加载当前页码前后的缩略图，保证左边栏滚动如丝般顺滑
-                self.prefetchThumbnails(around: index)
+                // 缩略图由可见侧栏单元按需申请；正文翻页不再同步序列化
+                // 前后 30 页，否则扫描页和 Beamer 会阻塞正文的滚动与瓦片加载。
                 
                 // [智能历史判定] 停留 10 秒以上，才自动作为重要历史点记录下来
                 self.historyTimerTask?.cancel()
@@ -234,12 +236,14 @@ extension AppState {
             .store(in: &cancellables)
 
         nc.publisher(for: NSNotification.Name("PDFRefreshAnnotations"))
+            .receive(on: DispatchQueue.main)
             .sink { [weak self] _ in self?.refreshAnnotations() }
             .store(in: &cancellables)
             
 
         // 监听内存模式动态切换，实时更新 PDFView 的渲染策略
         nc.publisher(for: UserDefaults.didChangeNotification)
+            .receive(on: DispatchQueue.main)
             .sink { [weak self] _ in
                 guard let self = self else { return }
                 // 同步护眼色到所有窗口（@AppStorage 的 didSet 只在改色的当前窗口触发，跨窗口同步靠此观察器）

@@ -10,7 +10,13 @@ final class ThumbnailManager: ObservableObject {
     
     private let cacheOwner = UUID()
     private var cacheGeneration: UInt = 0
-    private var prefetchPausedUntil = Date.distantPast
+    private struct PendingSnapshot {
+        let id = UUID()
+        let readyAt: ContinuousClock.Instant
+        let prepare: @MainActor () -> Void
+    }
+    private var pendingSnapshots: [Int: PendingSnapshot] = [:]
+    private var snapshotTask: Task<Void, Never>?
     // 防止对同一页重复发起请求；图像由 ThumbnailStore 统一持有。
     private var generatingIndices = Set<Int>()
     private let lock = OSAllocatedUnfairLock() // 采用性能最高的 OSAllocatedUnfairLock
@@ -21,7 +27,7 @@ final class ThumbnailManager: ObservableObject {
     private let renderQueue: OperationQueue = {
         let q = OperationQueue()
         q.maxConcurrentOperationCount = 1
-        q.qualityOfService = .userInteractive // 但优先级要高，因为这是可见的 UI
+        q.qualityOfService = .utility // 侧栏缩略图不能与正文瓦片争抢交互优先级
         return q
     }()
     
@@ -30,6 +36,7 @@ final class ThumbnailManager: ObservableObject {
     
     // 用来通知 UI 某张图画好了的信号发射器
     let thumbnailUpdateSubject = PassthroughSubject<(Int, PlatformImage), Never>()
+    let thumbnailInvalidatedSubject = PassthroughSubject<Int, Never>()
     
     // 用来通知所有存活（可见）的缩略图重新发起渲染请求（热重载唤醒机制）
     let hotReloadSubject = PassthroughSubject<Void, Never>()
@@ -58,6 +65,7 @@ final class ThumbnailManager: ObservableObject {
         let owner = cacheOwner
         Task { @MainActor in ThumbnailStore.shared.remove(owner: owner) }
         renderQueue.cancelAllOperations()
+        snapshotTask?.cancel()
         if let observer = observer {
             NotificationCenter.default.removeObserver(observer)
         }
@@ -78,50 +86,22 @@ final class ThumbnailManager: ObservableObject {
     }
 
     func handleMemoryPressure() {
-        prefetchPausedUntil = Date().addingTimeInterval(30)
         clearCache()
     }
 
-    // [极速原子化更新]
-    // 当在某一页上进行批注后，不需要重绘整个文档或者走后台队列。
-    // 直接在主线程迅速拉取该页当前的原生图像并强制覆盖缓存，消耗极低！
-    @MainActor
-    func updateLiveThumbnail(for page: PDFPage, at index: Int) {
-        // 此刻的实时结果比排队中的旧快照更新，取消旧请求并移除它的提交资格。
-        cancelThumbnail(for: index)
-        let maxEdge = currentMemoryMode.policy.thumbnailMaxEdge
-        let pageBounds = page.bounds(for: .cropBox)
-        guard pageBounds.width.isFinite, pageBounds.height.isFinite,
-              pageBounds.width > 0, pageBounds.height > 0 else { return }
-        let isRotated = page.rotation == 90 || page.rotation == 270
-        let effectiveWidth = isRotated ? pageBounds.height : pageBounds.width
-        let effectiveHeight = isRotated ? pageBounds.width : pageBounds.height
-        
-        let targetSize: CGSize
-        if effectiveWidth > effectiveHeight {
-            let scale = maxEdge / effectiveWidth
-            targetSize = CGSize(width: maxEdge, height: effectiveHeight * scale)
-        } else {
-            let scale = maxEdge / effectiveHeight
-            targetSize = CGSize(width: effectiveWidth * scale, height: maxEdge)
-        }
-        
-        // 策略给出最终像素边长；此处不再次乘倍率，以免每张图膨胀到十余 MiB。
-        let retinaSize = targetSize
-        guard let data = StandardInk.exportData(of: page), let copy = PDFDocument(data: data),
-              let visiblePage = copy.page(at: 0) else { return }
-        visiblePage.displaysAnnotations = page.displaysAnnotations
-        let thumb = visiblePage.platformThumbnail(of: retinaSize, for: .cropBox)
-        
-        ThumbnailStore.shared.insert(thumb, owner: cacheOwner, page: index)
-
-        thumbnailUpdateSubject.send((index, thumb))
+    /// 编辑、撤销和删除只让该页缓存失效，不在主线程同步解码/绘图。
+    /// 可见单元收到通知后走同一条后台管线；离屏页等再次出现时才生成。
+    func invalidateThumbnail(at index: Int) {
+        removeThumbnail(for: index)
+        thumbnailInvalidatedSubject.send(index)
     }
 
     // [紧急制动]
     // 当文档关闭或页面发生大规模改变时，紧急杀掉所有正在排队画图的线程，清空一切。
     func clearCache() {
         cacheGeneration &+= 1
+        snapshotTask?.cancel(); snapshotTask = nil
+        pendingSnapshots.removeAll()
         renderQueue.cancelAllOperations()
         ThumbnailStore.shared.remove(owner: cacheOwner)
         lock.lock()
@@ -146,20 +126,50 @@ final class ThumbnailManager: ObservableObject {
             markAsFinished(index, id: nil)
             return
         }
-        
-        // [极速 OOM 保护] 缩略图并发爆炸修复：
-        // 疯狂滑动时可能瞬间产生几百个尚未执行的画图任务，这会导致巨大的内存排队压力。
-        // 如果排队任务过多，直接把旧任务全部砍掉，只保留最新的视野范围。
-        lock.lock()
-        if operations.count > 60 {
+
+        // 延迟准备也计入队列上限，防止大量尚未离屏的单元积压快照任务。
+        // 保留已完成缓存，只取消过时工作；旧渲染凭请求 ID 无法回填新任务。
+        if pendingSnapshots.count + operations.count >= 60 {
+            snapshotTask?.cancel(); snapshotTask = nil
+            pendingSnapshots.removeAll()
             renderQueue.cancelAllOperations()
             operations.removeAll()
-            generatingIndices.removeAll()
-            generatingIndices.insert(index)
-            // 注意这里不直接 return，允许这个最新的任务入队
+            generatingIndices = [index]
         }
-        lock.unlock()
         
+        // 保留短暂停留门槛，快速滚过的页可在序列化之前取消。
+        // 待处理请求仅弱引用页面，尚未轮到的页不提前分配 PDF 数据副本。
+        pendingSnapshots[index] = PendingSnapshot(readyAt: .now.advanced(by: .milliseconds(180))) { [weak self, weak page, weak doc] in
+            guard let self else { return }
+            guard let page, let doc, page.document === doc, currentDocChecker() else {
+                self.markAsFinished(index, id: nil); return
+            }
+            self.enqueueThumbnail(for: page, at: index, currentDocChecker: currentDocChecker)
+        }
+        scheduleNextSnapshot()
+    }
+
+    /// 准备和渲染共用一条流水线：上一张结束后，才允许主线程序列化下一张。
+    /// 每次至少让出 16 ms 给输入和布局，避免多个 180 ms 延迟任务同时唤醒，
+    /// 把一屏缩略图的昂贵快照集中到同一帧。空闲时没有轮询或常驻定时器。
+    private func scheduleNextSnapshot() {
+        guard snapshotTask == nil, operations.isEmpty,
+              let (index, request) = pendingSnapshots.min(by: { $0.value.readyAt < $1.value.readyAt }) else { return }
+        let delay = max(Duration.milliseconds(16), ContinuousClock.now.duration(to: request.readyAt))
+        snapshotTask = Task { @MainActor [weak self] in
+            do { try await Task.sleep(for: delay) } catch { return }
+            guard let self else { return }
+            self.snapshotTask = nil
+            guard self.pendingSnapshots[index]?.id == request.id else {
+                self.scheduleNextSnapshot(); return
+            }
+            self.pendingSnapshots[index] = nil
+            request.prepare()
+        }
+    }
+
+    private func enqueueThumbnail(for page: PDFPage, at index: Int,
+                                  currentDocChecker: @escaping @MainActor @Sendable () -> Bool) {
         let safeCurrentDocChecker = currentDocChecker
         let maxEdge = currentMemoryMode.policy.thumbnailMaxEdge
         
@@ -260,11 +270,15 @@ final class ThumbnailManager: ObservableObject {
         generatingIndices.remove(index)
         operations.removeValue(forKey: index)
         lock.unlock()
+        scheduleNextSnapshot()
     }
     
     // [极限内存优化：精准击杀滞后任务]
     // 当缩略图因为用户快速滚动而离开屏幕时，如果它还在排队渲染，直接将其取消，节约宝贵的 CPU 和内存。
     func cancelThumbnail(for index: Int) {
+        if pendingSnapshots.removeValue(forKey: index) != nil {
+            generatingIndices.remove(index)
+        }
         lock.lock()
         if let entry = operations[index] {
             entry.operation.cancel()
@@ -272,27 +286,10 @@ final class ThumbnailManager: ObservableObject {
             generatingIndices.remove(index)
         }
         lock.unlock()
-    }
-    
-    // [智能预加载 (Prefetching)]
-    // 当用户滚到第 10 页时，我们提前把 11-40 页的图画好。如果用户滚得很慢，他会感觉非常流畅丝滑。
-    func prefetchThumbnails(pages: [(Int, PDFPage)], validRange: ClosedRange<Int>, in doc: PDFDocument, currentDocChecker: @escaping @MainActor @Sendable () -> Bool) {
-        guard Date() >= prefetchPausedUntil else { return }
-        lock.lock()
-        // 精细控制：把队列里“距离太远”的任务强行杀掉，把有限的 CPU 让给现在正需要的页面
-        // 必须彻底从追踪字典中拔除，防止僵尸任务霸占名额导致后续需要的页面无法重新触发
-        let keysToCancel = operations.keys.filter { !validRange.contains($0) }
-        for idx in keysToCancel {
-            if let entry = operations[idx] {
-                entry.operation.cancel()
-            }
-            operations.removeValue(forKey: idx)
-            generatingIndices.remove(idx)
+        if pendingSnapshots.isEmpty {
+            snapshotTask?.cancel(); snapshotTask = nil
         }
-        lock.unlock()
-        
-        for (i, page) in pages {
-            generateThumbnail(for: page, at: i, in: doc, currentDocChecker: currentDocChecker)
-        }
+        scheduleNextSnapshot()
     }
+
 }

@@ -48,10 +48,7 @@ extension AppState {
             let annotation = VectorSignatureAnnotation(path: path, color: avgColor, bounds: bounds)
             
             _ = self.annotationManager.applySignature(annotation: annotation, to: page, pdfView: self.pdfView) { index in
-                self.thumbnailManager.cancelThumbnail(for: index)
-                if let updatedPage = self.pdfView.document?.page(at: index) {
-                    self.thumbnailManager.updateLiveThumbnail(for: updatedPage, at: index)
-                }
+                self.thumbnailManager.invalidateThumbnail(at: index)
             }
             
             DispatchQueue.main.async {

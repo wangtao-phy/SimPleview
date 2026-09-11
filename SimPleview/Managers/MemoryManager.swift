@@ -52,6 +52,7 @@ final class MemoryManager {
             for weakState in AppState.allInstances {
                 if let state = weakState.value {
                     state.thumbnailManager.handleMemoryPressure()
+                    state.pdfView.scanCache.removeAll(pauseFor: 30)
                 }
             }
         }
@@ -65,6 +66,7 @@ final class MemoryManager {
             for weakState in AppState.allInstances {
                 if let state = weakState.value {
                     state.thumbnailManager.clearCache()
+                    state.pdfView.scanCache.removeAll()
                     // 可以加更多全局缓存清理逻辑
                 }
             }

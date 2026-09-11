@@ -77,6 +77,18 @@ struct AIChatView: View {
             
             Divider()
             
+            // 只显示本对话实际收到的用量。多页读取时这是最近一批请求，而非整轮总计。
+            if let usage = viewModel.lastUsage {
+                Text("最近请求：输入 \(usage.promptTokens) Token（缓存 \(usage.cachedTokens)）· 输出 \(usage.completionTokens) Token")
+                    .font(.caption2).foregroundStyle(.secondary)
+                    .padding(.horizontal, 16).padding(.vertical, 4)
+                    .help("由 API 返回。缓存是输入 Token 中复用的部分；多页读取时仅表示最近一次请求。")
+            } else if viewModel.estimatedContextTokens > 0 {
+                Text("上下文估算：\(viewModel.estimatedContextTokens) Token")
+                    .font(.caption2).foregroundStyle(.secondary)
+                    .help("本地估算的对话长度，不代表已经发送请求或产生用量。")
+            }
+
             // Chat Messages
             ScrollViewReader { proxy in
                 ScrollView {

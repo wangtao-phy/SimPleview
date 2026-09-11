@@ -14,6 +14,10 @@ import os
 /// - "替身批注法" (Ghost Annotation Method) 实现的 O(1) 性能选区边框。
 class CustomPDFView: PDFView {
     nonisolated let renderSnapshot = OSAllocatedUnfairLock(initialState: PDFRenderSnapshot())
+    nonisolated let scanCache = ScanPageCache()
+    // 不重写 document：PDFKit 的后台页面分析会通过 ObjC 读取该属性。
+    // Swift 的 MainActor getter 会使原生后台调用触发线程断言；缓存由
+    // prepareForDocumentReplacement、视图移除和内存压力入口负责清理。
     var isPublishingRenderSnapshot = false
     nonisolated(unsafe) var renderObserver: NSObjectProtocol?
 
@@ -124,6 +128,7 @@ class CustomPDFView: PDFView {
     /// 文件替换和关闭共用的引用释放点。弹窗、悬停和拖动状态都可能拥有旧页；
     /// 先关观察者/弹窗，再清状态，避免重载后回调修改已不属于当前文档的批注。
     func prepareForDocumentReplacement() {
+        scanCache.removeAll()
         cleanupMenuObservers()
         discardDraftInk()
         lastClickedAnnotation = nil

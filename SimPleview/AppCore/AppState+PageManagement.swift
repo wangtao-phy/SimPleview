@@ -160,15 +160,13 @@ extension AppState {
             pageAspectRatios[liveState.currentPageIndex] = 1.0 / pageAspectRatios[liveState.currentPageIndex]
         }
         
-        // 使用异步主线程调用，既满足 @MainActor 限制，又能确保修改立刻反映到 UI 上。
+        // 当前页仍是被旋转的页时立即使缓存失效；若推迟到异步回调，
+        // 用户已经翻页就会刷新错误的缩略图。此处只排队，不同步绘图。
+        thumbnailManager.invalidateThumbnail(at: liveState.currentPageIndex)
+
+        // 下一轮主队列更新原生页面布局。
         DispatchQueue.main.async { [weak self] in
             guard let self = self else { return }
-            
-            // [性能优化] 抛弃了以前那种“删除缓存 -> 排队等后台线程用 dataRepresentation 重新画”的低效做法。
-            // 这种旧做法由于存在竞态条件，极大概率导致缩略图不更新。
-            // 现在的 updateLiveThumbnail 直接在主线程抓取页面最新快照并瞬间强制覆盖缓存，速度快且 100% 准确！
-            self.thumbnailManager.updateLiveThumbnail(for: page, at: self.liveState.currentPageIndex)
-            
             self.pdfView.layoutDocumentView()
             self.pdfView.setPlatformNeedsDisplay()
         }

@@ -6,9 +6,9 @@ struct SettingsAIView: View {
     private let keyLoader: (String) throws -> String
     @AppStorage("appLanguage") var appLanguage: AppLanguage = .zh
     @State private var selectedEndpoint: UUID?
-    @State private var draft = AIEndpointConfiguration(name: "新 API", baseURL: "", models: [.init(modelID: "")])
+    @State private var draft = AIEndpointConfiguration(name: "", baseURL: "", models: [.init(modelID: "")])
     @State private var apiKey = ""
-    @State private var status = ""
+    @State private var status: Result<String, Error>?
     private func LS(_ key: String) -> String { SimPleview.L.s(key, appLanguage) }
 
     init(configuration: AIConfigurationStore = .shared,
@@ -22,22 +22,22 @@ struct SettingsAIView: View {
             // API 切换仅占顶部一行，把窗口宽度留给地址与模型 ID。
             // “添加 API”直接创建任意接口；服务商模板只是可选的填表捷径。
             HStack(spacing: 12) {
-                Picker("编辑 API", selection: $selectedEndpoint) {
-                    Text("新 API（未保存）").tag(nil as UUID?)
+                Picker(LS("Edit API"), selection: $selectedEndpoint) {
+                    Text(LS("New API (Unsaved)")).tag(nil as UUID?)
                     ForEach(configuration.endpoints) { endpoint in
                         Text(endpoint.name).tag(Optional(endpoint.id))
                     }
                 }
                 .pickerStyle(.menu)
                 .accessibilityIdentifier("ai.endpointPicker")
-                Button("添加 API", systemImage: "plus") { addCustomEndpoint() }
+                Button(LS("Add API"), systemImage: "plus") { addCustomEndpoint() }
                     .accessibilityIdentifier("ai.addEndpoint")
-                Menu("从模板添加") {
+                Menu(LS("Add from Template")) {
                     Button("DeepSeek") { newEndpoint(.deepSeek()) }
                     Button("OpenAI") {
                         newEndpoint(.init(name: "OpenAI", baseURL: "https://api.openai.com/v1", models: [.init(modelID: "")]))
                     }
-                    Button("其他兼容接口…") { addCustomEndpoint() }
+                    Button(LS("Other Compatible API…")) { addCustomEndpoint() }
                 }
             }
             .padding(20)
@@ -48,14 +48,14 @@ struct SettingsAIView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 20) {
                     VStack(alignment: .leading, spacing: 6) {
-                        Text("连接你的 AI").font(.title2.weight(.semibold))
-                        Text("支持任意 OpenAI 兼容接口，可分别配置服务地址、密钥和模型。")
+                        Text(LS("Connect Your AI")).font(.title2.weight(.semibold))
+                        Text(LS("AI Connection Introduction"))
                             .foregroundStyle(.secondary)
                     }
                     GroupBox {
                         VStack(alignment: .leading, spacing: 14) {
-                            LabeledContent("API 名称") {
-                                TextField("例如：工作接口、个人接口", text: $draft.name)
+                            LabeledContent(LS("API Name")) {
+                                TextField(LS("API Name Placeholder"), text: $draft.name)
                                     .accessibilityIdentifier("ai.endpointName")
                             }
                             LabeledContent("Base URL") {
@@ -63,40 +63,40 @@ struct SettingsAIView: View {
                                     .accessibilityIdentifier("ai.baseURL")
                             }
                             LabeledContent("API Key") {
-                                SecureField("输入此接口的密钥", text: $apiKey)
+                                SecureField(LS("Enter the API key for this connection"), text: $apiKey)
                             }
-                            Text("填写服务商的基础地址，不含 /chat/completions。各 API 的密钥独立保存在钥匙串。")
+                            Text(LS("AI Connection Help"))
                                 .font(.caption).foregroundStyle(.secondary)
                         }.textFieldStyle(.roundedBorder).padding(8)
-                    } label: { Label("连接信息", systemImage: "network") }
+                    } label: { Label(LS("Connection Details"), systemImage: "network") }
 
                     GroupBox {
                         VStack(alignment: .leading, spacing: 12) {
                             ForEach($draft.models) { $model in
                                 VStack(alignment: .leading, spacing: 8) {
                                     HStack {
-                                        TextField("精确模型 ID", text: $model.modelID)
+                                        TextField(LS("Exact Model ID"), text: $model.modelID)
                                             .textFieldStyle(.roundedBorder)
                                         Button(role: .destructive) {
                                             let id = model.id
                                             draft.models.removeAll { $0.id == id }
                                         } label: { Image(systemName: "minus.circle") }
-                                            .buttonStyle(.borderless).help("删除此模型")
+                                            .buttonStyle(.borderless).help(LS("Remove This Model"))
                                     }
-                                    Toggle("支持图片输入，可读取 PDF", isOn: $model.supportsVision)
+                                    Toggle(LS("Supports Images and PDF Reading"), isOn: $model.supportsVision)
                                         .font(.callout)
-                                    DisclosureGroup("上下文预算：\(model.contextBudget)") {
-                                        Stepper("调整预算", value: $model.contextBudget, in: 4096...1_000_000, step: 4096)
+                                    DisclosureGroup(LS("Context Budget") + ": \(model.contextBudget)") {
+                                        Stepper(LS("Adjust Budget"), value: $model.contextBudget, in: 4096...1_000_000, step: 4096)
                                             .font(.caption)
                                     }.font(.caption).foregroundStyle(.secondary)
                                 }
                                 Divider()
                             }
-                            Button("添加模型", systemImage: "plus") { draft.models.append(.init(modelID: "")) }
-                            Text("模型 ID 将原样发送给此 API。请按服务商提供的型号填写，并仅为支持图片的模型开启 PDF 阅读。")
+                            Button(LS("Add Model"), systemImage: "plus") { draft.models.append(.init(modelID: "")) }
+                            Text(LS("Exact Model ID Help"))
                                 .font(.caption).foregroundStyle(.secondary)
                         }.padding(8)
-                    } label: { Label("此 API 的模型", systemImage: "sparkles") }
+                    } label: { Label(LS("Models for This API"), systemImage: "sparkles") }
 
                     GroupBox {
                         VStack(alignment: .leading, spacing: 14) {
@@ -113,7 +113,7 @@ struct SettingsAIView: View {
                             }
                             Text(LS("Global Memory Description")).font(.caption).foregroundStyle(.secondary)
                         }.padding(8)
-                    } label: { Text("对话偏好") }
+                    } label: { Text(LS("Chat Preferences")) }
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(20)
@@ -122,11 +122,11 @@ struct SettingsAIView: View {
             // 保存按钮固定在底部，模型较多时不必滚到底部才能保存配置。
             HStack(spacing: 12) {
                 if configuration.endpoints.contains(where: { $0.id == draft.id }) {
-                    Button("删除 API", role: .destructive) { deleteEndpoint() }
+                    Button(LS("Delete API"), role: .destructive) { deleteEndpoint() }
                 }
-                Text(status).font(.caption).foregroundStyle(.secondary)
+                Text(statusText).font(.caption).foregroundStyle(.secondary)
                     .textSelection(.enabled).frame(maxWidth: .infinity, alignment: .leading)
-                Button("保存", action: saveEndpoint).buttonStyle(.borderedProminent)
+                Button(LS("Save"), action: saveEndpoint).buttonStyle(.borderedProminent)
                     .accessibilityIdentifier("ai.saveEndpoint")
             }.padding(16)
         }
@@ -134,7 +134,7 @@ struct SettingsAIView: View {
                minHeight: 500, idealHeight: 720, maxHeight: .infinity)
         .onAppear {
             selectedEndpoint = configuration.endpoints.first?.id
-            loadEndpoint()
+            if selectedEndpoint == nil { addCustomEndpoint() } else { loadEndpoint() }
         }
         .onChange(of: selectedEndpoint) { _, newValue in
             if newValue == nil {
@@ -145,8 +145,22 @@ struct SettingsAIView: View {
         }
     }
 
+    // 状态保留消息键/原始错误，在显示时翻译，切换语言后已有提示也立即更新。
+    private var statusText: String {
+        switch status {
+        case .success(let key): return LS(key)
+        case .failure(let error):
+            let native = error as NSError
+            if native.domain == NSOSStatusErrorDomain {
+                return String(format: LS("Keychain access failed (code %@)."), String(native.code))
+            }
+            return LS(error.localizedDescription)
+        case nil: return ""
+        }
+    }
+
     private func addCustomEndpoint() {
-        newEndpoint(.init(name: "新 API", baseURL: "", models: [.init(modelID: "")]))
+        newEndpoint(.init(name: LS("New API"), baseURL: "", models: [.init(modelID: "")]))
     }
 
     private func deleteEndpoint() {
@@ -156,7 +170,7 @@ struct SettingsAIView: View {
                 selectedEndpoint = endpoint.id
                 loadEndpoint()
             } else { addCustomEndpoint() }
-        } catch { status = error.localizedDescription }
+        } catch { status = .failure(error) }
     }
 
     private func newEndpoint(_ endpoint: AIEndpointConfiguration) {
@@ -170,14 +184,14 @@ struct SettingsAIView: View {
         }
         draft = endpoint
         apiKey = ""
-        status = "填写后保存，再到聊天中选择模型。"
+        status = .success("Save the configuration, then select a model in chat.")
     }
     private func loadEndpoint() {
         guard let endpoint = configuration.endpoints.first(where: { $0.id == selectedEndpoint }) else { return }
         draft = endpoint
         apiKey = ""
-        do { apiKey = try keyLoader(endpoint.keyAccount); status = "" }
-        catch { status = error.localizedDescription }
+        do { apiKey = try keyLoader(endpoint.keyAccount); status = nil }
+        catch { status = .failure(error) }
     }
     private func saveEndpoint() {
         do {
@@ -186,8 +200,8 @@ struct SettingsAIView: View {
             try configuration.save(endpoint)
             draft = endpoint
             selectedEndpoint = endpoint.id
-            status = "已保存；请在模型选择器中选择所需 API 和型号。"
-        } catch { status = error.localizedDescription }
+            status = .success("Saved. Choose the API and model in the model picker.")
+        } catch { status = .failure(error) }
     }
 
     private func openGlobalMemoryFile() {
@@ -195,7 +209,7 @@ struct SettingsAIView: View {
         let fileURL = dir.appendingPathComponent("GlobalMemory.md")
         
         if !FileManager.default.fileExists(atPath: fileURL.path) {
-            let initialContent = "你是一个理论物理学家。请用物理学家的口吻回答，并尽量使用数学公式。"
+            let initialContent = LS("Default AI Memory")
             try? initialContent.write(to: fileURL, atomically: true, encoding: .utf8)
         }
         

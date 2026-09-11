@@ -8,6 +8,27 @@ enum AIContextBuilder {
         messages.reduce(0) { $0 + $1.content.utf8.count + 32 }
     }
 
+    /// 普通问答只构造本地滑动窗口，不为压缩历史额外调用收费 API。
+    /// 保留系统指令和最新完整轮次；超限时从最旧的轮次移除，原始记录不变。
+    /// 本轮输入本身超限则明确报错，不能截断用户的问题后悄悄提交。
+    static func replyContext(_ messages: [ChatMessage], budget: Int) throws -> [ChatMessage] {
+        guard cost(messages) > budget else { return messages }
+        let system = messages.prefix { $0.role == "system" }
+        let conversation = Array(messages.dropFirst(system.count))
+        guard let latest = conversation.lastIndex(where: { $0.role == "user" }),
+              cost(Array(system) + conversation[latest...]) <= budget else {
+            throw NSError(domain: "AIContext", code: 1, userInfo: [NSLocalizedDescriptionKey: "本轮输入或系统指令超过上下文预算，请缩短选段或输入。未发送 API 请求。"])
+        }
+        var start = latest
+        var used = cost(Array(system) + conversation[latest...])
+        for index in conversation.indices.reversed() where index < latest && conversation[index].role == "user" {
+            let added = cost(Array(conversation[index..<start]))
+            guard used + added <= budget else { break }
+            used += added; start = index
+        }
+        return Array(system) + conversation[start...]
+    }
+
     static func prepare(_ messages: [ChatMessage], budget: Int,
                         summarize: ([ChatMessage]) async throws -> String) async throws -> [ChatMessage] {
         guard cost(messages) > budget else { return messages }

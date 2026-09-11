@@ -17,6 +17,7 @@ nonisolated struct PDFRenderSnapshot: @unchecked Sendable {
         let strokes: [Stroke]
         let noteIcons: [NoteIcon]
         var vectorInkIDs: Set<ObjectIdentifier> = []
+        var scan: ScanPage? = nil
     }
     struct NoteIcon {
         let image: CGImage
@@ -116,6 +117,13 @@ extension CustomPDFView {
             snapshot.pages[ObjectIdentifier(page)] = .init(transform: page.transform(for: .cropBox),
                                                            bounds: page.bounds(for: .cropBox), strokes: strokes, noteIcons: noteIcons,
                                                            vectorInkIDs: vectorInkIDs)
+            // 仅优化没有普通标注的扫描页。标准标注仍交给 PDFKit，避免缓存
+            // 遮挡选择、高亮或外部软件创建的外观；手绘草稿在缓存之上照常矢量绘制。
+            if displayBox == .cropBox, page.annotations.isEmpty,
+               let reference = page.pageRef, ScanPage.containsLargeImage(reference) {
+                snapshot.pages[ObjectIdentifier(page)]?.scan = ScanPage(reference: reference,
+                    transform: page.transform(for: .cropBox), bounds: page.bounds(for: .cropBox))
+            }
         }
         renderSnapshot.withLock { [snapshot] in $0 = snapshot }
     }

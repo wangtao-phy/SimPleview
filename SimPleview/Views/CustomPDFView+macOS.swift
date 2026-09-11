@@ -28,6 +28,7 @@ extension CustomPDFView {
     override func viewWillMove(toSuperview newSuperview: NSView?) {
         super.viewWillMove(toSuperview: newSuperview)
         if newSuperview == nil {
+            scanCache.removeAll()
             cleanupMenuObservers()
             if let renderObserver { NotificationCenter.default.removeObserver(renderObserver) }
             renderObserver = nil
@@ -80,8 +81,19 @@ extension CustomPDFView {
         let snapshot = renderSnapshot.withLock { $0 }
         // 先绘制页面及其余原生批注，再仅绘制一次手绘矢量路径。若不屏蔽
         // 本次调用中的原生手绘，半透明笔迹会加深，边缘也会出现缓存重影。
-        VectorInkDrawingScope.perform(suppressing: snapshot.pages[ObjectIdentifier(page)]?.vectorInkIDs ?? []) {
-            unsafeBitCast(implementation, to: Draw.self)(self, selector, page, context)
+        let scan = snapshot.pages[ObjectIdentifier(page)]?.scan
+        let scale = max(hypot(context.ctm.a, context.ctm.b), hypot(context.ctm.c, context.ctm.d))
+        // 只服务屏幕瓦片的位图上下文；PDF/打印上下文保持原生绘制。
+        if context.width > 0, context.height > 0, let scan,
+           let image = scanCache.image(for: scan, scale: scale) {
+            context.saveGState()
+            context.interpolationQuality = .high
+            context.draw(image, in: scan.displayBounds)
+            context.restoreGState()
+        } else {
+            VectorInkDrawingScope.perform(suppressing: snapshot.pages[ObjectIdentifier(page)]?.vectorInkIDs ?? []) {
+                unsafeBitCast(implementation, to: Draw.self)(self, selector, page, context)
+            }
         }
         guard let content = snapshot.pages[ObjectIdentifier(page)] else { return }
         context.saveGState()

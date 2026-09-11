@@ -119,7 +119,6 @@
 		93396AC42FD8E3B700CF018D /* Debug configuration for PBXNativeTarget "SimPleview" */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
-				/* macOS 仅构建 Apple Silicon；与 Release 一致，其他平台沿用默认架构。 */
 				"ARCHS[sdk=macosx*]" = arm64;
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
@@ -147,7 +146,7 @@
 				LD_RUNPATH_SEARCH_PATHS = "@executable_path/Frameworks";
 				"LD_RUNPATH_SEARCH_PATHS[sdk=macosx*]" = "@executable_path/../Frameworks";
 				MACOSX_DEPLOYMENT_TARGET = 26.6;
-				MARKETING_VERSION = 26.11;
+				MARKETING_VERSION = 26.12;
 				PRODUCT_BUNDLE_IDENTIFIER = com.tau.SimPleview;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				REGISTER_APP_GROUPS = YES;
@@ -168,7 +167,6 @@
 		93396AC52FD8E3B700CF018D /* Release configuration for PBXNativeTarget "SimPleview" */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
-				/* 正式归档也只包含 arm64，避免重新打包 Intel 代码而增加安装体积。 */
 				"ARCHS[sdk=macosx*]" = arm64;
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
@@ -196,7 +194,7 @@
 				LD_RUNPATH_SEARCH_PATHS = "@executable_path/Frameworks";
 				"LD_RUNPATH_SEARCH_PATHS[sdk=macosx*]" = "@executable_path/../Frameworks";
 				MACOSX_DEPLOYMENT_TARGET = 26.6;
-				MARKETING_VERSION = 26.11;
+				MARKETING_VERSION = 26.12;
 				PRODUCT_BUNDLE_IDENTIFIER = com.tau.SimPleview;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				REGISTER_APP_GROUPS = YES;

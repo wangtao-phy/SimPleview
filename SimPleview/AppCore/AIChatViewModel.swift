@@ -13,15 +13,8 @@ final class AIChatViewModel: ObservableObject {
     @Published var status = ""
     @Published var errorMessage: String?
     @Published var estimatedContextTokens = 0
-    @Published var lastUsage: TokenUsage? {
-        didSet {
-            if let usage = lastUsage {
-                UserDefaults.standard.set(usage.promptTokens, forKey: "lastPromptTokens")
-                UserDefaults.standard.set(usage.completionTokens, forKey: "lastCompletionTokens")
-                UserDefaults.standard.set(usage.cachedTokens, forKey: "lastCachedTokens")
-            }
-        }
-    }
+    // 用量仅属于当前窗口的当前对话，不写入全局设置，避免跨文档显示旧请求统计。
+    @Published var lastUsage: TokenUsage?
     @Published var availableSessions: [ConversationSession] = []
     @Published var currentSessionID: UUID?
     let configuration: AIConfigurationStore
@@ -76,6 +69,7 @@ final class AIChatViewModel: ObservableObject {
         cancelPendingWork()
         pdfRun = nil
         self.documentID = documentID
+        lastUsage = nil
         currentSessionID = nil
         messages = []
         if let legacyName { conversations.migrateLegacySessions(named: legacyName, to: documentID) }
@@ -88,6 +82,7 @@ final class AIChatViewModel: ObservableObject {
         let formatter = DateFormatter(); formatter.dateFormat = "MM-dd HH:mm"
         let session = ConversationSession(id: UUID(), documentID: documentID, createdAt: Date(), updatedAt: Date(), title: "对话 " + formatter.string(from: Date()), messages: [])
         availableSessions.insert(session, at: 0); currentSessionID = session.id; messages = []
+        lastUsage = nil
         saveCurrentSession()
     }
     func switchSession(to id: UUID) {
@@ -96,6 +91,8 @@ final class AIChatViewModel: ObservableObject {
         do {
             let session = try conversations.loadSession(id: id, documentID: documentID)
             currentSessionID = session.id; messages = session.messages
+            lastUsage = nil
+            estimatedContextTokens = AIContextBuilder.cost(messages) / 2
             // 上次进程意外结束的 running 消息只能续答，不能伪装成已完成。
             for index in messages.indices where messages[index].generationState == "running" { messages[index].generationState = "paused" }
         } catch { errorMessage = "读取对话失败：" + error.localizedDescription }
@@ -107,7 +104,6 @@ final class AIChatViewModel: ObservableObject {
         var snapshot = availableSessions[index]; snapshot.messages = messages
         conversations.saveSession(snapshot)
         estimatedContextTokens = AIContextBuilder.cost(messages) / 2
-        UserDefaults.standard.set(estimatedContextTokens, forKey: "estimatedContextTokens")
     }
 
     func sendMessage(appState: AppState?) {
@@ -148,7 +144,15 @@ final class AIChatViewModel: ObservableObject {
             requestEndpoint: route.endpoint.baseURL, generationState: "running")
     }
     func requestContext(_ messages: [ChatMessage]) -> [ChatMessage] {
-        var result = messages.filter { !$0.content.isEmpty }
+        var result = messages.filter { !$0.content.isEmpty }.map { original in
+            var message = original
+            // 全文读取已有总结时直接复用，不在每个后续问题中重复发送所有逐页笔记。
+            // 这里只改请求副本，用户仍可在聊天记录中查看完整的页码笔记。
+            if message.generationState == "completed", let summary = message.pdfSummary, !summary.isEmpty {
+                message.content = summary
+            }
+            return message
+        }
         let memory = DirectoryManager.shared.appRootDirectory.appendingPathComponent("GlobalMemory.md")
         if let size = try? memory.resourceValues(forKeys: [.fileSizeKey]).fileSize, size <= 256_000,
            let prompt = try? String(contentsOf: memory, encoding: .utf8), !prompt.isEmpty {
@@ -166,6 +170,7 @@ final class AIChatViewModel: ObservableObject {
             requestID = token; taskToken = token; activeAssistantID = assistantID
             isGenerating = true; isStopping = false; rawContent = prefix; rawThinking = ""; rawStreamText = ""
             errorMessage = nil
+            lastUsage = nil
             if let index = messages.firstIndex(where: { $0.id == assistantID }) {
                 messages[index].generationState = "running"; messages[index].errorMessage = nil
             }
@@ -183,19 +188,21 @@ final class AIChatViewModel: ObservableObject {
             generationTask = Task { [weak self] in
                 defer { gate.release(token); self?.finishTask(token) }
                 do {
-                    self?.isCompressing = AIContextBuilder.cost(context) > budget
-                    let prepared = try await AIContextBuilder.prepare(context, budget: max(1024, budget - 256)) { batch in
-                        try await Self.summarize(batch, route: route, key: key, transport: transport)
-                    }
+                    let prepared = try AIContextBuilder.replyContext(context, budget: max(1024, budget - 256))
                     try Task.checkCancellation()
                     guard self?.owns(token, session: session) == true else { return }
-                    self?.isCompressing = false
+                    if prepared.count < context.count {
+                        self?.status = "正在回答；本轮仅携带预算内的最近对话，完整历史仍保留。"
+                    }
                     try await transport.stream(route: route, apiKey: key, messages: prepared, images: []) { [weak self] update in
                         guard let self, self.owns(token, session: session) else { return }
                         self.accept(update, assistantID: assistantID, prefix: prefix)
                     }
                     try Task.checkCancellation()
                     self?.complete(assistantID, token: token, session: session)
+                    if self?.owns(token, session: session) == true, prepared.count < context.count {
+                        self?.status = "回答完成；本轮仅携带最近对话，完整历史仍保留。"
+                    }
                 } catch {
                     guard !Task.isCancelled, self?.owns(token, session: session) == true else { return }
                     self?.fail(assistantID, error: error)

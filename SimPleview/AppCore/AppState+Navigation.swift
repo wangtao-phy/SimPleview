@@ -129,9 +129,7 @@ extension AppState {
                 self?.documentVersion = UUID() // 强刷整个文档的 UI
             } else {
                 // 否则只是局部页面的批注撤销，单独重绘那一页即可
-                if let updatedPage = self?.pdfView.document?.page(at: index) {
-                    self?.thumbnailManager.updateLiveThumbnail(for: updatedPage, at: index)
-                }
+                self?.thumbnailManager.invalidateThumbnail(at: index)
             }
         }, onPageChange: { [weak self] index in
             self?.goToPage(index)
@@ -146,9 +144,7 @@ extension AppState {
                 self?.thumbnailManager.clearCache()
                 self?.documentVersion = UUID()
             } else {
-                if let updatedPage = self?.pdfView.document?.page(at: index) {
-                    self?.thumbnailManager.updateLiveThumbnail(for: updatedPage, at: index)
-                }
+                self?.thumbnailManager.invalidateThumbnail(at: index)
             }
         }, onPageChange: { [weak self] index in
             self?.goToPage(index)

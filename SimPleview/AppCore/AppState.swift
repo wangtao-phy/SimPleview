@@ -417,26 +417,6 @@ final class AppState: NSObject, ObservableObject, PDFViewDelegate {
         thumbnailManager.cancelThumbnail(for: index)
     }
     
-    // [智能调度] 把“即将进入视野”的缩略图提前准备好
-    func prefetchThumbnails(around index: Int) {
-        guard let doc = pdfView.document else { return }
-        // 【内存与显示的完美平衡】
-        // 之前极端缩减到前2后10，导致在 Retina 大屏幕上，可视范围内的几十个缩略图被误判为“不需要”而惨遭取消渲染（变成灰块）。
-        // 现在调整为前 10 后 20（总计 30 页），既能覆盖大屏的物理可视区域，又能压制 PDFKit 一次性生成 50+ 页带来的内存暴涨。
-        let start = max(0, index - 10)
-        let end = min(doc.pageCount, index + 20)
-        var pagesToFetch: [(Int, PDFPage)] = []
-        for i in start..<end {
-            if let page = doc.page(at: i) {
-                pagesToFetch.append((i, page))
-            }
-        }
-        let documentID = ObjectIdentifier(doc)
-        thumbnailManager.prefetchThumbnails(pages: pagesToFetch, validRange: start...end, in: doc) { [weak self] in
-            self?.pdfView.document.map(ObjectIdentifier.init) == documentID
-        }
-    }
-    
     // [新功能：独立对比窗口]
     // 弹出一个只有 PDFView、没有任何其他 UI 和侧边栏的纯净窗口，
     // 并且不参与任何状态同步，完全独立。

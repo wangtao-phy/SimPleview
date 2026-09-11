@@ -285,6 +285,11 @@ struct ThumbnailItem: View, Equatable {
                 thumbnail = payload.1 
             } 
         }
+        .onReceive(state.thumbnailManager.thumbnailInvalidatedSubject) { changedIndex in
+            // 保留当前图像直到新版就绪，避免编辑时闪成空白；缓存已经失效，
+            // 新请求会准备最新页面。离屏单元不因编辑通知重新占用渲染队列。
+            if isVisible && changedIndex == index { state.generateThumbnail(for: index) }
+        }
         // 接收热重载的“唤醒”信号！仅当前可见的 ThumbnailItem 会收到此信号，触发自身的精准重绘
         .onReceive(state.thumbnailManager.hotReloadSubject) { _ in
             thumbnail = nil

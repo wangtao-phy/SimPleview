@@ -22,10 +22,6 @@ struct ContentView: View {
     @StateObject var uiState = UIState()
     
     @ObservedObject private var aiConfiguration = AIConfigurationStore.shared
-    @AppStorage("estimatedContextTokens") private var estimatedContextTokens: Int = 0
-    @AppStorage("lastPromptTokens") private var lastPromptTokens: Int = 0
-    @AppStorage("lastCompletionTokens") private var lastCompletionTokens: Int = 0
-    @AppStorage("lastCachedTokens") private var lastCachedTokens: Int = 0
     
     // [教程注释：获取系统环境]
     // 监听当前是白天(Light)还是黑夜(Dark)模式，用于后续底层渲染适配。
@@ -246,12 +242,12 @@ struct ContentView: View {
                     Button {
                         state.save(immediate: true)
                     } label: {
-                        Label(state.documentManager.saveIssue != nil ? "保存未完成" : (state.isDirty ? "待保存" : "已写入 PDF"),
+                        Label(state.documentManager.saveIssue != nil ? "保存未完成" : (state.hasUnsavedChanges ? "待保存" : "保存标注"),
                               systemImage: state.documentManager.saveIssue != nil ? "exclamationmark.circle" : "doc.badge.arrow.up")
                     }
                     .buttonStyle(.borderless)
                     .font(.caption)
-                    .help(state.documentManager.saveIssue ?? "标注直接保存在原 PDF 中。已写入表示本地保存成功，iCloud 同步由系统完成；点击立即保存。")
+                    .help(state.documentManager.saveIssue ?? "点击将标注保存到原 PDF；iCloud 同步由系统完成。")
 
                     // 右侧 AI 控制
                     HStack(spacing: 12) {
@@ -264,32 +260,6 @@ struct ContentView: View {
                         .frame(width: 300)
                         .labelsHidden()
 
-                        if lastPromptTokens > 0 || lastCompletionTokens > 0 {
-                            let missTokens = max(0, lastPromptTokens - lastCachedTokens)
-                            let hitTokens = lastCachedTokens
-                            let outTokens = lastCompletionTokens
-                            
-                            HStack(spacing: 4) {
-                                if hitTokens > 0 {
-                                    Text(String(format: "命中:%.1fk", Double(hitTokens)/1000.0))
-                                        .foregroundColor(.green)
-                                }
-                                Text(String(format: "未命中:%.1fk", Double(missTokens)/1000.0))
-                                    .foregroundColor(.orange)
-                                Text(String(format: "输出:%.1fk", Double(outTokens)/1000.0))
-                                    .foregroundColor(.blue)
-                            }
-                            .font(.caption2)
-                            .padding(.horizontal, 4)
-                            .background(Color.gray.opacity(0.1))
-                            .cornerRadius(4)
-                        } else {
-                            let kTokens = Double(estimatedContextTokens) / 1000.0
-                            Text(String(format: "估算上下文: %.1fk", kTokens))
-                                .font(.caption)
-                                .foregroundColor(.secondary)
-                        }
-                        
                         Button(action: {
                             withAnimation(.spring(response: 0.4, dampingFraction: 0.8)) {
                                 uiState.isAIChatPresented.toggle()

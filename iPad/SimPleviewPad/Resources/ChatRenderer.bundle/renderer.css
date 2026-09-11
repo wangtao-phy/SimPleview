@@ -1,0 +1,6 @@
+:root { color-scheme: light dark; }
+body { font-family: -apple-system, sans-serif; font-size: 14px; line-height: 1.6; padding: 8px; margin: 0; overflow-wrap: anywhere; }
+pre { background: #8882; padding: 10px; border-radius: 5px; overflow-x: auto; }
+code { font-family: Menlo, monospace; background: #8882; }
+.katex-display { overflow-x: auto; overflow-y: hidden; }
+table { border-collapse: collapse; } td, th { border: 1px solid #8886; padding: 4px; }
