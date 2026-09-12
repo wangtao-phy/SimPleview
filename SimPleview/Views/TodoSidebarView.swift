@@ -5,9 +5,12 @@ import SwiftUI
 /// 该视图作为 SimPleview 读者的外延时间管理终端：
 /// 1. 待办事项 (Reminders)：
 ///    - 分类同步：未完成事项按系统分类列表（如『SimPleview阅读』、工作、个人等）进行清晰的分段呈现；
-///    - 完备归并：已完成事项（$\lambda = 1$）统一从各自具体分类中移出，归集到底部专属的『已完成』区域，避免干扰当前阅读待办；
+///    - 完备归并：已完成事项（$\lambda = 1$）统一从各自具体分类中移出，归集到底部专属的『已完成』区域；
 ///    - 默认流形：新增事项默认且自动归档至新建的『SimPleview阅读』原生分类列表。
-/// 2. 日程安排 (Events)：展示时间轴上的连续研读日程，支持按日期聚类与日历分类色条。
+/// 2. 日程安排 (Schedule)：
+///    - 底部微型月历 (Mini Month Calendar)：支持年月切换、查看当月日程分布（日期下方附带与所属日历颜色一致的圆点）；
+///    - 主视图日程流 (Day Schedule Timeline)：点击月历日期在上方主要区域查看该日日程，并支持在对应时间槽【双击】直接添加日程；
+///    - 默认归类：双击添加日程默认选定『SimPleview阅读』日历分类，且支持自由更换分类。
 /// 3. 文献引力锚定：一键捕获当前 PDF 文档名及页码并自动注入备注，实现文献与 macOS 原生生态的瞬时跃迁。
 struct TodoSidebarView: View {
     @ObservedObject var state: AppState
@@ -23,9 +26,15 @@ struct TodoSidebarView: View {
     // 过滤模式：仅看与当前文献关联的事项
     @State private var filterCurrentDocOnly: Bool = false
     
-    // 弹窗表单状态
+    // 日历当前选中日期与当前浏览月份
+    @State private var selectedDate: Date = Date()
+    @State private var currentCalendarMonth: Date = Date()
+    
+    // 弹窗表单状态与预填参数
     @State private var showingAddReminderSheet: Bool = false
     @State private var showingAddEventSheet: Bool = false
+    @State private var presetEventStartDate: Date? = nil
+    @State private var presetEventEndDate: Date? = nil
     
     // 当前文献坐标
     private var currentDocTitle: String {
@@ -109,6 +118,8 @@ struct TodoSidebarView: View {
                         if selectedSubTab == 0 {
                             showingAddReminderSheet = true
                         } else {
+                            presetEventStartDate = Calendar.current.date(bySettingHour: 9, minute: 0, second: 0, of: selectedDate)
+                            presetEventEndDate = Calendar.current.date(bySettingHour: 10, minute: 0, second: 0, of: selectedDate)
                             showingAddEventSheet = true
                         }
                     }) {
@@ -137,6 +148,7 @@ struct TodoSidebarView: View {
             eventManager.updateAuthStatuses()
             Task {
                 await eventManager.refreshAll()
+                await eventManager.fetchEventsForMonth(currentCalendarMonth)
             }
         }
         // 当应用重获焦点时（例如用户在系统设置中勾选允许后切回），自动重检权限与拉取数据
@@ -156,6 +168,8 @@ struct TodoSidebarView: View {
                 state: state,
                 defaultTitle: !currentDocTitle.isEmpty ? "研读: \(currentDocTitle)" : "",
                 defaultNotes: currentContextCitation,
+                initialStartDate: presetEventStartDate,
+                initialEndDate: presetEventEndDate,
                 eventManager: eventManager
             )
         }
@@ -319,7 +333,7 @@ struct TodoSidebarView: View {
         .padding(.vertical, 2)
     }
     
-    // MARK: - 日程安排列表组件
+    // MARK: - 日程安排复合视图：主要区域(当天日程轴) + 底部小月历
     
     @ViewBuilder
     private var scheduleContentView: some View {
@@ -330,48 +344,46 @@ struct TodoSidebarView: View {
                 isDenied: eventManager.isCalendarDenied
             )
         } else {
-            let filteredEvents = eventManager.events.filter { event in
-                guard filterCurrentDocOnly else { return true }
-                guard !currentDocTitle.isEmpty else { return true }
-                let inNotes = event.notes?.localizedCaseInsensitiveContains(currentDocTitle) ?? false
-                let inTitle = event.title?.localizedCaseInsensitiveContains(currentDocTitle) ?? false
-                return inNotes || inTitle
-            }
-            
-            if filteredEvents.isEmpty {
-                VStack(spacing: 8) {
-                    Spacer()
-                    Image(systemName: "calendar")
-                        .font(.system(size: 32))
-                        .foregroundColor(.secondary.opacity(0.6))
-                    Text(state.L("No Events Found"))
-                        .font(.subheadline)
-                        .foregroundColor(.secondary)
-                    Button(action: { showingAddEventSheet = true }) {
-                        Text(state.L("Add Event"))
-                            .font(.caption)
+            VStack(spacing: 0) {
+                // [主视图区域] 显示选中日期的详细时间流与日程
+                DayScheduleTimelineView(
+                    state: state,
+                    selectedDate: selectedDate,
+                    events: eventManager.events,
+                    filterCurrentDocOnly: filterCurrentDocOnly,
+                    currentDocTitle: currentDocTitle,
+                    onDoubleTapHour: { hour in
+                        let cal = Calendar.current
+                        presetEventStartDate = cal.date(bySettingHour: hour, minute: 0, second: 0, of: selectedDate)
+                        presetEventEndDate = cal.date(bySettingHour: hour + 1, minute: 0, second: 0, of: selectedDate)
+                        showingAddEventSheet = true
+                    },
+                    onDeleteEvent: { ev in
+                        Task {
+                            try? await eventManager.deleteEvent(ev)
+                        }
                     }
-                    .buttonStyle(.borderedProminent)
-                    .controlSize(.small)
-                    .padding(.top, 4)
-                    Spacer()
-                }
+                )
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
-            } else {
-                List {
-                    ForEach(filteredEvents, id: \.eventIdentifier) { event in
-                        EventRowView(
-                            event: event,
-                            currentDocTitle: currentDocTitle,
-                            onDelete: {
-                                Task {
-                                    try? await eventManager.deleteEvent(event)
-                                }
-                            }
-                        )
+                
+                Divider()
+                
+                // [底部微型小月历] 显示当月日程圆点与日期跳转
+                MiniMonthCalendarView(
+                    state: state,
+                    selectedDate: $selectedDate,
+                    currentMonth: $currentCalendarMonth,
+                    events: eventManager.events,
+                    onSelectDate: { date in
+                        selectedDate = date
+                    },
+                    onMonthChanged: { newMonth in
+                        Task {
+                            await eventManager.fetchEventsForMonth(newMonth)
+                        }
                     }
-                }
-                .listStyle(.plain)
+                )
+                .background(Color.primary.opacity(0.02))
             }
         }
     }
@@ -452,6 +464,354 @@ struct TodoSidebarView: View {
             Spacer()
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+}
+
+// MARK: - 模拟微型小月历组件 (MiniMonthCalendarView)
+
+struct MiniMonthCalendarView: View {
+    @ObservedObject var state: AppState
+    @Binding var selectedDate: Date
+    @Binding var currentMonth: Date
+    let events: [EKEvent]
+    let onSelectDate: (Date) -> Void
+    let onMonthChanged: (Date) -> Void
+    
+    private let calendar = Calendar.current
+    private let weekdays = ["日", "一", "二", "三", "四", "五", "六"]
+    
+    // 计算当前月份的元数据
+    private var monthMetadata: (start: Date, days: Int, leadOffset: Int) {
+        let comps = calendar.dateComponents([.year, .month], from: currentMonth)
+        let start = calendar.date(from: comps) ?? currentMonth
+        let days = calendar.range(of: .day, in: .month, for: start)?.count ?? 30
+        let firstWeekday = calendar.component(.weekday, from: start)
+        let leadOffset = (firstWeekday - calendar.firstWeekday + 7) % 7
+        return (start, days, leadOffset)
+    }
+    
+    var body: some View {
+        VStack(spacing: 4) {
+            // 月历头部控制：年月指示与月份切换
+            HStack(spacing: 8) {
+                Button(action: { changeMonth(by: -1) }) {
+                    Image(systemName: "chevron.left")
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundColor(.secondary)
+                }
+                .buttonStyle(.plain)
+                
+                Spacer()
+                
+                Text(formatMonthHeader(currentMonth))
+                    .font(.system(size: 11, weight: .bold))
+                    .foregroundColor(.primary)
+                
+                Spacer()
+                
+                Button(action: {
+                    withAnimation(.easeInOut(duration: 0.2)) {
+                        currentMonth = Date()
+                        selectedDate = Date()
+                    }
+                    onMonthChanged(currentMonth)
+                }) {
+                    Text(state.L("Today"))
+                        .font(.system(size: 9))
+                        .foregroundColor(.accentColor)
+                        .padding(.horizontal, 4)
+                        .padding(.vertical, 1)
+                        .background(Color.accentColor.opacity(0.1))
+                        .cornerRadius(3)
+                }
+                .buttonStyle(.plain)
+                .help("回到今天")
+                
+                Button(action: { changeMonth(by: 1) }) {
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundColor(.secondary)
+                }
+                .buttonStyle(.plain)
+            }
+            .padding(.horizontal, 10)
+            .padding(.top, 6)
+            
+            // 星期列指示
+            LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 2), count: 7), spacing: 2) {
+                ForEach(weekdays, id: \.self) { day in
+                    Text(day)
+                        .font(.system(size: 9, weight: .medium))
+                        .foregroundColor(.secondary)
+                        .frame(maxWidth: .infinity)
+                }
+            }
+            .padding(.horizontal, 6)
+            
+            // 日历日期数字网格
+            let meta = monthMetadata
+            let totalCells = meta.leadOffset + meta.days
+            
+            LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 2), count: 7), spacing: 2) {
+                ForEach(0..<totalCells, id: \.self) { index in
+                    if index < meta.leadOffset {
+                        Color.clear.frame(height: 22)
+                    } else {
+                        let dayNum = index - meta.leadOffset + 1
+                        let dayDate = calendar.date(byAdding: .day, value: dayNum - 1, to: meta.start) ?? meta.start
+                        let isSelected = calendar.isDate(dayDate, inSameDayAs: selectedDate)
+                        let isToday = calendar.isDateInToday(dayDate)
+                        let dayEvents = eventsForDate(dayDate)
+                        
+                        Button(action: {
+                            withAnimation(.easeInOut(duration: 0.15)) {
+                                onSelectDate(dayDate)
+                            }
+                        }) {
+                            VStack(spacing: 1) {
+                                Text("\(dayNum)")
+                                    .font(.system(size: 10, weight: (isSelected || isToday) ? .bold : .regular))
+                                    .foregroundColor(isSelected ? .white : (isToday ? .accentColor : .primary))
+                                
+                                // 日程颜色圆点：若该日存在日程，绘制与所属分类完全同构的彩色圆点
+                                if !dayEvents.isEmpty {
+                                    HStack(spacing: 2) {
+                                        let uniqueColors = Array(Set(dayEvents.compactMap { $0.calendar?.color })).prefix(3)
+                                        ForEach(0..<uniqueColors.count, id: \.self) { cIdx in
+                                            Circle()
+                                                .fill(isSelected ? Color.white : Color(nsColor: uniqueColors[cIdx]))
+                                                .frame(width: 3.5, height: 3.5)
+                                        }
+                                    }
+                                } else {
+                                    Color.clear.frame(height: 3.5)
+                                }
+                            }
+                            .frame(maxWidth: .infinity)
+                            .frame(height: 22)
+                            .background(isSelected ? Color.accentColor : Color.clear)
+                            .clipShape(RoundedRectangle(cornerRadius: 4))
+                            .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+            }
+            .padding(.horizontal, 6)
+            .padding(.bottom, 6)
+        }
+    }
+    
+    private func changeMonth(by value: Int) {
+        if let newMonth = calendar.date(byAdding: .month, value: value, to: currentMonth) {
+            withAnimation(.easeInOut(duration: 0.2)) {
+                currentMonth = newMonth
+            }
+            onMonthChanged(newMonth)
+        }
+    }
+    
+    private func formatMonthHeader(_ date: Date) -> String {
+        let f = DateFormatter()
+        f.dateFormat = "yyyy年M月"
+        return f.string(from: date)
+    }
+    
+    private func eventsForDate(_ date: Date) -> [EKEvent] {
+        events.filter { ev in
+            calendar.isDate(ev.startDate, inSameDayAs: date) ||
+            calendar.isDate(ev.endDate, inSameDayAs: date) ||
+            (ev.startDate <= date && ev.endDate >= date)
+        }
+    }
+}
+
+// MARK: - 主视图：单日日程时间轴 (DayScheduleTimelineView)
+
+struct DayScheduleTimelineView: View {
+    @ObservedObject var state: AppState
+    let selectedDate: Date
+    let events: [EKEvent]
+    let filterCurrentDocOnly: Bool
+    let currentDocTitle: String
+    let onDoubleTapHour: (Int) -> Void
+    let onDeleteEvent: (EKEvent) -> Void
+    
+    private let calendar = Calendar.current
+    
+    // 筛选出属于选中日期的日程
+    private var eventsOfDay: [EKEvent] {
+        let dayEvents = events.filter { ev in
+            calendar.isDate(ev.startDate, inSameDayAs: selectedDate) ||
+            calendar.isDate(ev.endDate, inSameDayAs: selectedDate) ||
+            (ev.startDate <= selectedDate && ev.endDate >= selectedDate)
+        }
+        
+        guard filterCurrentDocOnly, !currentDocTitle.isEmpty else { return dayEvents }
+        return dayEvents.filter { ev in
+            let inNotes = ev.notes?.localizedCaseInsensitiveContains(currentDocTitle) ?? false
+            let inTitle = ev.title?.localizedCaseInsensitiveContains(currentDocTitle) ?? false
+            return inNotes || inTitle
+        }
+    }
+    
+    private var allDayEvents: [EKEvent] {
+        eventsOfDay.filter { $0.isAllDay }
+    }
+    
+    private var timedEvents: [EKEvent] {
+        eventsOfDay.filter { !$0.isAllDay }
+    }
+    
+    var body: some View {
+        VStack(spacing: 0) {
+            // 顶端：日期指示栏
+            HStack {
+                Text(formatDayHeader(selectedDate))
+                    .font(.system(size: 13, weight: .bold))
+                
+                if calendar.isDateInToday(selectedDate) {
+                    Text(state.L("Today"))
+                        .font(.system(size: 9, weight: .medium))
+                        .padding(.horizontal, 4)
+                        .padding(.vertical, 1)
+                        .background(Color.accentColor.opacity(0.12))
+                        .foregroundColor(.accentColor)
+                        .cornerRadius(3)
+                }
+                
+                Spacer()
+                
+                Text("双击时间槽新建")
+                    .font(.system(size: 9))
+                    .foregroundColor(.secondary)
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 8)
+            .background(Color.primary.opacity(0.02))
+            
+            Divider()
+            
+            // 时间轴滚动区域
+            ScrollView {
+                VStack(spacing: 0) {
+                    // 全天事件区域
+                    if !allDayEvents.isEmpty {
+                        VStack(spacing: 4) {
+                            ForEach(allDayEvents, id: \.eventIdentifier) { ev in
+                                HStack(spacing: 6) {
+                                    RoundedRectangle(cornerRadius: 2)
+                                        .fill(Color(nsColor: ev.calendar?.color ?? .systemBlue))
+                                        .frame(width: 3, height: 16)
+                                    Text(ev.title ?? "全天日程")
+                                        .font(.system(size: 11, weight: .medium))
+                                    Spacer()
+                                    Text("全天")
+                                        .font(.system(size: 9))
+                                        .foregroundColor(.secondary)
+                                }
+                                .padding(.horizontal, 8)
+                                .padding(.vertical, 4)
+                                .background(Color.primary.opacity(0.04))
+                                .cornerRadius(4)
+                            }
+                        }
+                        .padding(8)
+                        Divider()
+                    }
+                    
+                    // 24 小时时间槽 (以 07:00 至 23:00 为主视界)
+                    ForEach(7...23, id: \.self) { hour in
+                        let hourEvents = timedEvents.filter { ev in
+                            let h = calendar.component(.hour, from: ev.startDate)
+                            return h == hour
+                        }
+                        
+                        HourlySlotRow(
+                            hour: hour,
+                            events: hourEvents,
+                            currentDocTitle: currentDocTitle,
+                            onDoubleTap: { onDoubleTapHour(hour) },
+                            onDeleteEvent: onDeleteEvent
+                        )
+                    }
+                }
+                .padding(.vertical, 4)
+            }
+        }
+    }
+    
+    private func formatDayHeader(_ date: Date) -> String {
+        let f = DateFormatter()
+        f.dateFormat = "M月d日 EEEE"
+        return f.string(from: date)
+    }
+}
+
+// MARK: - 单小时槽位视图 (HourlySlotRow)
+
+struct HourlySlotRow: View {
+    let hour: Int
+    let events: [EKEvent]
+    let currentDocTitle: String
+    let onDoubleTap: () -> Void
+    let onDeleteEvent: (EKEvent) -> Void
+    
+    @State private var isHovered: Bool = false
+    
+    var body: some View {
+        HStack(alignment: .top, spacing: 6) {
+            // 时间标尺
+            Text(String(format: "%02d:00", hour))
+                .font(.system(size: 9, weight: .medium, design: .monospaced))
+                .foregroundColor(.secondary)
+                .frame(width: 36, alignment: .trailing)
+                .padding(.top, 2)
+            
+            // 内容区域
+            VStack(alignment: .leading, spacing: 4) {
+                if events.isEmpty {
+                    // 空白时间槽：支持双击手势快速创建
+                    HStack {
+                        if isHovered {
+                            HStack(spacing: 4) {
+                                Image(systemName: "plus")
+                                    .font(.system(size: 8))
+                                Text("双击在此时间添加日程")
+                                    .font(.system(size: 9))
+                            }
+                            .foregroundColor(.accentColor.opacity(0.8))
+                        } else {
+                            Rectangle()
+                                .fill(Color.primary.opacity(0.06))
+                                .frame(height: 1)
+                        }
+                        Spacer()
+                    }
+                    .frame(height: 22)
+                    .contentShape(Rectangle())
+                    .onTapGesture(count: 2) {
+                        onDoubleTap()
+                    }
+                } else {
+                    // 已有日程卡片
+                    ForEach(events, id: \.eventIdentifier) { ev in
+                        EventRowView(
+                            event: ev,
+                            currentDocTitle: currentDocTitle,
+                            onDelete: { onDeleteEvent(ev) }
+                        )
+                        .padding(4)
+                        .background(Color.primary.opacity(0.03))
+                        .cornerRadius(4)
+                    }
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .padding(.horizontal, 6)
+        .padding(.vertical, 1)
+        .onHover { isHovered = $0 }
     }
 }
 
@@ -663,7 +1023,7 @@ struct EventRowView: View {
                 .help("删除此日程")
             }
         }
-        .padding(.vertical, 4)
+        .padding(.vertical, 3)
         .onHover { isHovered = $0 }
         .contextMenu {
             Button(role: .destructive, action: onDelete) {
@@ -681,7 +1041,7 @@ struct EventRowView: View {
         
         let cal = Calendar.current
         if cal.isDate(event.startDate, inSameDayAs: event.endDate) {
-            f.dateFormat = "M月d日 HH:mm"
+            f.dateFormat = "HH:mm"
             let startStr = f.string(from: event.startDate)
             let fEnd = DateFormatter()
             fEnd.dateFormat = "HH:mm"
@@ -755,10 +1115,7 @@ struct AddReminderSheetView: View {
             if !calendars.isEmpty {
                 Picker(state.L("List"), selection: $selectedCalendar) {
                     ForEach(calendars, id: \.calendarIdentifier) { cal in
-                        HStack {
-                            Text(cal.title)
-                        }
-                        .tag(cal as EKCalendar?)
+                        Text(cal.title).tag(cal as EKCalendar?)
                     }
                 }
                 .pickerStyle(.menu)
@@ -804,7 +1161,7 @@ struct AddReminderSheetView: View {
     }
 }
 
-// MARK: - 新建日程表单弹窗
+// MARK: - 新建日程表单弹窗 (默认归类为『SimPleview阅读』分类，亦可自由更改分类)
 
 struct AddEventSheetView: View {
     @ObservedObject var state: AppState
@@ -813,24 +1170,48 @@ struct AddEventSheetView: View {
     @State private var title: String
     @State private var notes: String
     @State private var isAllDay: Bool = false
-    @State private var startDate: Date = Date()
-    @State private var endDate: Date = Calendar.current.date(byAdding: .hour, value: 1, to: Date()) ?? Date()
+    @State private var startDate: Date
+    @State private var endDate: Date
     @State private var selectedCalendar: EKCalendar?
     
     let eventManager: EventManager
     
-    init(state: AppState, defaultTitle: String, defaultNotes: String, eventManager: EventManager) {
+    init(
+        state: AppState,
+        defaultTitle: String,
+        defaultNotes: String,
+        initialStartDate: Date? = nil,
+        initialEndDate: Date? = nil,
+        eventManager: EventManager
+    ) {
         self.state = state
         self._title = State(initialValue: defaultTitle)
         self._notes = State(initialValue: defaultNotes)
         self.eventManager = eventManager
-        self._selectedCalendar = State(initialValue: eventManager.defaultEventCalendar())
+        
+        let start = initialStartDate ?? Date()
+        let end = initialEndDate ?? (Calendar.current.date(byAdding: .hour, value: 1, to: start) ?? start)
+        self._startDate = State(initialValue: start)
+        self._endDate = State(initialValue: end)
+        
+        // 核心优化：默认自动选定或创建『SimPleview阅读』分类，亦可自由更改
+        let defaultCal = eventManager.getOrCreateSimPleviewEventCalendar() ?? eventManager.defaultEventCalendar()
+        self._selectedCalendar = State(initialValue: defaultCal)
     }
     
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
-            Text(state.L("Add Event"))
-                .font(.headline)
+            HStack {
+                Text(state.L("Add Event"))
+                    .font(.headline)
+                Spacer()
+                if let cal = selectedCalendar {
+                    HStack(spacing: 4) {
+                        Circle().fill(Color(nsColor: cal.color)).frame(width: 8, height: 8)
+                        Text(cal.title).font(.caption).foregroundColor(.secondary)
+                    }
+                }
+            }
             
             Divider()
             
@@ -861,11 +1242,16 @@ struct AddEventSheetView: View {
                 }
             }
             
+            // 所属日历分类选择器：默认『SimPleview阅读』，用户可自由改动分类
             let calendars = eventManager.availableEventCalendars()
-            if calendars.count > 1 {
+            if !calendars.isEmpty {
                 Picker(state.L("Calendar"), selection: $selectedCalendar) {
                     ForEach(calendars, id: \.calendarIdentifier) { cal in
-                        Text(cal.title).tag(cal as EKCalendar?)
+                        HStack {
+                            Circle().fill(Color(nsColor: cal.color)).frame(width: 6, height: 6)
+                            Text(cal.title)
+                        }
+                        .tag(cal as EKCalendar?)
                     }
                 }
                 .pickerStyle(.menu)

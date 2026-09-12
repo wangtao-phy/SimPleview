@@ -328,6 +328,16 @@ final class EventManager: ObservableObject {
         await fetchReminders()
     }
     
+    /// 拉取指定月份周边的日程数据
+    func fetchEventsForMonth(_ month: Date) async {
+        let cal = Calendar.current
+        guard let startOfMonth = cal.date(from: cal.dateComponents([.year, .month], from: month)),
+              let endOfMonth = cal.date(byAdding: .month, value: 1, to: startOfMonth) else { return }
+        let s = cal.date(byAdding: .day, value: -14, to: startOfMonth) ?? startOfMonth
+        let e = cal.date(byAdding: .day, value: 14, to: endOfMonth) ?? endOfMonth
+        await fetchEvents(from: s, to: e)
+    }
+    
     // MARK: - 日历日程 CRUD
     
     /// 获取可用的日历列表（如个人、工作、学术等分类）
@@ -341,7 +351,35 @@ final class EventManager: ObservableObject {
         return eventStore.defaultCalendarForNewEvents ?? availableEventCalendars().first
     }
     
-    /// 新建日历日程
+    /// 获取或自动创建“SimPleview阅读”专属日历分类列表
+    func getOrCreateSimPleviewEventCalendar() -> EKCalendar? {
+        guard hasCalendarAccess else { return nil }
+        let eventCalendars = eventStore.calendars(for: .event)
+        if let existing = eventCalendars.first(where: { $0.title == "SimPleview阅读" }) {
+            return existing
+        }
+        
+        guard let source = eventStore.defaultCalendarForNewEvents?.source 
+                ?? eventStore.sources.first(where: { $0.sourceType == .calDAV || $0.sourceType == .local })
+                ?? eventStore.sources.first else {
+            return defaultEventCalendar()
+        }
+        
+        let newCal = EKCalendar(for: .event, eventStore: eventStore)
+        newCal.title = "SimPleview阅读"
+        newCal.source = source
+        newCal.color = NSColor.systemIndigo
+        
+        do {
+            try eventStore.saveCalendar(newCal, commit: true)
+            return newCal
+        } catch {
+            print("[EventManager] 创建『SimPleview阅读』日历分类失败: \(error)")
+            return defaultEventCalendar()
+        }
+    }
+    
+    /// 新建日历日程 (默认归档至“SimPleview阅读”)
     @discardableResult
     func createEvent(
         title: String,
@@ -361,7 +399,7 @@ final class EventManager: ObservableObject {
         event.endDate = endDate
         event.isAllDay = isAllDay
         event.notes = notes
-        event.calendar = calendar ?? defaultEventCalendar()
+        event.calendar = calendar ?? getOrCreateSimPleviewEventCalendar() ?? defaultEventCalendar()
         
         try eventStore.save(event, span: .thisEvent, commit: true)
         await fetchEvents()
