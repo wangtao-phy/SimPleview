@@ -218,10 +218,10 @@ final class EventManager: ObservableObject {
         }
     }
     
-    /// 从 macOS 原生数据库拉取指定时间段内的日历日程 (默认显示前后 30 天)
+    /// 从 macOS 原生数据库拉取指定时间段内的日历日程 (默认显示前后 30 天/60 天)
     func fetchEvents(
-        from startDate: Date = Calendar.current.date(byAdding: .day, value: -7, to: Date()) ?? Date(),
-        to endDate: Date = Calendar.current.date(byAdding: .day, value: 30, to: Date()) ?? Date()
+        from startDate: Date = Calendar.current.date(byAdding: .day, value: -30, to: Date()) ?? Date(),
+        to endDate: Date = Calendar.current.date(byAdding: .day, value: 60, to: Date()) ?? Date()
     ) async {
         guard hasCalendarAccess else { return }
         isLoadingEvents = true
@@ -404,6 +404,33 @@ final class EventManager: ObservableObject {
         try eventStore.save(event, span: .thisEvent, commit: true)
         await fetchEvents()
         return event
+    }
+    
+    /// 修改并保存已有日程信息
+    func updateEvent(
+        _ event: EKEvent,
+        title: String,
+        startDate: Date,
+        endDate: Date,
+        isAllDay: Bool,
+        notes: String?,
+        calendar: EKCalendar?
+    ) async throws {
+        guard hasCalendarAccess else {
+            throw NSError(domain: "EventManager", code: 401, userInfo: [NSLocalizedDescriptionKey: "未获得日历访问权限"])
+        }
+        
+        event.title = title
+        event.startDate = startDate
+        event.endDate = endDate
+        event.isAllDay = isAllDay
+        event.notes = notes
+        if let cal = calendar {
+            event.calendar = cal
+        }
+        
+        try eventStore.save(event, span: .thisEvent, commit: true)
+        await fetchEvents()
     }
     
     /// 删除日历日程
