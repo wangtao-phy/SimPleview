@@ -247,12 +247,12 @@ struct TodoSidebarView: View {
                                         showCalendarBadge: false,
                                         onToggle: {
                                             Task {
-                                                try? await eventManager.toggleReminderCompletion(reminder)
+                                                _ = try? await eventManager.toggleReminderCompletion(reminder)
                                             }
                                         },
                                         onDelete: {
                                             Task {
-                                                try? await eventManager.deleteReminder(reminder)
+                                                _ = try? await eventManager.deleteReminder(reminder)
                                             }
                                         }
                                     )
@@ -271,12 +271,12 @@ struct TodoSidebarView: View {
                                     showCalendarBadge: true,
                                     onToggle: {
                                         Task {
-                                            try? await eventManager.toggleReminderCompletion(reminder)
+                                            _ = try? await eventManager.toggleReminderCompletion(reminder)
                                         }
                                     },
                                     onDelete: {
                                         Task {
-                                            try? await eventManager.deleteReminder(reminder)
+                                            _ = try? await eventManager.deleteReminder(reminder)
                                         }
                                     }
                                 )
@@ -369,7 +369,7 @@ struct TodoSidebarView: View {
                     },
                     onDeleteEvent: { ev in
                         Task {
-                            try? await eventManager.deleteEvent(ev)
+                            _ = try? await eventManager.deleteEvent(ev)
                         }
                     }
                 )
@@ -474,6 +474,58 @@ struct TodoSidebarView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
+}
+
+// MARK: - 静态时间格式化缓存 (消除高频重绘时的多余堆内存分配)
+
+private enum DateFormatters {
+    static let dayHeader: DateFormatter = {
+        let f = DateFormatter()
+        f.dateFormat = "M月d日 EEEE"
+        return f
+    }()
+    
+    static let monthHeader: DateFormatter = {
+        let f = DateFormatter()
+        f.dateFormat = "yyyy年M月"
+        return f
+    }()
+    
+    static let timeOnly: DateFormatter = {
+        let f = DateFormatter()
+        f.dateFormat = "HH:mm"
+        return f
+    }()
+    
+    static let dateAndHour: DateFormatter = {
+        let f = DateFormatter()
+        f.dateFormat = "M/d HH:mm"
+        return f
+    }()
+    
+    static let allDay: DateFormatter = {
+        let f = DateFormatter()
+        f.dateFormat = "M月d日 全天"
+        return f
+    }()
+    
+    static let todayDue: DateFormatter = {
+        let f = DateFormatter()
+        f.dateFormat = "今天 HH:mm"
+        return f
+    }()
+    
+    static let tomorrowDue: DateFormatter = {
+        let f = DateFormatter()
+        f.dateFormat = "明天 HH:mm"
+        return f
+    }()
+    
+    static let otherDue: DateFormatter = {
+        let f = DateFormatter()
+        f.dateFormat = "M月d日 HH:mm"
+        return f
+    }()
 }
 
 // MARK: - 模拟微型小月历组件 (MiniMonthCalendarView)
@@ -621,9 +673,7 @@ struct MiniMonthCalendarView: View {
     }
     
     private func formatMonthHeader(_ date: Date) -> String {
-        let f = DateFormatter()
-        f.dateFormat = "yyyy年M月"
-        return f.string(from: date)
+        DateFormatters.monthHeader.string(from: date)
     }
     
     private func eventsForDate(_ date: Date) -> [EKEvent] {
@@ -745,9 +795,7 @@ struct DayScheduleTimelineView: View {
     }
     
     private func formatDayHeader(_ date: Date) -> String {
-        let f = DateFormatter()
-        f.dateFormat = "M月d日 EEEE"
-        return f.string(from: date)
+        DateFormatters.dayHeader.string(from: date)
     }
 }
 
@@ -946,17 +994,11 @@ struct ReminderRowView: View {
     private func formatDueDate(_ date: Date) -> String {
         let cal = Calendar.current
         if cal.isDateInToday(date) {
-            let f = DateFormatter()
-            f.dateFormat = "今天 HH:mm"
-            return f.string(from: date)
+            return DateFormatters.todayDue.string(from: date)
         } else if cal.isDateInTomorrow(date) {
-            let f = DateFormatter()
-            f.dateFormat = "明天 HH:mm"
-            return f.string(from: date)
+            return DateFormatters.tomorrowDue.string(from: date)
         } else {
-            let f = DateFormatter()
-            f.dateFormat = "M月d日 HH:mm"
-            return f.string(from: date)
+            return DateFormatters.otherDue.string(from: date)
         }
     }
 }
@@ -1122,22 +1164,19 @@ struct EventRowView: View {
     }
     
     private func formatEventTime(_ event: EKEvent) -> String {
-        let f = DateFormatter()
         if event.isAllDay {
-            f.dateFormat = "M月d日 全天"
-            return f.string(from: event.startDate)
+            return DateFormatters.allDay.string(from: event.startDate)
         }
         
         let cal = Calendar.current
         if cal.isDate(event.startDate, inSameDayAs: event.endDate) {
-            f.dateFormat = "HH:mm"
-            let startStr = f.string(from: event.startDate)
-            let fEnd = DateFormatter()
-            fEnd.dateFormat = "HH:mm"
-            return "\(startStr) - \(fEnd.string(from: event.endDate))"
+            let startStr = DateFormatters.timeOnly.string(from: event.startDate)
+            let endStr = DateFormatters.timeOnly.string(from: event.endDate)
+            return "\(startStr) - \(endStr)"
         } else {
-            f.dateFormat = "M/d HH:mm"
-            return "\(f.string(from: event.startDate)) - \(f.string(from: event.endDate))"
+            let startStr = DateFormatters.dateAndHour.string(from: event.startDate)
+            let endStr = DateFormatters.dateAndHour.string(from: event.endDate)
+            return "\(startStr) - \(endStr)"
         }
     }
 }
