@@ -40,7 +40,7 @@ final class EventManager: ObservableObject {
     
     var hasCalendarAccess: Bool {
         if #available(macOS 14.0, *) {
-            return calendarAuthStatus == .fullAccess || calendarAuthStatus == .authorized
+            return calendarAuthStatus == .fullAccess || calendarAuthStatus == .authorized || calendarAuthStatus == .writeOnly
         } else {
             return calendarAuthStatus == .authorized
         }
@@ -127,13 +127,19 @@ final class EventManager: ObservableObject {
         }
         
         do {
-            let granted: Bool
+            var granted: Bool = false
             if #available(macOS 14.0, *) {
                 do {
                     granted = try await eventStore.requestFullAccessToEvents()
                 } catch {
-                    // 若 fullAccess 失败降级兼容传统接口
-                    granted = try await eventStore.requestAccess(to: .event)
+                    print("[EventManager] requestFullAccessToEvents error: \(error)")
+                }
+                if !granted {
+                    do {
+                        granted = try await eventStore.requestAccess(to: .event)
+                    } catch {
+                        print("[EventManager] fallback requestAccess(to: .event) error: \(error)")
+                    }
                 }
             } else {
                 granted = try await eventStore.requestAccess(to: .event)

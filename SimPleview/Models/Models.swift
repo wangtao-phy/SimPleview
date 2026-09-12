@@ -117,6 +117,7 @@ struct L {
             "Permission Denied Guide": [.zh: "权限已被系统限制或拒绝，请前往系统设置开启", .en: "Permission restricted or denied. Please enable in System Settings"],
             "All Lists": [.zh: "全部列表", .en: "All Lists"],
             "SimPleview Reading": [.zh: "SimPleview阅读", .en: "SimPleview Reading"],
+            "Completed": [.zh: "已完成", .en: "Completed"],
             "Authorize Access": [.zh: "授权访问系统", .en: "Authorize Access to"],
             "No Reminders Found": [.zh: "暂无待办事项", .en: "No Reminders Found"],
             "No Events Found": [.zh: "近期无日程安排", .en: "No Events Found"],
