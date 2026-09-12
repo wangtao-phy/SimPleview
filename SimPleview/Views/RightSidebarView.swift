@@ -18,10 +18,11 @@ struct RightSidebarView: View {
             Picker("", selection: $uiState.rightSidebarTab) {
                 Text(state.L("Annotations")).tag(0)
                 Text(state.L("Search")).tag(1)
+                Text(state.L("Todo")).tag(2)
                 
                 // 动态选项：只有用户在设置里开启了这功能，才显示这个标签
                 if enableReadingRecord {
-                    Text(state.L("Record")).tag(2)
+                    Text(state.L("Record")).tag(3)
                 }
             }
             .pickerStyle(.segmented)
@@ -33,7 +34,8 @@ struct RightSidebarView: View {
             switch uiState.rightSidebarTab {
             case 0: AnnotationSidebarView(state: state)
             case 1: SearchSidebarView(state: state, uiState: uiState, searchManager: state.searchManager)
-            case 2:
+            case 2: TodoSidebarView(state: state, uiState: uiState)
+            case 3:
                 if enableReadingRecord {
                     ReadingRecordView(state: state)
                 } else {
@@ -46,7 +48,7 @@ struct RightSidebarView: View {
         // 假设用户现在正停留在“统计(Record)”标签，然后他打开设置，把这功能关了。
         // 如果我们不处理，这页面就会变成一片空白卡住。所以我们监听开关，如果关了，强制跳回第一个标签。
         .onChange(of: enableReadingRecord) { _, newValue in
-            if !newValue && uiState.rightSidebarTab == 2 {
+            if !newValue && uiState.rightSidebarTab == 3 {
                 uiState.rightSidebarTab = 0
             }
         }

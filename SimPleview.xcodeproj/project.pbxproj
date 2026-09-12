@@ -131,6 +131,10 @@
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_CFBundleDisplayName = SimPleview;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.productivity";
+				INFOPLIST_KEY_NSCalendarsFullAccessUsageDescription = "SimPleview 需要访问您的日历，以便在阅读文献时规划和同步学术日程。";
+				INFOPLIST_KEY_NSCalendarsUsageDescription = "SimPleview 需要访问您的日历，以便在阅读文献时规划和同步学术日程。";
+				INFOPLIST_KEY_NSRemindersFullAccessUsageDescription = "SimPleview 需要访问您的提醒事项，以便在阅读文献时添加和同步待办任务。";
+				INFOPLIST_KEY_NSRemindersUsageDescription = "SimPleview 需要访问您的提醒事项，以便在阅读文献时添加和同步待办任务。";
 				"INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphoneos*]" = YES;
 				"INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphonesimulator*]" = YES;
 				"INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents[sdk=iphoneos*]" = YES;
@@ -179,6 +183,10 @@
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_CFBundleDisplayName = SimPleview;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.productivity";
+				INFOPLIST_KEY_NSCalendarsFullAccessUsageDescription = "SimPleview 需要访问您的日历，以便在阅读文献时规划和同步学术日程。";
+				INFOPLIST_KEY_NSCalendarsUsageDescription = "SimPleview 需要访问您的日历，以便在阅读文献时规划和同步学术日程。";
+				INFOPLIST_KEY_NSRemindersFullAccessUsageDescription = "SimPleview 需要访问您的提醒事项，以便在阅读文献时添加和同步待办任务。";
+				INFOPLIST_KEY_NSRemindersUsageDescription = "SimPleview 需要访问您的提醒事项，以便在阅读文献时添加和同步待办任务。";
 				"INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphoneos*]" = YES;
 				"INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphonesimulator*]" = YES;
 				"INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents[sdk=iphoneos*]" = YES;
