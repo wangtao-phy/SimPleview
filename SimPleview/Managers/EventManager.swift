@@ -1,19 +1,21 @@
 import Foundation
 @preconcurrency import EventKit
 import Combine
+import AppKit
 
 /// [理论物理与系统架构：宏观时间投影引擎 EventManager]
 /// 该管理器作为 SimPleview 内部状态流形向 macOS 系统宏观时间流形的规范联络 (Gauge Connection)。
 /// 它封装了底层 `EventKit.EKEventStore`，实现：
 /// 1. 待办事项 (Reminders)：离散投影本征态的检测、完成度跃迁 (Completion) 与持久化落盘。
+///    - 自动创建并默认挂载于专属的『SimPleview阅读』分类列表。
 /// 2. 日程安排 (Events)：紧致时间区间的截取、世界线规划与日历归档。
 /// 3. 实时双向退相干保护：通过监听 `.EKEventStoreChanged` 维持与系统原生“提醒事项”和“日历”的完全同构。
 @MainActor
 final class EventManager: ObservableObject {
     static let shared = EventManager()
     
-    // 底层 EventKit 核心存储对象 (单例生命周期内保持复用，避免重复初始化开销)
-    private let eventStore = EKEventStore()
+    // 底层 EventKit 核心存储对象 (单例生命周期内保持复用，支持动态 reset 重建)
+    private(set) var eventStore = EKEventStore()
     
     // 响应式状态发布
     @Published var reminderAuthStatus: EKAuthorizationStatus = .notDetermined
@@ -44,6 +46,14 @@ final class EventManager: ObservableObject {
         }
     }
     
+    var isReminderDenied: Bool {
+        reminderAuthStatus == .denied || reminderAuthStatus == .restricted
+    }
+    
+    var isCalendarDenied: Bool {
+        calendarAuthStatus == .denied || calendarAuthStatus == .restricted
+    }
+    
     private init() {
         updateAuthStatuses()
         setupStoreObserver()
@@ -53,6 +63,15 @@ final class EventManager: ObservableObject {
     func updateAuthStatuses() {
         reminderAuthStatus = EKEventStore.authorizationStatus(for: .reminder)
         calendarAuthStatus = EKEventStore.authorizationStatus(for: .event)
+    }
+    
+    /// 重置存储并重新检测权限 (用于用户在系统设置修改权限后切回)
+    func resetStoreAndAuth() {
+        eventStore.reset()
+        updateAuthStatuses()
+        Task {
+            await refreshAll()
+        }
     }
     
     /// 注册系统原生日历/提醒数据库变更通知 (实现与 macOS 原生 App 的实时双向退相干同步)
@@ -73,6 +92,12 @@ final class EventManager: ObservableObject {
     /// 请求系统“提醒事项”访问权限
     @discardableResult
     func requestReminderAccess() async -> Bool {
+        updateAuthStatuses()
+        if isReminderDenied {
+            openReminderPrivacySettings()
+            return false
+        }
+        
         do {
             let granted: Bool
             if #available(macOS 14.0, *) {
@@ -95,10 +120,21 @@ final class EventManager: ObservableObject {
     /// 请求系统“日历”访问权限
     @discardableResult
     func requestCalendarAccess() async -> Bool {
+        updateAuthStatuses()
+        if isCalendarDenied {
+            openCalendarPrivacySettings()
+            return false
+        }
+        
         do {
             let granted: Bool
             if #available(macOS 14.0, *) {
-                granted = try await eventStore.requestFullAccessToEvents()
+                do {
+                    granted = try await eventStore.requestFullAccessToEvents()
+                } catch {
+                    // 若 fullAccess 失败降级兼容传统接口
+                    granted = try await eventStore.requestAccess(to: .event)
+                }
             } else {
                 granted = try await eventStore.requestAccess(to: .event)
             }
@@ -111,6 +147,20 @@ final class EventManager: ObservableObject {
             print("[EventManager] 请求日历权限失败: \(error)")
             updateAuthStatuses()
             return false
+        }
+    }
+    
+    /// 一键打开 macOS 系统设置隐私与安全性 -> 提醒事项
+    func openReminderPrivacySettings() {
+        if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Reminders") {
+            NSWorkspace.shared.open(url)
+        }
+    }
+    
+    /// 一键打开 macOS 系统设置隐私与安全性 -> 日历
+    func openCalendarPrivacySettings() {
+        if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Calendars") {
+            NSWorkspace.shared.open(url)
         }
     }
     
@@ -177,7 +227,7 @@ final class EventManager: ObservableObject {
         self.events = list.sorted { $0.startDate < $1.startDate }
     }
     
-    // MARK: - 提醒事项 CRUD
+    // MARK: - 提醒事项分类列表 (Calendars & SimPleview阅读)
     
     /// 获取可用的提醒事项列表（列表分类）
     func availableReminderCalendars() -> [EKCalendar] {
@@ -190,7 +240,38 @@ final class EventManager: ObservableObject {
         return eventStore.defaultCalendarForNewReminders() ?? availableReminderCalendars().first
     }
     
-    /// 新建待办事项
+    /// 获取或自动创建“SimPleview阅读”专属提醒事项分类列表
+    func getOrCreateSimPleviewCalendar() -> EKCalendar? {
+        guard hasReminderAccess else { return nil }
+        
+        let reminderCalendars = eventStore.calendars(for: .reminder)
+        if let existing = reminderCalendars.first(where: { $0.title == "SimPleview阅读" }) {
+            return existing
+        }
+        
+        // 自动新建“SimPleview阅读”列表
+        // 查找支持创建 Reminders 的 Source (优先选择默认列表所在的 source，通常为 iCloud 或本地)
+        guard let source = eventStore.defaultCalendarForNewReminders()?.source 
+                ?? eventStore.sources.first(where: { $0.sourceType == .calDAV || $0.sourceType == .local })
+                ?? eventStore.sources.first else {
+            return defaultReminderCalendar()
+        }
+        
+        let newCal = EKCalendar(for: .reminder, eventStore: eventStore)
+        newCal.title = "SimPleview阅读"
+        newCal.source = source
+        newCal.color = NSColor.systemIndigo
+        
+        do {
+            try eventStore.saveCalendar(newCal, commit: true)
+            return newCal
+        } catch {
+            print("[EventManager] 创建『SimPleview阅读』分类列表失败: \(error)")
+            return defaultReminderCalendar()
+        }
+    }
+    
+    /// 新建待办事项 (默认归档至“SimPleview阅读”列表)
     @discardableResult
     func createReminder(
         title: String,
@@ -207,7 +288,8 @@ final class EventManager: ObservableObject {
         reminder.title = title
         reminder.notes = notes
         reminder.priority = priority
-        reminder.calendar = calendar ?? defaultReminderCalendar()
+        // 默认落入“SimPleview阅读”分类列表
+        reminder.calendar = calendar ?? getOrCreateSimPleviewCalendar() ?? defaultReminderCalendar()
         
         if let due = dueDate {
             let components = Calendar.current.dateComponents([.year, .month, .day, .hour, .minute], from: due)

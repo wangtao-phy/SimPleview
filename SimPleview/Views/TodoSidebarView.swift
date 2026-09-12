@@ -1,11 +1,12 @@
 import SwiftUI
-import EventKit
+@preconcurrency import EventKit
 
 /// [理论物理与用户界面：待办与日程侧边栏 TodoSidebarView]
 /// 该视图作为 SimPleview 读者的外延时间管理终端：
-/// 1. 投影待办事项 (Reminders)：展示离散完成态任务，支持实时勾选、快捷添加与过期高亮。
-/// 2. 投影日历日程 (Events)：展示时间轴上的连续研读日程，支持按日期聚类与颜色区分。
-/// 3. 文献引力锚定：支持一键捕获当前 PDF 文档名及页码，在创建事项时自动附注，实现文献到 macOS 原生系统的时空跃迁。
+/// 1. 待办事项 (Reminders)：分类同步，支持按系统列表（如『SimPleview阅读』、工作、个人）进行过滤与分段呈现，避免全部杂乱堆叠。
+///    - 新增事项默认且自动归档至新建的『SimPleview阅读』原生分类下。
+/// 2. 日程安排 (Events)：展示时间轴上的连续研读日程，支持按日期聚类与日历分类色条。
+/// 3. 文献引力锚定：一键捕获当前 PDF 文档名及页码并自动注入备注，实现文献与 macOS 原生生态的瞬时跃迁。
 struct TodoSidebarView: View {
     @ObservedObject var state: AppState
     @ObservedObject var uiState: UIState
@@ -13,6 +14,9 @@ struct TodoSidebarView: View {
     
     // 子标签切换：0 为待办事项 (Reminders)，1 为日程安排 (Schedule)
     @State private var selectedSubTab: Int = 0
+    
+    // 提醒事项分类列表筛选：默认为 "ALL" (显示全部列表并分节分组)，亦可单选『SimPleview阅读』等
+    @State private var selectedReminderCalendarID: String = "ALL"
     
     // 过滤模式：仅看与当前文献关联的事项
     @State private var filterCurrentDocOnly: Bool = false
@@ -47,24 +51,41 @@ struct TodoSidebarView: View {
                 .pickerStyle(.segmented)
                 
                 // 2. 工具栏与过滤栏
-                HStack(spacing: 8) {
+                HStack(spacing: 6) {
+                    // 如果处于待办事项模式，显示分类列表筛选器
+                    if selectedSubTab == 0 && eventManager.hasReminderAccess {
+                        let calendars = eventManager.availableReminderCalendars()
+                        Picker("", selection: $selectedReminderCalendarID) {
+                            Text(state.L("All Lists")).tag("ALL")
+                            ForEach(calendars, id: \.calendarIdentifier) { cal in
+                                HStack(spacing: 4) {
+                                    Text(cal.title)
+                                }
+                                .tag(cal.calendarIdentifier)
+                            }
+                        }
+                        .pickerStyle(.menu)
+                        .controlSize(.small)
+                        .frame(maxWidth: 130)
+                    }
+                    
                     // 仅看本文献切换
                     Button(action: {
                         withAnimation(.easeInOut(duration: 0.2)) {
                             filterCurrentDocOnly.toggle()
                         }
                     }) {
-                        HStack(spacing: 4) {
+                        HStack(spacing: 3) {
                             Image(systemName: filterCurrentDocOnly ? "line.3.horizontal.decrease.circle.fill" : "line.3.horizontal.decrease.circle")
-                                .font(.system(size: 12))
-                            Text(state.L("Filter Current Paper"))
                                 .font(.system(size: 11))
+                            Text(state.L("Filter Current Paper"))
+                                .font(.system(size: 10))
                         }
                         .foregroundColor(filterCurrentDocOnly ? .accentColor : .secondary)
-                        .padding(.horizontal, 6)
+                        .padding(.horizontal, 5)
                         .padding(.vertical, 3)
                         .background(filterCurrentDocOnly ? Color.accentColor.opacity(0.12) : Color.clear)
-                        .cornerRadius(6)
+                        .cornerRadius(5)
                     }
                     .buttonStyle(.plain)
                     .help(state.L("Filter Current Paper"))
@@ -78,7 +99,7 @@ struct TodoSidebarView: View {
                         }
                     }) {
                         Image(systemName: "arrow.clockwise")
-                            .font(.system(size: 12))
+                            .font(.system(size: 11))
                             .foregroundColor(.secondary)
                     }
                     .buttonStyle(.plain)
@@ -100,7 +121,7 @@ struct TodoSidebarView: View {
                     .help(selectedSubTab == 0 ? state.L("Add Task") : state.L("Add Event"))
                 }
             }
-            .padding(10)
+            .padding(8)
             
             Divider()
             
@@ -137,19 +158,29 @@ struct TodoSidebarView: View {
         }
     }
     
-    // MARK: - 待办事项列表组件
+    // MARK: - 待办事项列表组件 (分类同步与分组呈现)
     
     @ViewBuilder
     private var remindersContentView: some View {
         if !eventManager.hasReminderAccess {
-            permissionGuideView(typeTitle: state.L("Reminders"))
+            permissionGuideView(
+                isCalendar: false,
+                title: state.L("Reminders"),
+                isDenied: eventManager.isReminderDenied
+            )
         } else {
-            let filteredList = eventManager.reminders.filter { reminder in
+            let baseList = eventManager.reminders.filter { reminder in
                 guard filterCurrentDocOnly else { return true }
                 guard !currentDocTitle.isEmpty else { return true }
                 let inNotes = reminder.notes?.localizedCaseInsensitiveContains(currentDocTitle) ?? false
                 let inTitle = reminder.title?.localizedCaseInsensitiveContains(currentDocTitle) ?? false
                 return inNotes || inTitle
+            }
+            
+            // 如果用户选择了特定分类列表，进行精准切片
+            let filteredList = baseList.filter { reminder in
+                guard selectedReminderCalendarID != "ALL" else { return true }
+                return reminder.calendar?.calendarIdentifier == selectedReminderCalendarID
             }
             
             if filteredList.isEmpty {
@@ -172,27 +203,69 @@ struct TodoSidebarView: View {
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
+                // 按分类列表组织 Grouped Sections，与 macOS 原生提醒保持完全同构
+                let calendarsWithItems = eventManager.availableReminderCalendars().filter { cal in
+                    filteredList.contains(where: { $0.calendar?.calendarIdentifier == cal.calendarIdentifier })
+                }
+                
                 List {
-                    ForEach(filteredList, id: \.calendarItemIdentifier) { reminder in
-                        ReminderRowView(
-                            reminder: reminder,
-                            currentDocTitle: currentDocTitle,
-                            onToggle: {
-                                Task {
-                                    try? await eventManager.toggleReminderCompletion(reminder)
-                                }
-                            },
-                            onDelete: {
-                                Task {
-                                    try? await eventManager.deleteReminder(reminder)
+                    ForEach(calendarsWithItems, id: \.calendarIdentifier) { cal in
+                        let items = filteredList.filter { $0.calendar?.calendarIdentifier == cal.calendarIdentifier }
+                        if !items.isEmpty {
+                            Section(header: reminderSectionHeader(cal: cal, count: items.count)) {
+                                ForEach(items, id: \.calendarItemIdentifier) { reminder in
+                                    ReminderRowView(
+                                        reminder: reminder,
+                                        currentDocTitle: currentDocTitle,
+                                        onToggle: {
+                                            Task {
+                                                try? await eventManager.toggleReminderCompletion(reminder)
+                                            }
+                                        },
+                                        onDelete: {
+                                            Task {
+                                                try? await eventManager.deleteReminder(reminder)
+                                            }
+                                        }
+                                    )
                                 }
                             }
-                        )
+                        }
                     }
                 }
-                .listStyle(.plain)
+                .listStyle(.sidebar)
             }
         }
+    }
+    
+    @ViewBuilder
+    private func reminderSectionHeader(cal: EKCalendar, count: Int) -> some View {
+        HStack(spacing: 6) {
+            Circle()
+                .fill(Color(nsColor: cal.color))
+                .frame(width: 8, height: 8)
+            
+            Text(cal.title)
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundColor(.primary)
+            
+            if cal.title == "SimPleview阅读" {
+                Text("App专属")
+                    .font(.system(size: 9))
+                    .padding(.horizontal, 4)
+                    .padding(.vertical, 1)
+                    .background(Color.accentColor.opacity(0.12))
+                    .foregroundColor(.accentColor)
+                    .cornerRadius(4)
+            }
+            
+            Spacer()
+            
+            Text("\(count)")
+                .font(.system(size: 10))
+                .foregroundColor(.secondary)
+        }
+        .padding(.vertical, 2)
     }
     
     // MARK: - 日程安排列表组件
@@ -200,7 +273,11 @@ struct TodoSidebarView: View {
     @ViewBuilder
     private var scheduleContentView: some View {
         if !eventManager.hasCalendarAccess {
-            permissionGuideView(typeTitle: state.L("Schedule"))
+            permissionGuideView(
+                isCalendar: true,
+                title: state.L("Schedule"),
+                isDenied: eventManager.isCalendarDenied
+            )
         } else {
             let filteredEvents = eventManager.events.filter { event in
                 guard filterCurrentDocOnly else { return true }
@@ -248,48 +325,89 @@ struct TodoSidebarView: View {
         }
     }
     
-    // MARK: - 权限缺省与引导视图
+    // MARK: - 权限缺省与指引视图 (支持一键授权与系统设置深层唤醒)
     
     @ViewBuilder
-    private func permissionGuideView(typeTitle: String) -> some View {
+    private func permissionGuideView(isCalendar: Bool, title: String, isDenied: Bool) -> some View {
         VStack(spacing: 12) {
             Spacer()
-            Image(systemName: "calendar.badge.exclamationmark")
+            Image(systemName: isDenied ? "exclamationmark.triangle.fill" : "calendar.badge.exclamationmark")
                 .font(.system(size: 36))
-                .foregroundColor(.orange)
+                .foregroundColor(isDenied ? .red : .orange)
             
-            Text(state.L("Permission Required"))
+            Text(isDenied ? "权限未开启或已被拒绝" : state.L("Permission Required"))
                 .font(.headline)
                 .multilineTextAlignment(.center)
                 .padding(.horizontal, 16)
             
-            Text("SimPleview 需要访问您的系统\(typeTitle)，以直接与 macOS 原生 App 保持双向同步。")
+            Text(isDenied
+                 ? "macOS 系统已限制访问\(title)。请在『系统设置 > 隐私与安全性 > \(isCalendar ? "日历" : "提醒事项")』中允许 SimPleview。"
+                 : "SimPleview 需要访问您的系统\(title)，以实现与 macOS 原生 App 的双向实时同步。")
                 .font(.caption)
                 .foregroundColor(.secondary)
                 .multilineTextAlignment(.center)
                 .padding(.horizontal, 20)
             
-            Button(action: {
-                Task {
-                    await eventManager.requestAllAccess()
-                }
-            }) {
-                Text(state.L("Authorize Reminders & Calendar"))
+            if isDenied {
+                // 若已被拒绝，提供直达 macOS 系统设置的动作
+                Button(action: {
+                    if isCalendar {
+                        eventManager.openCalendarPrivacySettings()
+                    } else {
+                        eventManager.openReminderPrivacySettings()
+                    }
+                }) {
+                    HStack(spacing: 4) {
+                        Image(systemName: "gearshape.fill")
+                        Text(state.L("Open System Settings"))
+                    }
                     .font(.caption.weight(.medium))
-            }
-            .buttonStyle(.borderedProminent)
-            .controlSize(.regular)
-            
-            Button(action: {
-                if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Reminders") {
-                    NSWorkspace.shared.open(url)
                 }
-            }) {
-                Text(state.L("Open System Settings"))
+                .buttonStyle(.borderedProminent)
+                .controlSize(.regular)
+                
+                Button(action: {
+                    eventManager.resetStoreAndAuth()
+                }) {
+                    HStack(spacing: 4) {
+                        Image(systemName: "arrow.triangle.2.circlepath")
+                        Text(state.L("Check Again"))
+                    }
                     .font(.caption2)
-                    .foregroundColor(.secondary)
+                    .foregroundColor(.accentColor)
+                }
+                .buttonStyle(.plain)
+                .padding(.top, 4)
+            } else {
+                // 尚未做过决定时，执行原生权限请求
+                Button(action: {
+                    Task {
+                        if isCalendar {
+                            await eventManager.requestCalendarAccess()
+                        } else {
+                            await eventManager.requestReminderAccess()
+                        }
+                    }
+                }) {
+                    Text("\(state.L("Authorize Access")) \(title)")
+                        .font(.caption.weight(.medium))
+                }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.regular)
+                
+                Button(action: {
+                    if isCalendar {
+                        eventManager.openCalendarPrivacySettings()
+                    } else {
+                        eventManager.openReminderPrivacySettings()
+                    }
+                }) {
+                    Text(state.L("Open System Settings"))
+                        .font(.caption2)
+                        .foregroundColor(.secondary)
+                }
+                .buttonStyle(.plain)
             }
-            .buttonStyle(.plain)
             
             Spacer()
         }
@@ -324,23 +442,23 @@ struct ReminderRowView: View {
             // 圆圈勾选框
             Button(action: onToggle) {
                 Image(systemName: reminder.isCompleted ? "checkmark.circle.fill" : "circle")
-                    .font(.system(size: 16))
+                    .font(.system(size: 15))
                     .foregroundColor(reminder.isCompleted ? .secondary : .accentColor)
             }
             .buttonStyle(.plain)
             .padding(.top, 2)
             
             // 文本与元数据
-            VStack(alignment: .leading, spacing: 4) {
+            VStack(alignment: .leading, spacing: 3) {
                 Text(reminder.title ?? "未命名待办")
-                    .font(.system(size: 13, weight: .medium))
+                    .font(.system(size: 12, weight: .medium))
                     .strikethrough(reminder.isCompleted)
                     .foregroundColor(reminder.isCompleted ? .secondary : .primary)
                     .lineLimit(2)
                 
                 if let notes = reminder.notes, !notes.isEmpty {
                     Text(notes)
-                        .font(.system(size: 11))
+                        .font(.system(size: 10))
                         .foregroundColor(.secondary)
                         .lineLimit(1)
                 }
@@ -352,13 +470,13 @@ struct ReminderRowView: View {
                             Image(systemName: "clock")
                                 .font(.system(size: 9))
                             Text(formatDueDate(due))
-                                .font(.system(size: 10))
+                                .font(.system(size: 9))
                         }
                         .foregroundColor(isOverdue ? .red : .secondary)
                         .padding(.horizontal, 4)
-                        .padding(.vertical, 2)
+                        .padding(.vertical, 1)
                         .background(isOverdue ? Color.red.opacity(0.1) : Color.primary.opacity(0.04))
-                        .cornerRadius(4)
+                        .cornerRadius(3)
                     }
                     
                     // 当前文献锚定标签
@@ -371,9 +489,9 @@ struct ReminderRowView: View {
                         }
                         .foregroundColor(.accentColor)
                         .padding(.horizontal, 4)
-                        .padding(.vertical, 2)
+                        .padding(.vertical, 1)
                         .background(Color.accentColor.opacity(0.08))
-                        .cornerRadius(4)
+                        .cornerRadius(3)
                     }
                 }
             }
@@ -391,7 +509,7 @@ struct ReminderRowView: View {
                 .help("删除此事项")
             }
         }
-        .padding(.vertical, 4)
+        .padding(.vertical, 3)
         .onHover { isHovered = $0 }
         .contextMenu {
             Button(action: onToggle) {
@@ -447,7 +565,7 @@ struct EventRowView: View {
             
             VStack(alignment: .leading, spacing: 3) {
                 Text(event.title ?? "未命名日程")
-                    .font(.system(size: 13, weight: .medium))
+                    .font(.system(size: 12, weight: .medium))
                     .foregroundColor(.primary)
                     .lineLimit(2)
                 
@@ -474,7 +592,7 @@ struct EventRowView: View {
                     .padding(.horizontal, 4)
                     .padding(.vertical, 1)
                     .background(Color.accentColor.opacity(0.08))
-                    .cornerRadius(4)
+                    .cornerRadius(3)
                 }
             }
             
@@ -520,7 +638,7 @@ struct EventRowView: View {
     }
 }
 
-// MARK: - 新建待办事项表单弹窗
+// MARK: - 新建待办事项表单弹窗 (默认归档至『SimPleview阅读』)
 
 struct AddReminderSheetView: View {
     @ObservedObject var state: AppState
@@ -539,13 +657,24 @@ struct AddReminderSheetView: View {
         self._title = State(initialValue: defaultTitle)
         self._notes = State(initialValue: defaultNotes)
         self.eventManager = eventManager
-        self._selectedCalendar = State(initialValue: eventManager.defaultReminderCalendar())
+        // 核心优化：默认选中或创建『SimPleview阅读』分类列表
+        let readingCal = eventManager.getOrCreateSimPleviewCalendar() ?? eventManager.defaultReminderCalendar()
+        self._selectedCalendar = State(initialValue: readingCal)
     }
     
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
-            Text(state.L("Add Task"))
-                .font(.headline)
+            HStack {
+                Text(state.L("Add Task"))
+                    .font(.headline)
+                Spacer()
+                if let cal = selectedCalendar {
+                    HStack(spacing: 4) {
+                        Circle().fill(Color(nsColor: cal.color)).frame(width: 8, height: 8)
+                        Text(cal.title).font(.caption).foregroundColor(.secondary)
+                    }
+                }
+            }
             
             Divider()
             
@@ -567,12 +696,15 @@ struct AddReminderSheetView: View {
                     .labelsHidden()
             }
             
-            // 分类列表选择
+            // 分类列表选择 (默认优先指向『SimPleview阅读』)
             let calendars = eventManager.availableReminderCalendars()
-            if calendars.count > 1 {
+            if !calendars.isEmpty {
                 Picker(state.L("List"), selection: $selectedCalendar) {
                     ForEach(calendars, id: \.calendarIdentifier) { cal in
-                        Text(cal.title).tag(cal as EKCalendar?)
+                        HStack {
+                            Text(cal.title)
+                        }
+                        .tag(cal as EKCalendar?)
                     }
                 }
                 .pickerStyle(.menu)
