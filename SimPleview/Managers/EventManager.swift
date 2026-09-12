@@ -32,7 +32,7 @@ final class EventManager: ObservableObject {
     // 权限便捷判定
     var hasReminderAccess: Bool {
         if #available(macOS 14.0, *) {
-            return reminderAuthStatus == .fullAccess || reminderAuthStatus == .authorized
+            return reminderAuthStatus == .fullAccess
         } else {
             return reminderAuthStatus == .authorized
         }
@@ -40,7 +40,7 @@ final class EventManager: ObservableObject {
     
     var hasCalendarAccess: Bool {
         if #available(macOS 14.0, *) {
-            return calendarAuthStatus == .fullAccess || calendarAuthStatus == .authorized || calendarAuthStatus == .writeOnly
+            return calendarAuthStatus == .fullAccess || calendarAuthStatus == .writeOnly
         } else {
             return calendarAuthStatus == .authorized
         }
@@ -136,9 +136,9 @@ final class EventManager: ObservableObject {
                 }
                 if !granted {
                     do {
-                        granted = try await eventStore.requestAccess(to: .event)
+                        granted = try await eventStore.requestWriteOnlyAccessToEvents()
                     } catch {
-                        print("[EventManager] fallback requestAccess(to: .event) error: \(error)")
+                        print("[EventManager] fallback requestWriteOnlyAccessToEvents error: \(error)")
                     }
                 }
             } else {
@@ -387,7 +387,9 @@ final class EventManager: ObservableObject {
         endDate: Date,
         isAllDay: Bool = false,
         notes: String? = nil,
-        calendar: EKCalendar? = nil
+        calendar: EKCalendar? = nil,
+        recurrence: EventRecurrenceOption = .none,
+        alert: EventAlertOption = .none
     ) async throws -> EKEvent {
         guard hasCalendarAccess else {
             throw NSError(domain: "EventManager", code: 401, userInfo: [NSLocalizedDescriptionKey: "未获得日历访问权限"])
@@ -401,12 +403,20 @@ final class EventManager: ObservableObject {
         event.notes = notes
         event.calendar = calendar ?? getOrCreateSimPleviewEventCalendar() ?? defaultEventCalendar()
         
+        if let rule = recurrence.toRecurrenceRule() {
+            event.recurrenceRules = [rule]
+        }
+        
+        if let offset = alert.relativeOffset {
+            event.alarms = [EKAlarm(relativeOffset: offset)]
+        }
+        
         try eventStore.save(event, span: .thisEvent, commit: true)
         await fetchEvents()
         return event
     }
     
-    /// 修改并保存已有日程信息
+    /// 修改并保存已有日程信息 (支持重复日程与提前提醒设置)
     func updateEvent(
         _ event: EKEvent,
         title: String,
@@ -414,7 +424,9 @@ final class EventManager: ObservableObject {
         endDate: Date,
         isAllDay: Bool,
         notes: String?,
-        calendar: EKCalendar?
+        calendar: EKCalendar?,
+        recurrence: EventRecurrenceOption = .none,
+        alert: EventAlertOption = .none
     ) async throws {
         guard hasCalendarAccess else {
             throw NSError(domain: "EventManager", code: 401, userInfo: [NSLocalizedDescriptionKey: "未获得日历访问权限"])
@@ -429,6 +441,20 @@ final class EventManager: ObservableObject {
             event.calendar = cal
         }
         
+        // 更新重复规则
+        if let rule = recurrence.toRecurrenceRule() {
+            event.recurrenceRules = [rule]
+        } else {
+            event.recurrenceRules = nil
+        }
+        
+        // 更新提醒
+        if let offset = alert.relativeOffset {
+            event.alarms = [EKAlarm(relativeOffset: offset)]
+        } else {
+            event.alarms = nil
+        }
+        
         try eventStore.save(event, span: .thisEvent, commit: true)
         await fetchEvents()
     }
@@ -438,5 +464,120 @@ final class EventManager: ObservableObject {
         guard hasCalendarAccess else { return }
         try eventStore.remove(event, span: .thisEvent, commit: true)
         await fetchEvents()
+    }
+}
+
+// MARK: - 日程高级选项：重复与提醒类型模型 (完全同构于 macOS 原生日历)
+
+/// 日程重复周期类型 (完全同构于 macOS 原生日历)
+enum EventRecurrenceOption: String, CaseIterable, Identifiable {
+    case none = "none"
+    case daily = "daily"
+    case weekly = "weekly"
+    case biweekly = "biweekly"
+    case monthly = "monthly"
+    case yearly = "yearly"
+    
+    var id: String { rawValue }
+    
+    var localizedTitle: String {
+        switch self {
+        case .none: return "无"
+        case .daily: return "每天"
+        case .weekly: return "每周"
+        case .biweekly: return "每两周"
+        case .monthly: return "每月"
+        case .yearly: return "每年"
+        }
+    }
+    
+    static func from(rule: EKRecurrenceRule?) -> EventRecurrenceOption {
+        guard let rule else { return .none }
+        switch rule.frequency {
+        case .daily:
+            return .daily
+        case .weekly:
+            return rule.interval == 2 ? .biweekly : .weekly
+        case .monthly:
+            return .monthly
+        case .yearly:
+            return .yearly
+        @unknown default:
+            return .none
+        }
+    }
+    
+    func toRecurrenceRule() -> EKRecurrenceRule? {
+        switch self {
+        case .none:
+            return nil
+        case .daily:
+            return EKRecurrenceRule(recurrenceWith: .daily, interval: 1, end: nil)
+        case .weekly:
+            return EKRecurrenceRule(recurrenceWith: .weekly, interval: 1, end: nil)
+        case .biweekly:
+            return EKRecurrenceRule(recurrenceWith: .weekly, interval: 2, end: nil)
+        case .monthly:
+            return EKRecurrenceRule(recurrenceWith: .monthly, interval: 1, end: nil)
+        case .yearly:
+            return EKRecurrenceRule(recurrenceWith: .yearly, interval: 1, end: nil)
+        }
+    }
+}
+
+/// 日程提醒偏置类型 (完全同构于 macOS 原生日历)
+enum EventAlertOption: String, CaseIterable, Identifiable {
+    case none = "none"
+    case atTime = "atTime"
+    case before5m = "before5m"
+    case before15m = "before15m"
+    case before30m = "before30m"
+    case before1h = "before1h"
+    case before2h = "before2h"
+    case before1d = "before1d"
+    case before2d = "before2d"
+    
+    var id: String { rawValue }
+    
+    var relativeOffset: TimeInterval? {
+        switch self {
+        case .none: return nil
+        case .atTime: return 0
+        case .before5m: return -300
+        case .before15m: return -900
+        case .before30m: return -1800
+        case .before1h: return -3600
+        case .before2h: return -7200
+        case .before1d: return -86400
+        case .before2d: return -172800
+        }
+    }
+    
+    var localizedTitle: String {
+        switch self {
+        case .none: return "无"
+        case .atTime: return "日程发生时"
+        case .before5m: return "5 分钟前"
+        case .before15m: return "15 分钟前"
+        case .before30m: return "30 分钟前"
+        case .before1h: return "1 小时前"
+        case .before2h: return "2 小时前"
+        case .before1d: return "1 天前"
+        case .before2d: return "2 天前"
+        }
+    }
+    
+    static func from(alarm: EKAlarm?) -> EventAlertOption {
+        guard let alarm else { return .none }
+        let offset = alarm.relativeOffset
+        if abs(offset) < 1 { return .atTime }
+        if abs(offset - (-300)) < 10 { return .before5m }
+        if abs(offset - (-900)) < 10 { return .before15m }
+        if abs(offset - (-1800)) < 10 { return .before30m }
+        if abs(offset - (-3600)) < 10 { return .before1h }
+        if abs(offset - (-7200)) < 10 { return .before2h }
+        if abs(offset - (-86400)) < 10 { return .before1d }
+        if abs(offset - (-172800)) < 10 { return .before2d }
+        return .atTime
     }
 }

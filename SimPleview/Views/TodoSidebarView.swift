@@ -1155,6 +1155,8 @@ struct EditEventPopoverView: View {
     @State private var startDate: Date
     @State private var endDate: Date
     @State private var selectedCalendar: EKCalendar?
+    @State private var recurrence: EventRecurrenceOption
+    @State private var alert: EventAlertOption
     @State private var notes: String
     @State private var isSaving: Bool = false
     @State private var errorMessage: String? = nil
@@ -1170,6 +1172,8 @@ struct EditEventPopoverView: View {
         self._startDate = State(initialValue: event.startDate)
         self._endDate = State(initialValue: event.endDate)
         self._selectedCalendar = State(initialValue: event.calendar)
+        self._recurrence = State(initialValue: EventRecurrenceOption.from(rule: event.recurrenceRules?.first))
+        self._alert = State(initialValue: EventAlertOption.from(alarm: event.alarms?.first))
         self._notes = State(initialValue: event.notes ?? "")
     }
     
@@ -1222,6 +1226,23 @@ struct EditEventPopoverView: View {
                 }
             }
             
+            // 重复日程选项 (与 macOS 原生一致)
+            HStack {
+                Text(state.L("Repeat"))
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+                    .frame(width: 50, alignment: .leading)
+                
+                Picker("", selection: $recurrence) {
+                    ForEach(EventRecurrenceOption.allCases) { opt in
+                        Text(opt.localizedTitle).tag(opt)
+                    }
+                }
+                .labelsHidden()
+                .pickerStyle(.menu)
+                Spacer()
+            }
+            
             // 日历分类切换
             let calendars = eventManager.availableEventCalendars()
             if !calendars.isEmpty {
@@ -1244,6 +1265,23 @@ struct EditEventPopoverView: View {
                     .pickerStyle(.menu)
                     Spacer()
                 }
+            }
+            
+            // 提醒选项 (与 macOS 原生一致)
+            HStack {
+                Text(state.L("Alert"))
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+                    .frame(width: 50, alignment: .leading)
+                
+                Picker("", selection: $alert) {
+                    ForEach(EventAlertOption.allCases) { opt in
+                        Text(opt.localizedTitle).tag(opt)
+                    }
+                }
+                .labelsHidden()
+                .pickerStyle(.menu)
+                Spacer()
             }
             
             // 备注信息
@@ -1271,7 +1309,7 @@ struct EditEventPopoverView: View {
             HStack {
                 Button(role: .destructive, action: {
                     Task {
-                        try? await eventManager.deleteEvent(event)
+                        _ = try? await eventManager.deleteEvent(event)
                         onDismiss()
                     }
                 }) {
@@ -1305,7 +1343,9 @@ struct EditEventPopoverView: View {
                                 endDate: finalEnd,
                                 isAllDay: isAllDay,
                                 notes: notes.isEmpty ? nil : notes,
-                                calendar: selectedCalendar
+                                calendar: selectedCalendar,
+                                recurrence: recurrence,
+                                alert: alert
                             )
                             onDismiss()
                         } catch {
@@ -1418,7 +1458,7 @@ struct AddReminderSheetView: View {
                 
                 Button("添加至提醒事项") {
                     Task {
-                        try? await eventManager.createReminder(
+                        _ = try? await eventManager.createReminder(
                             title: title,
                             dueDate: hasDueDate ? dueDate : nil,
                             notes: notes.isEmpty ? nil : notes,
@@ -1453,6 +1493,8 @@ struct AddEventSheetView: View {
     @State private var startDate: Date
     @State private var endDate: Date
     @State private var selectedCalendar: EKCalendar?
+    @State private var recurrence: EventRecurrenceOption = .none
+    @State private var alert: EventAlertOption = .none
     
     let eventManager: EventManager
     let initialStartDate: Date?
@@ -1527,19 +1569,62 @@ struct AddEventSheetView: View {
                 }
             }
             
+            // 重复日程
+            HStack {
+                Text(state.L("Repeat"))
+                    .font(.caption2)
+                    .foregroundColor(.secondary)
+                    .frame(width: 50, alignment: .leading)
+                
+                Picker("", selection: $recurrence) {
+                    ForEach(EventRecurrenceOption.allCases) { opt in
+                        Text(opt.localizedTitle).tag(opt)
+                    }
+                }
+                .labelsHidden()
+                .pickerStyle(.menu)
+                Spacer()
+            }
+            
             // 所属日历分类选择器：默认『SimPleview阅读』，用户可自由改动分类
             let calendars = eventManager.availableEventCalendars()
             if !calendars.isEmpty {
-                Picker(state.L("Calendar"), selection: $selectedCalendar) {
-                    ForEach(calendars, id: \.calendarIdentifier) { cal in
-                        HStack {
-                            Circle().fill(Color(nsColor: cal.color)).frame(width: 6, height: 6)
-                            Text(cal.title)
+                HStack {
+                    Text(state.L("Calendar"))
+                        .font(.caption2)
+                        .foregroundColor(.secondary)
+                        .frame(width: 50, alignment: .leading)
+                    
+                    Picker("", selection: $selectedCalendar) {
+                        ForEach(calendars, id: \.calendarIdentifier) { cal in
+                            HStack {
+                                Circle().fill(Color(nsColor: cal.color)).frame(width: 6, height: 6)
+                                Text(cal.title)
+                            }
+                            .tag(cal as EKCalendar?)
                         }
-                        .tag(cal as EKCalendar?)
+                    }
+                    .labelsHidden()
+                    .pickerStyle(.menu)
+                    Spacer()
+                }
+            }
+            
+            // 提醒
+            HStack {
+                Text(state.L("Alert"))
+                    .font(.caption2)
+                    .foregroundColor(.secondary)
+                    .frame(width: 50, alignment: .leading)
+                
+                Picker("", selection: $alert) {
+                    ForEach(EventAlertOption.allCases) { opt in
+                        Text(opt.localizedTitle).tag(opt)
                     }
                 }
+                .labelsHidden()
                 .pickerStyle(.menu)
+                Spacer()
             }
             
             VStack(alignment: .leading, spacing: 4) {
@@ -1562,13 +1647,15 @@ struct AddEventSheetView: View {
                 
                 Button("添加至日历") {
                     Task {
-                        try? await eventManager.createEvent(
+                        _ = try? await eventManager.createEvent(
                             title: title,
                             startDate: startDate,
                             endDate: endDate,
                             isAllDay: isAllDay,
                             notes: notes.isEmpty ? nil : notes,
-                            calendar: selectedCalendar
+                            calendar: selectedCalendar,
+                            recurrence: recurrence,
+                            alert: alert
                         )
                         dismiss()
                     }
