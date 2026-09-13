@@ -15,6 +15,7 @@ struct GeneralSettingsView: View {
     @AppStorage("externalBrowser") var externalBrowser: ExternalBrowser = .defaultBrowser
     @AppStorage("customBrowserPath") var customBrowserPath: String = ""
     @AppStorage("enableReadingRecord") var enableReadingRecord: Bool = false
+    @AppStorage("enableTodo") var enableTodo: Bool = true
     
     @State private var selectedImageFormat: String = "All"
     
@@ -118,6 +119,12 @@ struct GeneralSettingsView: View {
             }
             
             Section {
+                Toggle(isOn: $enableTodo) {
+                    Text(LS("Enable Todo"))
+                        .fixedSize(horizontal: true, vertical: false)
+                }
+                .padding(.vertical, 4)
+
                 // [设置项 5：阅读记录总开关]
                 Toggle(isOn: $enableReadingRecord) {
                     Text(LS("Enable Reading Record"))

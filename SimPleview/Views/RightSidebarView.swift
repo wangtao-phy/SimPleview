@@ -11,6 +11,15 @@ struct RightSidebarView: View {
     
     // 读取 UserDefaults 里的开关：用户是否开启了“阅读统计”功能
     @AppStorage("enableReadingRecord") var enableReadingRecord = false
+    @AppStorage("enableTodo") var enableTodo = true
+
+    /// 关闭当前功能时回到标注；首次挂载也检查，避免隐藏标签仍被选中。
+    private func validateSelection() {
+        if (uiState.rightSidebarTab == 2 && !enableTodo) ||
+           (uiState.rightSidebarTab == 3 && !enableReadingRecord) {
+            uiState.rightSidebarTab = 0
+        }
+    }
     
     var body: some View {
         VStack(spacing: 0) {
@@ -18,7 +27,9 @@ struct RightSidebarView: View {
             Picker("", selection: $uiState.rightSidebarTab) {
                 Text(state.L("Annotations")).tag(0)
                 Text(state.L("Search")).tag(1)
-                Text(state.L("Todo")).tag(2)
+                if enableTodo {
+                    Text(state.L("Todo")).tag(2)
+                }
                 
                 // 动态选项：只有用户在设置里开启了这功能，才显示这个标签
                 if enableReadingRecord {
@@ -34,24 +45,14 @@ struct RightSidebarView: View {
             switch uiState.rightSidebarTab {
             case 0: AnnotationSidebarView(state: state)
             case 1: SearchSidebarView(state: state, uiState: uiState, searchManager: state.searchManager)
-            case 2: TodoSidebarView(state: state, uiState: uiState)
-            case 3:
-                if enableReadingRecord {
-                    ReadingRecordView(state: state)
-                } else {
-                    EmptyView()
-                }
-            default: EmptyView()
+            case 2 where enableTodo: TodoSidebarView(state: state, uiState: uiState)
+            case 3 where enableReadingRecord: ReadingRecordView(state: state)
+            default: AnnotationSidebarView(state: state)
             }
         }
-        // [防御性编程] 
-        // 假设用户现在正停留在“统计(Record)”标签，然后他打开设置，把这功能关了。
-        // 如果我们不处理，这页面就会变成一片空白卡住。所以我们监听开关，如果关了，强制跳回第一个标签。
-        .onChange(of: enableReadingRecord) { _, newValue in
-            if !newValue && uiState.rightSidebarTab == 3 {
-                uiState.rightSidebarTab = 0
-            }
-        }
+        .onAppear(perform: validateSelection)
+        .onChange(of: enableTodo) { _, _ in validateSelection() }
+        .onChange(of: enableReadingRecord) { _, _ in validateSelection() }
     }
 }
 

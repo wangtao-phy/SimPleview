@@ -30,16 +30,54 @@ extension CustomPDFView {
         if newSuperview == nil {
             scanCache.removeAll()
             cleanupMenuObservers()
-            if let renderObserver { NotificationCenter.default.removeObserver(renderObserver) }
-            renderObserver = nil
-        } else if renderObserver == nil {
-            renderObserver = NotificationCenter.default.addObserver(forName: .PDFViewVisiblePagesChanged,
-                object: self, queue: .main) { [weak self] _ in
-                MainActor.assumeIsolated { self?.publishRenderSnapshot() }
-            }
+            removeRenderObservers()
         }
     }
-    
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        if window == nil {
+            scanCache.removeAll()
+            removeRenderObservers()
+        } else {
+            publishRenderSnapshot()
+            scheduleRenderSnapshot()
+        }
+    }
+
+    private func removeRenderObservers() {
+        for observer in renderObservers { NotificationCenter.default.removeObserver(observer) }
+        renderObservers.removeAll()
+        observedRenderClipView = nil
+    }
+
+    /// PDFKit 可只更新内部滚动视图而不调用外层 layout/needsDisplay。直接观察
+    /// 原生视口，加上页码/缩放通知，避免实际页面已变而绘制快照还停在旧页。
+    /// 注册在窗口挂接之后；文档替换造成内部视口变化时重新绑定，关闭时移除。
+    func observeRenderViewport() {
+        guard window != nil else { return }
+        let scroll = documentView?.enclosingScrollView ?? subviews.compactMap { $0 as? NSScrollView }.first
+        let clip = scroll?.contentView
+        guard renderObservers.isEmpty || observedRenderClipView !== clip else { return }
+        removeRenderObservers()
+        observedRenderClipView = clip
+        let center = NotificationCenter.default
+        for name: Notification.Name in [.PDFViewDocumentChanged, .PDFViewPageChanged, .PDFViewVisiblePagesChanged, .PDFViewScaleChanged] {
+            renderObservers.append(center.addObserver(forName: name, object: self, queue: .main) { [weak self] _ in
+                MainActor.assumeIsolated {
+                    if name == .PDFViewDocumentChanged { self?.scanCache.removeAll() }
+                    self?.scheduleRenderSnapshot()
+                }
+            })
+        }
+        if let clip {
+            clip.postsBoundsChangedNotifications = true
+            renderObservers.append(center.addObserver(forName: NSView.boundsDidChangeNotification, object: clip, queue: .main) { [weak self] _ in
+                MainActor.assumeIsolated { self?.scheduleRenderSnapshot() }
+            })
+        }
+    }
+
     // MARK: - Mouse Tracking (Hover)
     
     override func updateTrackingAreas() {
@@ -83,7 +121,7 @@ extension CustomPDFView {
         // 本次调用中的原生手绘，半透明笔迹会加深，边缘也会出现缓存重影。
         let scan = snapshot.pages[ObjectIdentifier(page)]?.scan
         let scale = max(hypot(context.ctm.a, context.ctm.b), hypot(context.ctm.c, context.ctm.d))
-        // 只服务屏幕瓦片的位图上下文；PDF/打印上下文保持原生绘制。
+        // 屏幕只复用已就绪图像，未命中不等待后台整页绘制；PDF/打印保持原生绘制。
         if context.width > 0, context.height > 0, let scan,
            let image = scanCache.image(for: scan, scale: scale) {
             context.saveGState()

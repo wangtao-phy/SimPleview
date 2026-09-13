@@ -28,6 +28,20 @@ nonisolated struct PDFRenderSnapshot: @unchecked Sendable {
 }
 
 extension CustomPDFView {
+    /// PDFKit 的窗口/滚动通知可能先于内部可见页更新。合并到下一轮主队列
+    /// 再取 visiblePages，避免把尚未完成布局的空列表当成最终视口。
+    /// 每个视图最多排队一次，弱引用不延长窗口寿命；手绘仍同步发布快照。
+    func scheduleRenderSnapshot() {
+        guard window != nil, !isRenderSnapshotScheduled else { return }
+        isRenderSnapshotScheduled = true
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            self.isRenderSnapshotScheduled = false
+            guard self.window != nil else { return }
+            self.publishRenderSnapshot()
+        }
+    }
+
     /// 只在主执行器收集可见页。锁仅用于一次值替换，PDFKit/绘图调用均在锁外，
     /// 避免后台瓦片等待主线程或持锁回调造成死锁。
     func publishRenderSnapshot() {
@@ -35,6 +49,7 @@ extension CustomPDFView {
         guard !isPublishingRenderSnapshot else { return }
         isPublishingRenderSnapshot = true
         defer { isPublishingRenderSnapshot = false }
+        observeRenderViewport()
         var snapshot = PDFRenderSnapshot()
         snapshot.background = _threadSafePageBackgroundColor.rawValue
         var pages = visiblePages
@@ -119,13 +134,18 @@ extension CustomPDFView {
                                                            vectorInkIDs: vectorInkIDs)
             // 仅优化没有普通标注的扫描页。标准标注仍交给 PDFKit，避免缓存
             // 遮挡选择、高亮或外部软件创建的外观；手绘草稿在缓存之上照常矢量绘制。
-            if displayBox == .cropBox, page.annotations.isEmpty,
-               let reference = page.pageRef, ScanPage.containsLargeImage(reference) {
-                snapshot.pages[ObjectIdentifier(page)]?.scan = ScanPage(reference: reference,
-                    transform: page.transform(for: .cropBox), bounds: page.bounds(for: .cropBox))
-            }
+            if displayBox == .cropBox { snapshot.pages[ObjectIdentifier(page)]?.scan = ScanPage.capture(page) }
         }
         renderSnapshot.withLock { [snapshot] in $0 = snapshot }
+        // 只在实际显示时预备当前页及紧邻的一页；不因打开长文档而生成整本图片。
+        // 瓦片未命中仍立即走 PDFKit，后台图像就绪后供后续瓦片/回滚复用。
+        if window != nil, displayBox == .cropBox, let document {
+            var warming = visiblePages
+            let indices = warming.map { document.index(for: $0) }.filter { $0 != NSNotFound }
+            if let first = indices.min(), first > 0, let page = document.page(at: first - 1) { warming.append(page) }
+            if let last = indices.max(), last + 1 < document.pageCount, let page = document.page(at: last + 1) { warming.append(page) }
+            scanCache.update(pages: warming, scale: scaleFactor * (window?.backingScaleFactor ?? 2))
+        }
     }
 
     /// SF Symbol 和 NSGraphicsContext 只在主线程使用，后台瓦片仅取得不可变

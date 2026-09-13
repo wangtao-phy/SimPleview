@@ -2,20 +2,13 @@ import Foundation
 @preconcurrency import EventKit
 import Combine
 import AppKit
+import os
 
-/// [理论物理与系统架构：宏观时间投影引擎 EventManager]
-/// 该管理器作为 SimPleview 内部状态流形向 macOS 系统宏观时间流形的规范联络 (Gauge Connection)。
-/// 它封装了底层 `EventKit.EKEventStore`，实现：
-/// 1. 待办事项 (Reminders)：离散投影本征态的检测、完成度跃迁 (Completion) 与持久化落盘。
-///    - 自动创建并默认挂载于专属的『SimPleview阅读』分类列表。
-/// 2. 日程安排 (Events)：紧致时间区间的截取、世界线规划与日历归档。
-/// 3. 实时双向退相干保护：通过监听 `.EKEventStoreChanged` 维持与系统原生“提醒事项”和“日历”的完全同构。
+/// 每个待办面板拥有自己的 EventKit 存储和浏览月份，避免多窗口互相覆盖日程。
+/// 通知只触发合并刷新；面板关闭后，订阅随管理器释放。
 @MainActor
 final class EventManager: ObservableObject {
-    static let shared = EventManager()
-    
-    // 底层 EventKit 核心存储对象 (单例生命周期内保持复用，支持动态 reset 重建)
-    private(set) var eventStore = EKEventStore()
+    let eventStore: EKEventStore
     
     // 响应式状态发布
     @Published var reminderAuthStatus: EKAuthorizationStatus = .notDetermined
@@ -28,7 +21,14 @@ final class EventManager: ObservableObject {
     @Published var isLoadingEvents: Bool = false
     
     private var cancellables = Set<AnyCancellable>()
+    private var remindersNeedRefresh = false
+    private var eventStart = Calendar.current.date(byAdding: .day, value: -30, to: Date()) ?? Date()
+    private var eventEnd = Calendar.current.date(byAdding: .day, value: 60, to: Date()) ?? Date()
     
+    private func text(_ key: String) -> String {
+        L.s(key, UserDefaults.standard.string(forKey: "appLanguage").flatMap(AppLanguage.init(rawValue:)) ?? .zh)
+    }
+
     // 权限便捷判定
     var hasReminderAccess: Bool {
         if #available(macOS 14.0, *) {
@@ -40,7 +40,8 @@ final class EventManager: ObservableObject {
     
     var hasCalendarAccess: Bool {
         if #available(macOS 14.0, *) {
-            return calendarAuthStatus == .fullAccess || calendarAuthStatus == .writeOnly
+            // 只写权限不能读取日程或分类列表，不能把它当作日历已授权。
+            return calendarAuthStatus == .fullAccess
         } else {
             return calendarAuthStatus == .authorized
         }
@@ -54,34 +55,35 @@ final class EventManager: ObservableObject {
         calendarAuthStatus == .denied || calendarAuthStatus == .restricted
     }
     
-    private init() {
+    init(eventStore: EKEventStore = EKEventStore(), observesChanges: Bool = true) {
+        self.eventStore = eventStore
         updateAuthStatuses()
-        setupStoreObserver()
+        if observesChanges { setupStoreObserver() }
     }
     
     /// 刷新当前系统对提醒与日历的授权状态
     func updateAuthStatuses() {
         reminderAuthStatus = EKEventStore.authorizationStatus(for: .reminder)
         calendarAuthStatus = EKEventStore.authorizationStatus(for: .event)
+        if !hasReminderAccess { reminders = [] }
+        if !hasCalendarAccess { events = [] }
     }
     
-    /// 重置存储并重新检测权限 (用于用户在系统设置修改权限后切回)
-    func resetStoreAndAuth() {
-        eventStore.reset()
+    /// 回到应用时只重检权限，不 reset：reset 会使表单持有的日历/日程对象失效。
+    func recheckAuthorization() {
         updateAuthStatuses()
-        Task {
-            await refreshAll()
+        Task { [weak self] in
+            await self?.refreshAll()
         }
     }
     
-    /// 注册系统原生日历/提醒数据库变更通知 (实现与 macOS 原生 App 的实时双向退相干同步)
+    /// 一次保存可能连续触发多条系统通知，短暂合并，避免反复全量读取。
     private func setupStoreObserver() {
         NotificationCenter.default.publisher(for: .EKEventStoreChanged, object: eventStore)
-            .receive(on: DispatchQueue.main)
+            .debounce(for: .milliseconds(200), scheduler: DispatchQueue.main)
             .sink { [weak self] _ in
-                guard let self = self else { return }
-                Task {
-                    await self.refreshAll()
+                Task { [weak self] in
+                    await self?.refreshAll()
                 }
             }
             .store(in: &cancellables)
@@ -111,7 +113,7 @@ final class EventManager: ObservableObject {
             }
             return granted
         } catch {
-            print("[EventManager] 请求提醒事项权限失败: \(error)")
+            Logger.view.error("请求提醒事项权限失败: \(error)")
             updateAuthStatuses()
             return false
         }
@@ -127,20 +129,9 @@ final class EventManager: ObservableObject {
         }
         
         do {
-            var granted: Bool = false
+            let granted: Bool
             if #available(macOS 14.0, *) {
-                do {
-                    granted = try await eventStore.requestFullAccessToEvents()
-                } catch {
-                    print("[EventManager] requestFullAccessToEvents error: \(error)")
-                }
-                if !granted {
-                    do {
-                        granted = try await eventStore.requestWriteOnlyAccessToEvents()
-                    } catch {
-                        print("[EventManager] fallback requestWriteOnlyAccessToEvents error: \(error)")
-                    }
-                }
+                granted = try await eventStore.requestFullAccessToEvents()
             } else {
                 granted = try await eventStore.requestAccess(to: .event)
             }
@@ -150,7 +141,7 @@ final class EventManager: ObservableObject {
             }
             return granted
         } catch {
-            print("[EventManager] 请求日历权限失败: \(error)")
+            Logger.view.error("请求日历权限失败: \(error)")
             updateAuthStatuses()
             return false
         }
@@ -180,6 +171,7 @@ final class EventManager: ObservableObject {
     
     /// 全量刷新数据
     func refreshAll() async {
+        updateAuthStatuses()
         if hasReminderAccess {
             await fetchReminders()
         }
@@ -191,48 +183,42 @@ final class EventManager: ObservableObject {
     /// 从 macOS 原生数据库拉取待办事项
     func fetchReminders() async {
         guard hasReminderAccess else { return }
+        // 同一时刻只保留一次查询；查询期间的变化在结束后补读，旧结果不会覆盖新结果。
+        guard !isLoadingReminders else { remindersNeedRefresh = true; return }
         isLoadingReminders = true
         defer { isLoadingReminders = false }
-        
-        let predicate = eventStore.predicateForReminders(in: nil)
-        
-        await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
-            eventStore.fetchReminders(matching: predicate) { [weak self] list in
-                DispatchQueue.main.async {
-                    guard let self = self else {
-                        continuation.resume()
-                        return
-                    }
-                    let fetched = list ?? []
-                    self.reminders = fetched.sorted { r1, r2 in
-                        if r1.isCompleted != r2.isCompleted {
-                            return !r1.isCompleted && r2.isCompleted
+        repeat {
+            remindersNeedRefresh = false
+            let predicate = eventStore.predicateForReminders(in: nil)
+            await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+                eventStore.fetchReminders(matching: predicate) { [weak self] list in
+                    DispatchQueue.main.async {
+                        defer { continuation.resume() }
+                        guard let self, self.hasReminderAccess, let list else { return }
+                        self.reminders = list.sorted { r1, r2 in
+                            if r1.isCompleted != r2.isCompleted { return !r1.isCompleted }
+                            let d1 = r1.dueDateComponents?.date ?? Date.distantFuture
+                            let d2 = r2.dueDateComponents?.date ?? Date.distantFuture
+                            if d1 != d2 { return d1 < d2 }
+                            return r1.calendarItemIdentifier < r2.calendarItemIdentifier
                         }
-                        let d1 = r1.dueDateComponents?.date ?? Date.distantFuture
-                        let d2 = r2.dueDateComponents?.date ?? Date.distantFuture
-                        return d1 < d2
                     }
-                    continuation.resume()
                 }
             }
-        }
+        } while remindersNeedRefresh && hasReminderAccess && !Task.isCancelled
     }
-    
-    /// 从 macOS 原生数据库拉取指定时间段内的日历日程 (默认显示前后 30 天/60 天)
-    func fetchEvents(
-        from startDate: Date = Calendar.current.date(byAdding: .day, value: -30, to: Date()) ?? Date(),
-        to endDate: Date = Calendar.current.date(byAdding: .day, value: 60, to: Date()) ?? Date()
-    ) async {
-        guard hasCalendarAccess else { return }
+
+    /// 保留当前浏览的月份范围，新增、删除和系统通知不会把远处月份刷成空白。
+    func fetchEvents(from startDate: Date? = nil, to endDate: Date? = nil) async {
+        if let startDate { eventStart = startDate }
+        if let endDate { eventEnd = endDate }
+        guard hasCalendarAccess, eventStart < eventEnd else { return }
         isLoadingEvents = true
         defer { isLoadingEvents = false }
-        
-        let predicate = eventStore.predicateForEvents(withStart: startDate, end: endDate, calendars: nil)
-        let list = eventStore.events(matching: predicate)
-        
-        self.events = list.sorted { $0.startDate < $1.startDate }
+        let predicate = eventStore.predicateForEvents(withStart: eventStart, end: eventEnd, calendars: nil)
+        events = eventStore.events(matching: predicate).sorted { $0.startDate < $1.startDate }
     }
-    
+
     // MARK: - 提醒事项分类列表 (Calendars & SimPleview阅读)
     
     /// 获取可用的提醒事项列表（列表分类）
@@ -272,7 +258,7 @@ final class EventManager: ObservableObject {
             try eventStore.saveCalendar(newCal, commit: true)
             return newCal
         } catch {
-            print("[EventManager] 创建『SimPleview阅读』分类列表失败: \(error)")
+            Logger.view.error("创建提醒事项列表失败: \(error)")
             return defaultReminderCalendar()
         }
     }
@@ -287,9 +273,13 @@ final class EventManager: ObservableObject {
         calendar: EKCalendar? = nil
     ) async throws -> EKReminder {
         guard hasReminderAccess else {
-            throw NSError(domain: "EventManager", code: 401, userInfo: [NSLocalizedDescriptionKey: "未获得提醒事项访问权限"])
+            throw NSError(domain: "EventManager", code: 401, userInfo: [NSLocalizedDescriptionKey: text("Reminder Access Required")])
         }
         
+        guard !title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            throw NSError(domain: "EventManager", code: 400, userInfo: [NSLocalizedDescriptionKey: text("Title Required")])
+        }
+
         let reminder = EKReminder(eventStore: eventStore)
         reminder.title = title
         reminder.notes = notes
@@ -310,20 +300,33 @@ final class EventManager: ObservableObject {
     
     /// 切换待办事项的完成状态 (0 <-> 1 态跃迁)
     func toggleReminderCompletion(_ reminder: EKReminder) async throws {
-        guard hasReminderAccess else { return }
+        guard hasReminderAccess else {
+            throw NSError(domain: "EventManager", code: 401, userInfo: [NSLocalizedDescriptionKey: text("Reminder Access Required")])
+        }
+        let wasCompleted = reminder.isCompleted, oldCompletionDate = reminder.completionDate
         reminder.isCompleted.toggle()
         if reminder.isCompleted {
             reminder.completionDate = Date()
         } else {
             reminder.completionDate = nil
         }
-        try eventStore.save(reminder, commit: true)
+        do {
+            try eventStore.save(reminder, commit: true)
+        } catch {
+            // EKReminder 是引用对象；写盘失败必须恢复列表中的勾选状态。
+            objectWillChange.send()
+            reminder.isCompleted = wasCompleted
+            reminder.completionDate = oldCompletionDate
+            throw error
+        }
         await fetchReminders()
     }
     
     /// 删除待办事项
     func deleteReminder(_ reminder: EKReminder) async throws {
-        guard hasReminderAccess else { return }
+        guard hasReminderAccess else {
+            throw NSError(domain: "EventManager", code: 401, userInfo: [NSLocalizedDescriptionKey: text("Reminder Access Required")])
+        }
         try eventStore.remove(reminder, commit: true)
         await fetchReminders()
     }
@@ -374,7 +377,7 @@ final class EventManager: ObservableObject {
             try eventStore.saveCalendar(newCal, commit: true)
             return newCal
         } catch {
-            print("[EventManager] 创建『SimPleview阅读』日历分类失败: \(error)")
+            Logger.view.error("创建日历失败: \(error)")
             return defaultEventCalendar()
         }
     }
@@ -392,9 +395,16 @@ final class EventManager: ObservableObject {
         alert: EventAlertOption = .none
     ) async throws -> EKEvent {
         guard hasCalendarAccess else {
-            throw NSError(domain: "EventManager", code: 401, userInfo: [NSLocalizedDescriptionKey: "未获得日历访问权限"])
+            throw NSError(domain: "EventManager", code: 401, userInfo: [NSLocalizedDescriptionKey: text("Calendar Access Required")])
         }
         
+        guard !title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            throw NSError(domain: "EventManager", code: 400, userInfo: [NSLocalizedDescriptionKey: text("Title Required")])
+        }
+        guard endDate >= startDate else {
+            throw NSError(domain: "EventManager", code: 400, userInfo: [NSLocalizedDescriptionKey: text("Invalid Event Dates")])
+        }
+
         let event = EKEvent(eventStore: eventStore)
         event.title = title
         event.startDate = startDate
@@ -429,9 +439,16 @@ final class EventManager: ObservableObject {
         alert: EventAlertOption = .none
     ) async throws {
         guard hasCalendarAccess else {
-            throw NSError(domain: "EventManager", code: 401, userInfo: [NSLocalizedDescriptionKey: "未获得日历访问权限"])
+            throw NSError(domain: "EventManager", code: 401, userInfo: [NSLocalizedDescriptionKey: text("Calendar Access Required")])
         }
         
+        guard !title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            throw NSError(domain: "EventManager", code: 400, userInfo: [NSLocalizedDescriptionKey: text("Title Required")])
+        }
+        guard endDate >= startDate else {
+            throw NSError(domain: "EventManager", code: 400, userInfo: [NSLocalizedDescriptionKey: text("Invalid Event Dates")])
+        }
+
         event.title = title
         event.startDate = startDate
         event.endDate = endDate
@@ -455,13 +472,21 @@ final class EventManager: ObservableObject {
             event.alarms = nil
         }
         
-        try eventStore.save(event, span: .thisEvent, commit: true)
+        do {
+            try eventStore.save(event, span: .thisEvent, commit: true)
+        } catch {
+            // 列表重新读取已保存值，编辑表单仍保留用户输入用于重试。
+            await fetchEvents()
+            throw error
+        }
         await fetchEvents()
     }
     
     /// 删除日历日程
     func deleteEvent(_ event: EKEvent) async throws {
-        guard hasCalendarAccess else { return }
+        guard hasCalendarAccess else {
+            throw NSError(domain: "EventManager", code: 401, userInfo: [NSLocalizedDescriptionKey: text("Calendar Access Required")])
+        }
         try eventStore.remove(event, span: .thisEvent, commit: true)
         await fetchEvents()
     }

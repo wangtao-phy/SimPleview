@@ -15,7 +15,7 @@ import SwiftUI
 struct TodoSidebarView: View {
     @ObservedObject var state: AppState
     @ObservedObject var uiState: UIState
-    @ObservedObject var eventManager = EventManager.shared
+    @StateObject private var eventManager = EventManager()
     
     // 子标签切换：0 为待办事项 (Reminders)，1 为日程安排 (Schedule)
     @State private var selectedSubTab: Int = 0
@@ -31,6 +31,7 @@ struct TodoSidebarView: View {
     @State private var currentCalendarMonth: Date = Date()
     
     // 弹窗表单状态与预填参数
+    @State private var operationError: String?
     @State private var showingAddReminderSheet: Bool = false
     @State private var showingAddEventSheet: Bool = false
     @State private var presetEventStartDate: Date? = nil
@@ -148,16 +149,21 @@ struct TodoSidebarView: View {
                 }
             }
         }
-        .onAppear {
+        .alert(state.L("Operation Failed"), isPresented: Binding(
+            get: { operationError != nil }, set: { if !$0 { operationError = nil } }
+        )) {
+            Button(state.L("OK"), role: .cancel) { operationError = nil }
+        } message: {
+            Text(operationError ?? "")
+        }
+        .task {
             eventManager.updateAuthStatuses()
-            Task {
-                await eventManager.refreshAll()
-                await eventManager.fetchEventsForMonth(currentCalendarMonth)
-            }
+            await eventManager.fetchEventsForMonth(currentCalendarMonth)
+            await eventManager.fetchReminders()
         }
         // 当应用重获焦点时（例如用户在系统设置中勾选允许后切回），自动重检权限与拉取数据
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
-            eventManager.resetStoreAndAuth()
+            eventManager.recheckAuthorization()
         }
         .sheet(isPresented: $showingAddReminderSheet) {
             AddReminderSheetView(
@@ -247,12 +253,14 @@ struct TodoSidebarView: View {
                                         showCalendarBadge: false,
                                         onToggle: {
                                             Task {
-                                                _ = try? await eventManager.toggleReminderCompletion(reminder)
+                                                do { try await eventManager.toggleReminderCompletion(reminder) }
+                                                catch { operationError = error.localizedDescription }
                                             }
                                         },
                                         onDelete: {
                                             Task {
-                                                _ = try? await eventManager.deleteReminder(reminder)
+                                                do { try await eventManager.deleteReminder(reminder) }
+                                                catch { operationError = error.localizedDescription }
                                             }
                                         }
                                     )
@@ -271,12 +279,14 @@ struct TodoSidebarView: View {
                                     showCalendarBadge: true,
                                     onToggle: {
                                         Task {
-                                            _ = try? await eventManager.toggleReminderCompletion(reminder)
+                                            do { try await eventManager.toggleReminderCompletion(reminder) }
+                                            catch { operationError = error.localizedDescription }
                                         }
                                     },
                                     onDelete: {
                                         Task {
-                                            _ = try? await eventManager.deleteReminder(reminder)
+                                            do { try await eventManager.deleteReminder(reminder) }
+                                            catch { operationError = error.localizedDescription }
                                         }
                                     }
                                 )
@@ -369,7 +379,8 @@ struct TodoSidebarView: View {
                     },
                     onDeleteEvent: { ev in
                         Task {
-                            _ = try? await eventManager.deleteEvent(ev)
+                            do { try await eventManager.deleteEvent(ev) }
+                            catch { operationError = error.localizedDescription }
                         }
                     }
                 )
@@ -457,7 +468,7 @@ struct TodoSidebarView: View {
                 
                 // 3. 重新检测按钮
                 Button(action: {
-                    eventManager.resetStoreAndAuth()
+                    eventManager.recheckAuthorization()
                 }) {
                     HStack(spacing: 4) {
                         Image(systemName: "arrow.triangle.2.circlepath")
@@ -1347,9 +1358,14 @@ struct EditEventPopoverView: View {
             // 底部操作区：左侧删除，右侧取消与存储
             HStack {
                 Button(role: .destructive, action: {
+                    guard !isSaving else { return }
+                    isSaving = true
                     Task {
-                        _ = try? await eventManager.deleteEvent(event)
-                        onDismiss()
+                        defer { isSaving = false }
+                        do {
+                            try await eventManager.deleteEvent(event)
+                            onDismiss()
+                        } catch { errorMessage = error.localizedDescription }
                     }
                 }) {
                     HStack(spacing: 4) {
@@ -1362,6 +1378,7 @@ struct EditEventPopoverView: View {
                 }
                 .buttonStyle(.plain)
                 .help("删除此日程")
+                .disabled(isSaving)
                 
                 Spacer()
                 
@@ -1371,8 +1388,9 @@ struct EditEventPopoverView: View {
                 .keyboardShortcut(.cancelAction)
                 
                 Button(state.L("Save")) {
+                    guard !isSaving else { return }
+                    isSaving = true
                     Task {
-                        isSaving = true
                         do {
                             let finalEnd = isAllDay ? endDate : (endDate >= startDate ? endDate : startDate.addingTimeInterval(7200))
                             try await eventManager.updateEvent(
@@ -1414,6 +1432,8 @@ struct AddReminderSheetView: View {
     @State private var hasDueDate: Bool = true
     @State private var dueDate: Date
     @State private var selectedCalendar: EKCalendar?
+    @State private var isSaving = false
+    @State private var errorMessage: String?
     
     let eventManager: EventManager
     
@@ -1422,7 +1442,8 @@ struct AddReminderSheetView: View {
         self._title = State(initialValue: defaultTitle)
         self._notes = State(initialValue: defaultNotes)
         self.eventManager = eventManager
-        let readingCal = eventManager.getOrCreateSimPleviewCalendar() ?? eventManager.defaultReminderCalendar()
+        // 初始化不创建系统列表；点击保存时才按默认分类落盘。
+        let readingCal = eventManager.availableReminderCalendars().first { $0.title == "SimPleview阅读" }
         self._selectedCalendar = State(initialValue: readingCal)
         
         // 核心优化 1：提醒事项默认截止时间为当前时间的 1 天以后
@@ -1469,6 +1490,9 @@ struct AddReminderSheetView: View {
             let calendars = eventManager.availableReminderCalendars()
             if !calendars.isEmpty {
                 Picker(state.L("List"), selection: $selectedCalendar) {
+                    if !calendars.contains(where: { $0.title == "SimPleview阅读" }) {
+                        Text(state.L("SimPleview Reading")).tag(nil as EKCalendar?)
+                    }
                     ForEach(calendars, id: \.calendarIdentifier) { cal in
                         Text(cal.title).tag(cal as EKCalendar?)
                     }
@@ -1485,6 +1509,9 @@ struct AddReminderSheetView: View {
                     .textFieldStyle(.roundedBorder)
             }
             
+            if let errorMessage {
+                Text(errorMessage).font(.caption).foregroundStyle(.red)
+            }
             Divider()
             
             HStack {
@@ -1496,18 +1523,27 @@ struct AddReminderSheetView: View {
                 Spacer()
                 
                 Button("添加至提醒事项") {
+                    guard !isSaving else { return }
+                    isSaving = true
+                    errorMessage = nil
                     Task {
-                        _ = try? await eventManager.createReminder(
-                            title: title,
-                            dueDate: hasDueDate ? dueDate : nil,
-                            notes: notes.isEmpty ? nil : notes,
-                            calendar: selectedCalendar
-                        )
-                        dismiss()
+                        defer { isSaving = false }
+                        do {
+                            _ = try await eventManager.createReminder(
+                                title: title,
+                                dueDate: hasDueDate ? dueDate : nil,
+                                notes: notes.isEmpty ? nil : notes,
+                                calendar: selectedCalendar
+                            )
+                            dismiss()
+                        } catch {
+                            // 保存失败保留输入，允许修正后重试。
+                            errorMessage = error.localizedDescription
+                        }
                     }
                 }
                 .buttonStyle(.borderedProminent)
-                .disabled(title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                .disabled(isSaving || title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                 .keyboardShortcut(.defaultAction)
             }
         }
@@ -1532,6 +1568,8 @@ struct AddEventSheetView: View {
     @State private var startDate: Date
     @State private var endDate: Date
     @State private var selectedCalendar: EKCalendar?
+    @State private var isSaving = false
+    @State private var errorMessage: String?
     @State private var recurrence: EventRecurrenceOption = .none
     @State private var alert: EventAlertOption = .none
     
@@ -1560,8 +1598,8 @@ struct AddEventSheetView: View {
         self._startDate = State(initialValue: start)
         self._endDate = State(initialValue: end)
         
-        // 默认自动选定或创建『SimPleview阅读』分类，亦可自由更改
-        let defaultCal = eventManager.getOrCreateSimPleviewEventCalendar() ?? eventManager.defaultEventCalendar()
+        // 表单初始化只读取分类；确实点击保存时才创建专属列表，取消不写入系统。
+        let defaultCal = eventManager.availableEventCalendars().first { $0.title == "SimPleview阅读" }
         self._selectedCalendar = State(initialValue: defaultCal)
     }
     
@@ -1635,6 +1673,9 @@ struct AddEventSheetView: View {
                         .frame(width: 50, alignment: .leading)
                     
                     Picker("", selection: $selectedCalendar) {
+                        if !calendars.contains(where: { $0.title == "SimPleview阅读" }) {
+                            Text(state.L("SimPleview Reading")).tag(nil as EKCalendar?)
+                        }
                         ForEach(calendars, id: \.calendarIdentifier) { cal in
                             HStack {
                                 Circle().fill(Color(nsColor: cal.color)).frame(width: 6, height: 6)
@@ -1674,6 +1715,9 @@ struct AddEventSheetView: View {
                     .textFieldStyle(.roundedBorder)
             }
             
+            if let errorMessage {
+                Text(errorMessage).font(.caption).foregroundStyle(.red)
+            }
             Divider()
             
             HStack {
@@ -1685,22 +1729,31 @@ struct AddEventSheetView: View {
                 Spacer()
                 
                 Button("添加至日历") {
+                    guard !isSaving else { return }
+                    isSaving = true
+                    errorMessage = nil
                     Task {
-                        _ = try? await eventManager.createEvent(
-                            title: title,
-                            startDate: startDate,
-                            endDate: endDate,
-                            isAllDay: isAllDay,
-                            notes: notes.isEmpty ? nil : notes,
-                            calendar: selectedCalendar,
-                            recurrence: recurrence,
-                            alert: alert
-                        )
-                        dismiss()
+                        defer { isSaving = false }
+                        do {
+                            _ = try await eventManager.createEvent(
+                                title: title,
+                                startDate: startDate,
+                                endDate: endDate,
+                                isAllDay: isAllDay,
+                                notes: notes.isEmpty ? nil : notes,
+                                calendar: selectedCalendar,
+                                recurrence: recurrence,
+                                alert: alert
+                            )
+                            dismiss()
+                        } catch {
+                            // 保存失败保留输入，允许修正后重试。
+                            errorMessage = error.localizedDescription
+                        }
                     }
                 }
                 .buttonStyle(.borderedProminent)
-                .disabled(title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                .disabled(isSaving || title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                 .keyboardShortcut(.defaultAction)
             }
         }

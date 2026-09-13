@@ -32,6 +32,7 @@ struct WindowAccessor: NSViewRepresentable {
                 if let wc = newWindow?.windowController as? AppWindowController, let state = state {
                     wc.appState = state
                 }
+                if newWindow?.isKeyWindow == true { state?.updateReadingTracking() }
                 
                 // [P0 级核心修复：后台标签页休眠丢失 Bug]
                 // 场景：App 启动时恢复了 10 个标签页，或者用户在后台新开了一个标签页。
@@ -63,6 +64,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     
     // App 完全启动后的回调
     func applicationDidFinishLaunching(_ notification: Notification) {
+        FocusSessionManager.shared.startService()
         // 标准 InkList 交给 PDFKit 渲染，避免全局交换系统方法影响导出与其他文档。
         
         NotificationCenter.default.addObserver(forName: NSNotification.Name("GlobalNewDocument"), object: nil, queue: .main) { _ in
@@ -255,6 +257,14 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             let alert = NSAlert()
             alert.messageText = "阅读记录或作者库尚未保存，已取消退出"
             alert.informativeText = "请检查记录存储目录与磁盘空间后重试，内存中的修改已保留。"
+            alert.runModal()
+            return .terminateCancel
+        }
+        guard FocusSessionManager.shared.prepareForTermination() else {
+            AppState.isAppExiting = false
+            let alert = NSAlert()
+            alert.messageText = FocusSessionManager.shared.text("Focus Save Before Quit")
+            alert.informativeText = FocusSessionManager.shared.recorder.lastError ?? ""
             alert.runModal()
             return .terminateCancel
         }

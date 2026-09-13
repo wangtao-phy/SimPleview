@@ -29,6 +29,12 @@ struct AnnotationToolbarGroup: CustomizableToolbarContent {
             .disabled(state.fileURL == nil)
         }
         
+        ToolbarItem(id: "Pomodoro", placement: .primaryAction) {
+            FocusTimerButton(documentTitle: state.fileURL?.deletingPathExtension().lastPathComponent,
+                             label: state.L("Pomodoro"))
+                .frame(width: 28, height: 24)
+        }
+
         // 护眼背景色按钮
         ToolbarItem(id: "BackgroundColor", placement: .primaryAction) {
             Menu {

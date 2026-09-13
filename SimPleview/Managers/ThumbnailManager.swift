@@ -11,8 +11,8 @@ final class ThumbnailManager: ObservableObject {
     private let cacheOwner = UUID()
     private var cacheGeneration: UInt = 0
     private struct PendingSnapshot {
-        let id = UUID()
         let readyAt: ContinuousClock.Instant
+        var isPrefetch: Bool
         let prepare: @MainActor () -> Void
     }
     private var pendingSnapshots: [Int: PendingSnapshot] = [:]
@@ -23,10 +23,11 @@ final class ThumbnailManager: ObservableObject {
     
     // [并发调度器]
     // 专门的渲染队列，使用 OperationQueue 支持取消。
-    // 独立 PDF 快照仍使用串行渲染，降低 CoreGraphics 位图分配峰值。
+    // 每窗口至多两张独立 PDF 快照并行，缩短整屏等待时间，
+    // 不随页数增加工作线程；主线程仍每轮只准备一页。
     private let renderQueue: OperationQueue = {
         let q = OperationQueue()
-        q.maxConcurrentOperationCount = 1
+        q.maxConcurrentOperationCount = 2
         q.qualityOfService = .utility // 侧栏缩略图不能与正文瓦片争抢交互优先级
         return q
     }()
@@ -111,10 +112,11 @@ final class ThumbnailManager: ObservableObject {
     }
     
     // [核心渲染逻辑]
-    func generateThumbnail(for page: PDFPage, at index: Int, in doc: PDFDocument, currentDocChecker: @escaping @MainActor @Sendable () -> Bool) {
+    func generateThumbnail(for page: PDFPage, at index: Int, in doc: PDFDocument, prefetch: Bool = false, currentDocChecker: @escaping @MainActor @Sendable () -> Bool) {
         // 1. 原子性地检查并在生成集合中注册，消除 TOCTOU 竞态
         lock.lock()
         if generatingIndices.contains(index) {
+            if !prefetch { pendingSnapshots[index]?.isPrefetch = false }
             lock.unlock()
             return
         }
@@ -137,9 +139,9 @@ final class ThumbnailManager: ObservableObject {
             generatingIndices = [index]
         }
         
-        // 保留短暂停留门槛，快速滚过的页可在序列化之前取消。
-        // 待处理请求仅弱引用页面，尚未轮到的页不提前分配 PDF 数据副本。
-        pendingSnapshots[index] = PendingSnapshot(readyAt: .now.advanced(by: .milliseconds(180))) { [weak self, weak page, weak doc] in
+        // 请求先登记，下一轮才准备；快速经过且已离屏的页仍可及时取消。
+        // 首次可见页不再强制等 180 ms；只预取视口附近两页，不扫描整本书。
+        pendingSnapshots[index] = PendingSnapshot(readyAt: .now, isPrefetch: prefetch) { [weak self, weak page, weak doc] in
             guard let self else { return }
             guard let page, let doc, page.document === doc, currentDocChecker() else {
                 self.markAsFinished(index, id: nil); return
@@ -149,22 +151,39 @@ final class ThumbnailManager: ObservableObject {
         scheduleNextSnapshot()
     }
 
-    /// 准备和渲染共用一条流水线：上一张结束后，才允许主线程序列化下一张。
-    /// 每次至少让出 16 ms 给输入和布局，避免多个 180 ms 延迟任务同时唤醒，
-    /// 把一屏缩略图的昂贵快照集中到同一帧。空闲时没有轮询或常驻定时器。
+    /// 可见范围是调度依据；提前两页填充缓存，使普通速度滚动时直接复用图像。
+    /// 真正离开范围才取消任务，不能在单元刚出屏幕时把紧邻预取也一起取消。
+    func updateViewport(_ indices: [Int], in document: PDFDocument,
+                        currentDocChecker: @escaping @MainActor @Sendable () -> Bool) {
+        let visible = Set(indices.filter { $0 >= 0 && $0 < document.pageCount })
+        var wanted = visible
+        for index in visible {
+            wanted.formUnion(max(0, index - 2)...min(document.pageCount - 1, index + 2))
+        }
+        for index in generatingIndices.subtracting(wanted) { cancelThumbnail(for: index) }
+        for index in visible.sorted() + wanted.subtracting(visible).sorted() {
+            guard let page = document.page(at: index) else { continue }
+            generateThumbnail(for: page, at: index, in: document,
+                prefetch: !visible.contains(index), currentDocChecker: currentDocChecker)
+        }
+    }
+
+    /// 每次至少让出 16 ms 给输入/布局；准备最多领先两个工作项。
+    /// 可见页优先于预取。空闲时没有轮询，也不一次性序列化整屏页面。
     private func scheduleNextSnapshot() {
-        guard snapshotTask == nil, operations.isEmpty,
-              let (index, request) = pendingSnapshots.min(by: { $0.value.readyAt < $1.value.readyAt }) else { return }
-        let delay = max(Duration.milliseconds(16), ContinuousClock.now.duration(to: request.readyAt))
+        guard snapshotTask == nil, operations.count < 2, !pendingSnapshots.isEmpty else { return }
         snapshotTask = Task { @MainActor [weak self] in
-            do { try await Task.sleep(for: delay) } catch { return }
+            do { try await Task.sleep(for: .milliseconds(16)) } catch { return }
             guard let self else { return }
             self.snapshotTask = nil
-            guard self.pendingSnapshots[index]?.id == request.id else {
-                self.scheduleNextSnapshot(); return
-            }
+            // 睡眠期间视口可能改变，执行前再选当前最需要的页面。
+            guard let (index, request) = self.pendingSnapshots.min(by: {
+                if $0.value.isPrefetch != $1.value.isPrefetch { return !$0.value.isPrefetch }
+                return $0.value.readyAt < $1.value.readyAt
+            }) else { return }
             self.pendingSnapshots[index] = nil
             request.prepare()
+            self.scheduleNextSnapshot()
         }
     }
 

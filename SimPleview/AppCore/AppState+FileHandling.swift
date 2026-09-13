@@ -262,6 +262,7 @@ extension AppState {
     func updateReadingTracking() {
         guard !isClosed, hostingWindow?.isKeyWindow == true, NSApp.isActive,
               let url = fileURL else { return }
+        FocusSessionManager.shared.updateReadingDocument(title: url.deletingPathExtension().lastPathComponent)
         readingTracker.startTracking(documentID: DocumentIdentity.id(for: url),
             documentTitle: url.deletingPathExtension().lastPathComponent,
             pageIndex: liveState.currentPageIndex, owner: ObjectIdentifier(self))

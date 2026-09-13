@@ -19,7 +19,9 @@ class CustomPDFView: PDFView {
     // Swift 的 MainActor getter 会使原生后台调用触发线程断言；缓存由
     // prepareForDocumentReplacement、视图移除和内存压力入口负责清理。
     var isPublishingRenderSnapshot = false
-    nonisolated(unsafe) var renderObserver: NSObjectProtocol?
+    var isRenderSnapshotScheduled = false
+    nonisolated(unsafe) var renderObservers: [NSObjectProtocol] = []
+    weak var observedRenderClipView: NSClipView?
 
     /// 只改变 PDFPage 的绘图开关，不写入批注 /F，也不移除批注。
     /// PDFKit 序列化不会保存此页面开关，因此隐藏时保存/打印仍包含标注。
@@ -52,6 +54,7 @@ class CustomPDFView: PDFView {
     override func layout() {
         super.layout()
         publishRenderSnapshot()
+        scheduleRenderSnapshot()
     }
 
     
@@ -157,7 +160,7 @@ class CustomPDFView: PDFView {
     }
     
     deinit {
-        if let renderObserver { NotificationCenter.default.removeObserver(renderObserver) }
+        for observer in renderObservers { NotificationCenter.default.removeObserver(observer) }
         if let obs = menuObserver {
             NotificationCenter.default.removeObserver(obs)
         }

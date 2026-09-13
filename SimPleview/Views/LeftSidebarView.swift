@@ -65,6 +65,17 @@ struct LeftSidebarView: View {
 struct ThumbnailListView: View {
     @ObservedObject var state: AppState
     @FocusState.Binding var isThumbnailFocused: Bool
+    @State private var visibleIndices: [Int] = []
+    @State private var isScrolling = false
+
+    private func updateViewport(_ indices: [Int]) {
+        guard let document = state.pdfView.document else { return }
+        let identity = ObjectIdentifier(document)
+        state.thumbnailManager.updateViewport(indices, in: document) { [weak state] in
+            state?.pdfView.document.map(ObjectIdentifier.init) == identity
+        }
+    }
+
     
     #if os(macOS)
     /// 方向键翻页的统一处理。
@@ -117,7 +128,6 @@ struct ThumbnailListView: View {
                             // 真正的缩略图卡片
                             ThumbnailItem(index: index, state: state, isSelected: state.selectedIndices.contains(index))
                                 .equatable() // .equatable() 告诉 SwiftUI：如果不发生实质性变化，不要去重绘它！
-                                .id(index) // 给滚动定位器打的标记
                                 .onTapGesture {
                                     // 捕获系统修饰键，用于判断是 Command 点击(点选) 还是 Shift 点击(连选)
                                     let isCommand = NSEvent.modifierFlags.contains(.command)
@@ -127,11 +137,13 @@ struct ThumbnailListView: View {
                                     isThumbnailFocused = true // 把键盘焦点抢过来
                                 }
                         }
+                        .id(index)
                     }
                     
                     // 最后一页底部也要加一条插入线，允许把页面拖到整个文档最后面
                     DropInsertLine(index: state.liveState.totalPageCount, state: state)
                 }
+                .scrollTargetLayout()
                 .id(state.documentVersion) // [黑魔法] 强行绑定 UUID。当页面发生大规模新增或删除时，改变 UUID 让整个列表彻底重建
                 .padding(.bottom, 10)
                 .padding(.top, 2)
@@ -139,6 +151,13 @@ struct ThumbnailListView: View {
                 .contentShape(Rectangle())
                 .onTapGesture { isThumbnailFocused = true }
             }
+            .onScrollTargetVisibilityChange(idType: Int.self, threshold: 0.01) { indices in
+                visibleIndices = indices
+                updateViewport(indices)
+            }
+            .onScrollPhaseChange { _, phase in isScrolling = phase != .idle }
+            .onReceive(state.thumbnailManager.hotReloadSubject) { _ in updateViewport(visibleIndices) }
+            .onDisappear { updateViewport([]) }
             #if os(macOS)
             // [修复] 改用 NSEvent 本地监听拦截方向键。原 .onKeyPress 依赖 SwiftUI 焦点 + ScrollView，
             // 在 macOS 上会被内层 NSScrollView 抢先消费方向键导致失效。本地监听在事件派发前拦截，稳定可靠。
@@ -162,12 +181,10 @@ struct ThumbnailListView: View {
             )
             #endif
             .onChange(of: state.liveState.currentPageIndex) { _, newIndex in
-                let anim: Animation = !MemoryMode.current.policy.delaysNavigationJumps
-                    ? .easeOut(duration: 0.2)
-                    : .spring(response: 0.15, dampingFraction: 0.9)
-                withAnimation(anim) {
-                    proxy.scrollTo(newIndex)
-                }
+                // 原生列表只在选中页不在视口内时跟随；用户正在滚动侧栏时
+                // 不用新的定位动画覆盖其手势，否则会产生追赶和反复加载。
+                guard !isScrolling, !visibleIndices.contains(newIndex) else { return }
+                proxy.scrollTo(newIndex)
             }
             .onChange(of: state.pageStructureChanged) { _, _ in
                 // 插入/删除/重排页后，上下文菜单关闭 + PDFView.go(to:)（异步）可能抢走焦点。
@@ -242,7 +259,7 @@ struct ThumbnailItem: View, Equatable {
         
         VStack(spacing: 6) {
             ZStack {
-                if let img = thumbnail {
+                if let img = thumbnail ?? state.getThumbnail(for: index) {
                     Image(nsImage: img)
                         .resizable()
                         .interpolation(.high)
@@ -254,15 +271,6 @@ struct ThumbnailItem: View, Equatable {
                     Color.primary.opacity(0.03)
                         .aspectRatio(ratio, contentMode: .fit)
                         .frame(width: 140)
-                        .onAppear { 
-                            // 刚出现时立刻去内存缓存里碰碰运气
-                            if let cached = state.getThumbnail(for: index) { 
-                                thumbnail = cached 
-                            } else { 
-                                // 缓存里没有，命令专门的引擎去后台渲染
-                                state.generateThumbnail(for: index) 
-                            } 
-                        } 
                 }
             }
             .frame(width: 140).background(Color.white).cornerRadius(4)
@@ -293,20 +301,17 @@ struct ThumbnailItem: View, Equatable {
         // 接收热重载的“唤醒”信号！仅当前可见的 ThumbnailItem 会收到此信号，触发自身的精准重绘
         .onReceive(state.thumbnailManager.hotReloadSubject) { _ in
             thumbnail = nil
-            if isVisible { state.generateThumbnail(for: index) }
         }
         // LazyVStack 可能保留离屏行及其订阅，通知本身不代表该行可见。
         // 显式可见性门禁阻止热重载/预取通知重新填满离屏强引用。
         .onAppear {
             isVisible = true
             thumbnail = state.getThumbnail(for: index)
-            if thumbnail == nil { state.generateThumbnail(for: index) }
         }
         .onDisappear {
             isVisible = false
             // SwiftUI 可保留滚出屏幕的行；释放行级引用才能让全局缓存预算生效。
             thumbnail = nil
-            state.cancelThumbnailGeneration(for: index)
         }
         .contextMenu {
             Button(action: { state.insertBlankPage(at: index + 1) }) {
