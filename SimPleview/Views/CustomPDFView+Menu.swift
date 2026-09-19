@@ -19,9 +19,14 @@ extension CustomPDFView {
             // 挂一个 KVO 监听器，只要菜单里改了颜色，我就能知道
             colorObserver?.invalidate()
             colorObserver = annotation.observe(\.color, options: [.new]) { [weak self] annot, _ in
-                nonisolated(unsafe) let safeAnnot = annot
+                // KVO 不承诺回调线程。只传递身份值，回到主执行器后重新取标注，
+                // 不把可变 PDFAnnotation 用 unsafe 声明跨执行器传递。
+                let identity = ObjectIdentifier(annot)
                 Task { @MainActor [weak self] in
-                    self?.syncBatchColor(for: safeAnnot)
+                    guard let self, let annotation = self.lastClickedAnnotation,
+                          ObjectIdentifier(annotation) == identity,
+                          annotation.page?.document === self.document else { return }
+                    self.syncBatchColor(for: annotation)
                 }
             }
             

@@ -29,11 +29,17 @@ actor NotebookStorage {
     init(recoveryDirectory: URL? = nil) { self.recoveryDirectory = recoveryDirectory }
     /// 图像仅用于本地缩略图和用户主动发起的视觉读取；PDF 保存始终使用矢量。
     func images(_ snapshot: PadSaveSnapshot, pages: [Int], maximumDimension: CGFloat = 1536) throws -> [AIImageInput] {
+        guard maximumDimension.isFinite, maximumDimension >= 1, maximumDimension <= 4096 else {
+            throw PadError.message("页面图像尺寸无效。")
+        }
         guard let document = PDFDocument(data: snapshot.background), pages.count <= 2 else { throw PadError.message("页面批次无效。") }
         return try pages.map { index in
             try Task.checkCancellation()
             guard let page = document.page(at: index), let reference = page.pageRef else { throw PadError.message("无法读取页面。") }
             let bounds = page.bounds(for: .cropBox), rotated = page.rotation % 180 != 0
+            // PDF 尺寸来自文件，不可直接转 Int；非有限数会触发 Swift 运行时陷阱。
+            guard [bounds.minX, bounds.minY, bounds.width, bounds.height].allSatisfy(\.isFinite),
+                  bounds.width > 0, bounds.height > 0 else { throw PadError.message("PDF 页面尺寸无效。") }
             let size = rotated ? CGSize(width: bounds.height,height: bounds.width) : bounds.size
             let scale = min(2,maximumDimension/max(size.width,size.height))
             let width = max(1,Int(size.width*scale)), height = max(1,Int(size.height*scale))

@@ -20,10 +20,37 @@ class CustomPDFView: PDFView {
     // prepareForDocumentReplacement、视图移除和内存压力入口负责清理。
     var isPublishingRenderSnapshot = false
     var isRenderSnapshotScheduled = false
-    nonisolated(unsafe) var renderObservers: [NSObjectProtocol] = []
+    var renderObservers: [NSObjectProtocol] = []
     weak var observedRenderClipView: NSClipView?
     weak var backgroundGeometryDocument: PDFDocument?
     var backgroundGeometryBox: PDFDisplayBox?
+    weak var navigationRenderPage: PDFPage?
+
+    /// PDFKit 可以在更新 visiblePages 之前绘制跳转目标。先准备目标页的
+    /// 矢量快照，避免第一批瓦片漏画手绘/签名，直到再次点击才重绘。
+    func prepareForNavigation(to page: PDFPage) {
+        guard let document, page.document === document else { return }
+        navigationRenderPage = page
+        publishRenderSnapshot()
+    }
+
+    override func go(to page: PDFPage) {
+        prepareForNavigation(to: page)
+        super.go(to: page)
+        setNeedsDisplay(convert(page.bounds(for: displayBox), from: page))
+    }
+
+    override func go(to destination: PDFDestination) {
+        if let page = destination.page { prepareForNavigation(to: page) }
+        super.go(to: destination)
+        if let page = destination.page { setNeedsDisplay(convert(page.bounds(for: displayBox), from: page)) }
+    }
+
+    override func go(to rect: CGRect, on page: PDFPage) {
+        prepareForNavigation(to: page)
+        super.go(to: rect, on: page)
+        setNeedsDisplay(convert(page.bounds(for: displayBox), from: page))
+    }
 
     /// 只改变 PDFPage 的绘图开关，不写入批注 /F，也不移除批注。
     /// PDFKit 序列化不会保存此页面开关，因此隐藏时保存/打印仍包含标注。
@@ -37,9 +64,13 @@ class CustomPDFView: PDFView {
             cleanupMenuObservers()
         }
         if let document {
-            for index in 0..<document.pageCount { document.page(at: index)?.displaysAnnotations = visible }
+            for index in 0..<document.pageCount {
+                if let page = document.page(at: index), page.displaysAnnotations != visible {
+                    page.displaysAnnotations = visible
+                }
+            }
         }
-        layoutDocumentView()
+        // 显隐不改变页面尺寸或位置，只刷新绘制；避免重排整本文档、扰动滚动位置。
         setPlatformNeedsDisplay()
         documentView?.needsDisplay = true
     }
@@ -74,8 +105,8 @@ class CustomPDFView: PDFView {
     var initialAnnotationColor: PlatformColor?
     
     #if os(macOS)
-    nonisolated(unsafe) var menuObserver: NSObjectProtocol?
-    nonisolated(unsafe) var colorObserver: NSKeyValueObservation?
+    var menuObserver: NSObjectProtocol?
+    var colorObserver: NSKeyValueObservation?
     var currentPopover: NSPopover?
     
     // Link Hover Preview State
@@ -134,6 +165,7 @@ class CustomPDFView: PDFView {
     /// 先关观察者/弹窗，再清状态，避免重载后回调修改已不属于当前文档的批注。
     func prepareForDocumentReplacement() {
         backgroundGeometryDocument = nil
+        navigationRenderPage = nil
         scanCache.removeAll()
         cleanupMenuObservers()
         discardDraftInk()
@@ -162,7 +194,7 @@ class CustomPDFView: PDFView {
         return true
     }
     
-    deinit {
+    isolated deinit {
         for observer in renderObservers { NotificationCenter.default.removeObserver(observer) }
         if let obs = menuObserver {
             NotificationCenter.default.removeObserver(obs)

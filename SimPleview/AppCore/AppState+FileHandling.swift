@@ -222,12 +222,8 @@ extension AppState {
             self.refreshAnnotations()
             
             if isHotReloading {
-                // [热重载缩略图无缝刷新]
-                // 绝不能调用改变 documentVersion 导致整个侧边栏闪白重建！
-                // 我们调用 clearCache() 清理掉所有指向旧 PDFDocument 的废弃图片内存，
-                // 然后通过 hotReloadSubject 唤醒所有“当前可见”的缩略图重新发起渲染！
-                self.thumbnailManager.clearCache()
-                self.thumbnailManager.hotReloadSubject.send()
+                // 保留旧缩略图作过渡，当前可见页优先替换；旧文档的在途结果失效。
+                self.thumbnailManager.refreshDocument(doc)
                 
                 // [防内存泄漏与崩溃] 热重载时底层 PDFDocument 实例已换新，必须清空撤销栈，
                 // 否则旧的 PDFPage/PDFAnnotation 被强引用会导致内存泄漏，且 Undo 会崩溃。

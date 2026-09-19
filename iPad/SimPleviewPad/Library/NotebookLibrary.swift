@@ -13,6 +13,7 @@ struct LibraryEntry: Identifiable {
     @Published var revision = 0
     @Published var error: String?
     private var scoped: URL?
+    deinit { scoped?.stopAccessingSecurityScopedResource() }
     init() {
         root = URL.documentsDirectory.appendingPathComponent("SimPleview 笔记", isDirectory: true)
         do {

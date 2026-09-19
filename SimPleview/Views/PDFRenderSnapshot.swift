@@ -78,7 +78,10 @@ extension CustomPDFView {
         snapshot.background = _threadSafePageBackgroundColor.rawValue
         snapshot.backgroundBounds = renderSnapshot.withLock { $0.backgroundBounds }
         var pages = visiblePages
-        for page in [draftInkPage, currentDrawingPage, currentHoveredLink?.page].compactMap({ $0 }) {
+        // 目标页最多额外保留一页；普通滚动也纳入 currentPage，不能只信任
+        // PDFKit 尚未更新的 visiblePages。全部仍在主执行器构建不可变绘图值。
+        for page in [navigationRenderPage, currentPage, draftInkPage, currentDrawingPage, currentHoveredLink?.page].compactMap({ $0 }) {
+            guard page.document === document else { continue }
             if !pages.contains(where: { $0 === page }) { pages.append(page) }
         }
         for page in pages {

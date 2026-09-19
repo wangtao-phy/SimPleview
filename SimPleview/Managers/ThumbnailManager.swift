@@ -64,7 +64,31 @@ final class ThumbnailManager: ObservableObject {
         thumbnailInvalidatedSubject.send(index)
     }
 
-    /// 仅文档替换、显示内容整体改变或关闭时彻底清空。
+    /// 标注显隐只影响有标注的页面；纯扫描页和无标注页面直接复用。
+    /// 单页失效会保留旧图，并拒绝旧显示状态的在途结果。
+    func refreshAnnotationVisibility(in document: PDFDocument) {
+        for index in Array(knownPages.keys) {
+            guard let page = document.page(at: index), !page.annotations.isEmpty else { continue }
+            invalidateThumbnail(at: index)
+        }
+    }
+
+    /// 同一文件被外部更新后，旧图只作过渡，不能被当成新文档的有效缓存。
+    /// 保留仍存在的页码，逐页原位替换；不额外保存第二套图片。
+    func refreshDocument(_ document: PDFDocument) {
+        cancelPendingWork()
+        var retained: [Int: WeakPage] = [:]
+        for index in knownPages.keys {
+            if let page = document.page(at: index) { retained[index] = WeakPage(value: page) }
+        }
+        ThumbnailStore.shared.remap(owner: cacheOwner,
+                                    pages: Dictionary(uniqueKeysWithValues: retained.keys.map { ($0, $0) }))
+        knownPages = retained
+        dirtyIndices = Set(retained.keys)
+        hotReloadSubject.send()
+    }
+
+    /// 仅打开另一份文档或关闭窗口时彻底清空。
     func clearCache() {
         cancelPendingWork()
         knownPages.removeAll(); dirtyIndices.removeAll()
@@ -116,7 +140,10 @@ final class ThumbnailManager: ObservableObject {
         guard !isSuspended, let size = Self.pixelSize(bounds: page.bounds(for: .cropBox), rotation: page.rotation, scale: displayScale) else { return }
         knownPages[index] = WeakPage(value: page)
         if generatingIndices.contains(index) {
-            if !prefetch { pendingSnapshots[index]?.isPrefetch = false }
+            if !prefetch {
+                pendingSnapshots[index]?.isPrefetch = false
+                operations[index]?.operation.queuePriority = .high
+            }
             return
         }
         if !dirtyIndices.contains(index), ThumbnailStore.shared.contains(owner: cacheOwner, page: index, pixels: size) { return }
@@ -143,7 +170,16 @@ final class ThumbnailManager: ObservableObject {
         ThumbnailStore.shared.setVisible(visible, owner: cacheOwner)
         var wanted = visible
         for index in visible { wanted.formUnion(max(0, index - 2)...min(document.pageCount - 1, index + 2)) }
-        for index in generatingIndices.subtracting(wanted) { cancelThumbnail(for: index) }
+        for index in generatingIndices.subtracting(wanted) {
+            // 系统绘图开始后取消并不能收回解码开销。保留在途及刚完成的结果，
+            // 快速返回时直接复用；仅取消尚未开始的过期任务。
+            // 编辑、换文档和休眠仍使用无条件取消，防止旧内容回填。
+            if let operation = operations[index]?.operation, operation.isExecuting || operation.isFinished { continue }
+            cancelThumbnail(for: index)
+        }
+        for (index, entry) in operations {
+            entry.operation.queuePriority = visible.contains(index) ? .high : .low
+        }
         for index in visible.sorted() + wanted.subtracting(visible).sorted() {
             guard let page = document.page(at: index) else { continue }
             generateThumbnail(for: page, at: index, in: document, prefetch: !visible.contains(index), currentDocChecker: currentDocChecker)
@@ -162,6 +198,7 @@ final class ThumbnailManager: ObservableObject {
             }) else { return }
             self.pendingSnapshots[index] = nil
             request.prepare()
+            self.operations[index]?.operation.queuePriority = request.isPrefetch ? .low : .high
             self.scheduleNextSnapshot()
         }
     }

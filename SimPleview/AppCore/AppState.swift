@@ -36,9 +36,10 @@ final class AppState: NSObject, ObservableObject, PDFViewDelegate {
                 selectedAnnotation = nil
             }
             pdfView.setAnnotationsVisible(areAnnotationsVisible)
-            // 缩略图同步切换；缓存代数变化会拒绝尚未完成的旧显示状态结果。
-            thumbnailManager.clearCache()
-            thumbnailManager.hotReloadSubject.send()
+            // 有标注的缩略图原位更新，其余页面无需重新解码。
+            if let document = pdfView.document {
+                thumbnailManager.refreshAnnotationVisibility(in: document)
+            }
         }
     }
     @Published var documentVersion = UUID()
@@ -117,6 +118,7 @@ final class AppState: NSObject, ObservableObject, PDFViewDelegate {
     @Published var selectedAnnotation: PDFAnnotation? {
         didSet {
             guard let selected = selectedAnnotation else { return }
+            if let page = selected.page { pdfView.prepareForNavigation(to: page) }
             pdfView.setPlatformNeedsDisplay()
             handleAnnotationSelection(selected)
         }
@@ -233,6 +235,7 @@ final class AppState: NSObject, ObservableObject, PDFViewDelegate {
     
     // Internal state
     var isNavigating = false
+    var navigationUnlockTask: Task<Void, Never>?
     var isApplyingAnnotation = false
     var lastProcessedSelectionString: String?
     
@@ -302,9 +305,8 @@ final class AppState: NSObject, ObservableObject, PDFViewDelegate {
         }
     }
     
-    // [极致内存斩杀：显式清理机制]
-    // 专门用来应对 PDFKit 贪婪的底层缓存策略。当窗口关闭时，我们不能仅仅依靠系统 GC，
-    // 必须手动把底层的文档指针拔掉，强制 CoreGraphics 吐出几百兆的瓦片缓存。
+    /// 关闭时停止异步工作，解除文档、观察者和交互状态的引用。
+    /// Swift 使用 ARC；PDFKit 自身的缓存回收时机仍由系统决定。
     func cleanup() {
         guard !isClosed else { return }
         isClosed = true
@@ -317,8 +319,7 @@ final class AppState: NSObject, ObservableObject, PDFViewDelegate {
         pdfView.document = nil
         pdfView.removeFromSuperview()
         
-        // 【终极防漏】：直接替换为全新的空壳实例！如果仅仅置 nil，底层的某些 PDFKit 视图层级可能依旧互相引用。
-        // 用全新的实例替换，旧的 PDF 视图堆栈会被彻底废弃并进入系统级垃圾回收。
+        // 保留一个不关联文档的新视图，断开 AppState 对旧视图树的引用。
         pdfView = CustomPDFView()
         pdfView._threadSafePageBackgroundColor = self.pageBackgroundColor
         
@@ -327,6 +328,9 @@ final class AppState: NSObject, ObservableObject, PDFViewDelegate {
         annotationTimerTask?.cancel()
         annotationJumpTask?.cancel()
         thumbnailJumpTask?.cancel()
+        navigationUnlockTask?.cancel()
+        navigationUnlockTask = nil
+        isNavigating = false
         statisticsTask?.cancel()
         statisticsTask = nil
         loadTask?.cancel()
@@ -371,6 +375,7 @@ final class AppState: NSObject, ObservableObject, PDFViewDelegate {
 
     deinit {
         statisticsTask?.cancel()
+        navigationUnlockTask?.cancel()
     }
     
     

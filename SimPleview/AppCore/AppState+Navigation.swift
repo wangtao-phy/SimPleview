@@ -6,6 +6,17 @@ import PDFKit
 extension AppState {
     
     // MARK: - Navigation
+
+    /// 快速连续跳转只保留最后一次解锁任务，旧回调不能提前解除新跳转的保护。
+    func suppressPageUpdates(for duration: Duration) {
+        navigationUnlockTask?.cancel()
+        isNavigating = true
+        navigationUnlockTask = Task { @MainActor [weak self] in
+            do { try await Task.sleep(for: duration) } catch { return }
+            self?.isNavigating = false
+            self?.navigationUnlockTask = nil
+        }
+    }
     
     // [逻辑流程：页面跳转与边界保护]
     func goToPage(_ index: Int, recordHistory: Bool = true) {
@@ -19,7 +30,7 @@ extension AppState {
         let clampedIndex = max(0, min(index, pageCount - 1))
         
         // 【稳健性优化】上锁，防止在跳转动画期间引发的系统页码回跳
-        isNavigating = true
+        suppressPageUpdates(for: .milliseconds(150))
         
         // 委托给导航管理器去执行真正的底层 PDFKit 翻页
         navigationManager.goToPage(clampedIndex, pdfView: pdfView, recordHistory: recordHistory)
@@ -29,10 +40,6 @@ extension AppState {
             self.liveState.currentPageIndex = clampedIndex
         }
         
-        // 跳转结束，稍微延迟一点放开锁，防止 PDFKit 残留的回调事件
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) { [weak self] in
-            self?.isNavigating = false
-        }
     }
     
     // 处理左侧缩略图被点击时的复杂逻辑（比如按住 Shift 连选）
@@ -70,7 +77,7 @@ extension AppState {
     // 实际执行物理跳转的方法
     private func executeAnnotationJump(_ annotation: PDFAnnotation) {
         // 找出这个批注所在的页
-        guard let page = annotation.page, let doc = page.document else { return }
+        guard let page = annotation.page, let doc = page.document, doc === pdfView.document else { return }
         let index = doc.index(for: page)
         
         // 【防跳动核心逻辑】：判断该批注是否已经在屏幕的可视范围内
@@ -85,7 +92,7 @@ extension AppState {
         
         // 如果批注在视野外（比如从侧边栏点击了其他页的批注），我们才执行滚动跳转
         // 上锁：标记当前正在“因为程序逻辑而导航中”，屏蔽掉用户的滑动干扰
-        isNavigating = true
+        suppressPageUpdates(for: .milliseconds(100))
         if self.liveState.currentPageIndex != index { 
             self.recordHistoryAction() 
             // 【极其关键】必须显式更新页码状态，否则 LeftSidebarView 里的 onChange(of: currentPageIndex) 监听不到，
@@ -97,10 +104,6 @@ extension AppState {
         pdfView.go(to: page)
         pdfView.go(to: annotation.bounds, on: page)
         
-        // 延迟 0.1 秒后解锁
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { [weak self] in
-            self?.isNavigating = false
-        }
     }
     
     // MARK: - Search

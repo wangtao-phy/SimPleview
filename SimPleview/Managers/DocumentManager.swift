@@ -6,7 +6,7 @@ import Combine
 /// `DocumentManager` 负责管理 PDF 文件的生命周期，包括：
 /// 1. 文件的打开、关闭与安全沙盒权限 (Security Scoped Bookmark) 的管理
 /// 2. 多文档或单文档的状态维护 (如 `fileURL`, `isDirty` 等)
-/// 3. 在后台队列中安全、原子化地保存文档修改，避免阻塞主线程 UI
+/// 3. 在文档所属执行器内验证并原子保存，防止并发修改和不完整写入
 final class DocumentManager: ObservableObject {
     
     // [核心数据：基础文件状态]
@@ -153,10 +153,10 @@ class FileMonitor: NSObject {
     
     private var lastKnownModDate: Date?
     private var acknowledgedModDate: Date?
-    nonisolated(unsafe) private var source: DispatchSourceFileSystemObject?
+    private var source: DispatchSourceFileSystemObject?
     /// 实例级防抖任务，替代全局 cancelPreviousPerformRequests，避免多窗口互相干扰
-    nonisolated(unsafe) private var debounceWorkItem: DispatchWorkItem?
-    nonisolated(unsafe) private var restartWorkItem: DispatchWorkItem?
+    private var debounceWorkItem: DispatchWorkItem?
+    private var restartWorkItem: DispatchWorkItem?
     private var isStopped = false
     
     init(url: URL) {
@@ -265,7 +265,7 @@ class FileMonitor: NSObject {
         acknowledgedModDate = date
         onDidChange?()
     }
-    deinit {
+    isolated deinit {
         debounceWorkItem?.cancel()
         restartWorkItem?.cancel()
         source?.cancel()

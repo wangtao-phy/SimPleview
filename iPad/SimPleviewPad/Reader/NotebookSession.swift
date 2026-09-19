@@ -25,6 +25,8 @@ final class NotebookSession: ObservableObject {
     private var debounce: Task<Void, Never>?
     private var saveTask: Task<Bool, Never>?
     private var hasScope = false
+    private var isOpening = false
+    private var isClosed = false
     var dirty: Bool { revision != savedRevision }
 
     init(url: URL) { self.url = url }
@@ -34,21 +36,39 @@ final class NotebookSession: ObservableObject {
     }
 
     func open() async {
-        guard document == nil else { return }
+        guard document == nil, !isOpening, !isClosed, !Task.isCancelled else { return }
+        isOpening = true
         hasScope = url.startAccessingSecurityScopedResource()
+        // 打开失败、任务取消或等待期间关闭，都必须释放本次权限租约。
+        // 成功后由 close/deinit 接管，重复进入 open 不重复申请权限。
+        defer {
+            isOpening = false
+            if document == nil, hasScope {
+                url.stopAccessingSecurityScopedResource()
+                hasScope = false
+            }
+        }
         do {
             let (data, version) = try await storage.read(url)
+            try Task.checkCancellation()
+            guard !isClosed else { return }
             guard let pdf = PDFDocument(data: data), !pdf.isLocked, pdf.pageCount > 0 else {
                 throw PadError.message("PDF 无法打开、没有页面或需要先解除密码保护。")
             }
             // 只移除本版本持有完整编辑数据的笔迹外观，交给画布显示；
             // 其他软件的批注仍归 PDFKit 所有，不能删掉它们或重复绘制。
+            var loadedDrawings: [ObjectIdentifier: PKDrawing] = [:]
             for index in 0..<pdf.pageCount {
+                try Task.checkCancellation()
                 guard let page = pdf.page(at: index) else { continue }
-                drawings[ObjectIdentifier(page)] = try VectorInk.takeEditableDrawing(from: page)
+                loadedDrawings[ObjectIdentifier(page)] = try VectorInk.takeEditableDrawing(from: page)
             }
+            drawings = loadedDrawings
             self.version = version
             document = pdf
+            error = nil
+        } catch is CancellationError {
+            // 关闭界面导致的取消不弹错误，也不发布半解析的文档。
         } catch { self.error = error.localizedDescription }
     }
 
@@ -116,6 +136,7 @@ final class NotebookSession: ObservableObject {
             guard await save() else { return false }
             await Task.yield()
         }
+        isClosed = true
         if hasScope { url.stopAccessingSecurityScopedResource(); hasScope = false }
         return true
     }
