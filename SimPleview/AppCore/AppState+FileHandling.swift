@@ -131,6 +131,7 @@ extension AppState {
         // 必须先关掉原生手绘层，再交给 PDFView，避免先创建模糊位图缓存。
         StandardInk.prepareForScreen(in: doc)
         self.fileURL = url
+        self.pdfView.preparePageBackground(for: doc)
         self.pdfView.document = doc
         self.pdfView.setAnnotationsVisible(areAnnotationsVisible)
         

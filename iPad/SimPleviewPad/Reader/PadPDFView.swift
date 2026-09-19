@@ -19,7 +19,7 @@ struct PadPDFView: UIViewRepresentable {
     }
     func updateUIView(_ view: PDFView, context: Context) {
         if view.document !== session.document { view.document = session.document }
-        view.isInMarkupMode = session.writing
+        if view.isInMarkupMode != session.writing { view.isInMarkupMode = session.writing }
         context.coordinator.update()
     }
     static func dismantleUIView(_ view: PDFView, coordinator: Coordinator) {
@@ -41,6 +41,7 @@ struct PadPDFView: UIViewRepresentable {
         var observers: [NSObjectProtocol] = []
         var scrollObservation: NSKeyValueObservation?
         var visibility: Bool?
+        private var writingEnabled = false
         init(_ session: NotebookSession) {
             self.session = session
             super.init()
@@ -92,23 +93,41 @@ struct PadPDFView: UIViewRepresentable {
             return overlay
         }
         func pdfView(_ view: PDFView, willDisplayOverlayView overlayView: UIView, for page: PDFPage) {
+            // PDFKit 可复用离屏覆盖视图；离屏时已拆除的委托和工具观察者
+            // 必须在重新显示时恢复，不能假设一定再次调用 overlayViewFor。
+            if let canvas = (overlayView as? PageInkOverlay)?.canvas,
+               canvases[ObjectIdentifier(page)]?.1 !== canvas {
+                canvases[ObjectIdentifier(page)] = (page, canvas)
+                canvas.delegate = self
+                picker.addObserver(canvas)
+            }
             observeScrolling(view)
-            (overlayView as? PageInkOverlay)?.updateViewport()
+            update()
         }
         func pdfView(_ pdfView: PDFView, willEndDisplayingOverlayView overlayView: UIView, for page: PDFPage) {
             guard let canvas = (overlayView as? PageInkOverlay)?.canvas else { return }
             picker.removeObserver(canvas)
             canvas.delegate = nil
             if session.canvas === canvas { session.canvas = nil }
-            canvases.removeValue(forKey: ObjectIdentifier(page))
+            if canvases[ObjectIdentifier(page)]?.1 === canvas {
+                canvases.removeValue(forKey: ObjectIdentifier(page))
+            }
         }
         func configure(_ canvas: PKCanvasView) {
-            canvas.drawingPolicy = session.fingerDrawing ? .anyInput : .pencilOnly
-            canvas.isUserInteractionEnabled = session.writing && session.annotationsVisible
-            canvas.isHidden = !session.annotationsVisible
-            if !session.writing { picker.setVisible(false, forFirstResponder: canvas); canvas.resignFirstResponder() }
+            let policy: PKCanvasViewDrawingPolicy = session.fingerDrawing ? .anyInput : .pencilOnly
+            let enabled = session.writing && session.annotationsVisible
+            if canvas.drawingPolicy != policy { canvas.drawingPolicy = policy }
+            if canvas.isUserInteractionEnabled != enabled { canvas.isUserInteractionEnabled = enabled }
+            if canvas.isHidden == session.annotationsVisible { canvas.isHidden = !session.annotationsVisible }
+            if !enabled, canvas.isFirstResponder {
+                picker.setVisible(false, forFirstResponder: canvas)
+                canvas.resignFirstResponder()
+            }
         }
         func update() {
+            let enabled = session.writing && session.annotationsVisible
+            let writingChanged = enabled != writingEnabled
+            writingEnabled = enabled
             updateLayouts()
             if visibility != session.annotationsVisible, let doc = session.document {
                 for index in 0..<doc.pageCount { doc.page(at: index)?.displaysAnnotations = session.annotationsVisible }
@@ -117,8 +136,11 @@ struct PadPDFView: UIViewRepresentable {
             }
             for (_, canvas) in canvases.values { configure(canvas) }
             if let page = session.pdfView?.currentPage, let (_, canvas) = canvases[ObjectIdentifier(page)] {
+                let canvasChanged = session.canvas !== canvas
                 session.canvas = canvas
-                if session.writing && session.annotationsVisible {
+                // 只在进入书写或切换画布时转移焦点。笔迹/保存状态更新
+                // 不重开工具栏，也不能抢走弹窗或文本输入框的焦点。
+                if enabled && (writingChanged || canvasChanged) {
                     picker.setVisible(true, forFirstResponder: canvas)
                     canvas.becomeFirstResponder()
                 }
@@ -176,17 +198,20 @@ struct PadPDFView: UIViewRepresentable {
         // contentOffset 把此视口映射回原始笔迹坐标，翻页/缩放不修改 PKDrawing。
         let size = CGSize(width: visible.width * scale, height: visible.height * scale)
         let offset = CGPoint(x: visible.minX * scale, y: visible.minY * scale)
-        canvas.transform = CGAffineTransform(scaleX: 1 / scale, y: 1 / scale)
+        let transform = CGAffineTransform(scaleX: 1 / scale, y: 1 / scale)
+        if canvas.transform != transform { canvas.transform = transform }
         if canvas.bounds.size != size { canvas.bounds.size = size }
-        canvas.center = CGPoint(x: visible.midX, y: visible.midY)
-        canvas.minimumZoomScale = min(0.1, scale)
-        canvas.maximumZoomScale = max(16, scale)
+        let minimum = min(0.1, scale), maximum = max(16, scale)
+        if canvas.minimumZoomScale != minimum { canvas.minimumZoomScale = minimum }
+        if canvas.maximumZoomScale != maximum { canvas.maximumZoomScale = maximum }
         if abs(canvas.zoomScale - scale) > 0.0001 { canvas.setZoomScale(scale, animated: false) }
-        canvas.contentSize = CGSize(width: pageSize.width * scale, height: pageSize.height * scale)
+        let contentSize = CGSize(width: pageSize.width * scale, height: pageSize.height * scale)
+        if canvas.contentSize != contentSize { canvas.contentSize = contentSize }
         if canvas.contentOffset != offset { canvas.setContentOffset(offset, animated: false) }
         // UIScrollView 会把偏移量对齐到像素。补偿该舍入，避免非整数倍率下
         // 笔迹相对 PDF 内容产生小幅位移；不通过移动原始笔迹来修正显示误差。
-        canvas.center = CGPoint(x: visible.midX + (canvas.contentOffset.x - offset.x) / scale,
-                                y: visible.midY + (canvas.contentOffset.y - offset.y) / scale)
+        let center = CGPoint(x: visible.midX + (canvas.contentOffset.x - offset.x) / scale,
+                             y: visible.midY + (canvas.contentOffset.y - offset.y) / scale)
+        if canvas.center != center { canvas.center = center }
     }
 }

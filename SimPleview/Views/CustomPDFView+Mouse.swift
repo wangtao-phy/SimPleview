@@ -34,7 +34,8 @@ extension CustomPDFView {
                 self._threadSafeDrawingPath = path.copy() as? NSBezierPath
                 self._threadSafeDrawingPage = page
                 
-                self.needsDisplay = true
+                // 落笔只涉及当前位置，不让已完成的标注随整个视口重绘。
+                self.setNeedsDisplay(NSRect(x: point.x - 10, y: point.y - 10, width: 20, height: 20))
                 
                 // [核心修复] 使用原生 AppKit 事件追踪循环，100% 拦截鼠标轨迹，彻底解决断点和空白高亮问题
                 var keepTracking = true
@@ -529,6 +530,12 @@ extension CustomPDFView {
 
         guard let annot = makeDraftInkAnnotation() else { return }
         StandardInk.prepareForScreen(annot)
+
+        // 先结束草稿状态再挂入正式标注。addAnnotation 可能同步请求快照；
+        // 此时同一笔迹只能来自正式标注，避免草稿与新标注短暂叠加而变深。
+        self.draftInkPaths = []
+        self.draftInkPage = nil
+        self.currentDrawingBatchID = nil
         page.addAnnotation(annot)
         
         if let doc = page.document {
@@ -540,15 +547,12 @@ extension CustomPDFView {
             self.manager?.pendingColorOverride = nil
             
             self.onSaveRequired?() // 触发脏标记
-            NotificationCenter.default.post(name: NSNotification.Name("PDFRefreshAnnotations"), object: nil)
+            self.onInkCommitted?(annot)
         }
         
-        // 清理草稿
-        self.draftInkPaths = []
-        self.draftInkPage = nil
-        self._threadSafeDraftInkPaths = []
-        self.currentDrawingBatchID = nil
-        self.needsDisplay = true
+        // 保留其余区域的画面；缩放倍率决定实际描边宽度，留足抗锯齿边缘。
+        let padding = max(10, self._threadSafeLineWidth * self.scaleFactor)
+        self.setNeedsDisplay(self.convert(annot.bounds, from: page).insetBy(dx: -padding, dy: -padding))
     }
     
     override func keyDown(with event: NSEvent) {

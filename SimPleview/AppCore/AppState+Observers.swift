@@ -4,10 +4,6 @@ import Combine
 
 extension AppState {
 
-    /// 缩略图全量刷新的"离开时长"阈值（秒）：应用退到后台超过这个时长，回来才值得重绘缩略图；
-    /// 短于它的快速切换（如 Cmd+Tab）不会导致底层位图被回收，跳过以节约 CPU。
-    private static let thumbnailRefreshInactiveThreshold: TimeInterval = 300
-
     func setupCallbacks() {
         // [闭包与弱引用]
         // [weak self] 是 Swift 避免闭包造成循环引用（互相抓住不放）的终极武器。
@@ -74,6 +70,19 @@ extension AppState {
         }
         pdfView.onSaveRequired = { [weak self] in
             self?.isDirty = true
+        }
+        pdfView.onInkCommitted = { [weak self] annotation in
+            // 切换工具可能发生在 SwiftUI 更新期间，延后一轮发布列表变化。
+            // 只追加新批次，不扫描全书，也不触碰其他窗口的旧标注。
+            DispatchQueue.main.async { [weak self] in
+                guard let self, !self.isClosed, let page = annotation.page,
+                      let document = self.pdfView.document, page.document === document else { return }
+                // 侧栏首次展开可能已读到这一笔，延迟回调不能再追加一次。
+                if !self.annotationManager.allAnnotations.contains(where: { $0 === annotation }) {
+                    self.annotationManager.allAnnotations.append(annotation)
+                }
+                self.thumbnailManager.invalidateThumbnail(at: document.index(for: page))
+            }
         }
     }
     
@@ -188,35 +197,6 @@ extension AppState {
             .sink { [weak self] _ in self?.pdfView.autoScales = true }
             .store(in: &cancellables)
             
-        // 记录应用退到后台（失去活跃）的时刻，配合 didBecomeActive 做节流判断
-        nc.publisher(for: NSApplication.didResignActiveNotification)
-            .sink { [weak self] _ in
-                self?.lastResignActiveDate = Date()
-            }
-            .store(in: &cancellables)
-
-        // [稳健性修复：从后台返回时自动刷新缩略图]
-        // 防止用户长时间离开应用导致底层 NSImage 位图被系统回收（Zombie Cache），回来时缩略图变白板。
-        // [节流] 只有离开超过阈值才做全量刷新，避免每次 Cmd+Tab 切换都重绘所有可见缩略图、白白浪费 CPU。
-        nc.publisher(for: NSApplication.didBecomeActiveNotification)
-            .sink { [weak self] _ in
-                // 仅在非深度休眠状态下强制刷新，因为深度休眠在 wakeUp 时已经处理过了
-                guard let self = self, !self.isHibernating else { return }
-                // 离开时间太短（快速切换）时底层位图根本不会被回收，跳过刷新以节约资源
-                let resignDate = self.lastResignActiveDate
-                self.lastResignActiveDate = nil
-                guard let resignDate,
-                      Date().timeIntervalSince(resignDate) >= Self.thumbnailRefreshInactiveThreshold else {
-                    return
-                }
-                
-                // 【稳健性核心】：必须先彻底清空可能已经变成 Zombie (丢失位图数据) 的底层缓存
-                // 否则 hotReloadSubject 触发 generateThumbnail 时会命中缓存并直接返回，导致视图永久变白！
-                self.thumbnailManager.clearCache()
-                self.thumbnailManager.hotReloadSubject.send()
-            }
-            .store(in: &cancellables)
-        
         // [新增：监听选中状态用于 AI 字数统计]
         nc.publisher(for: .PDFViewSelectionChanged, object: pdfView)
             .debounce(for: .milliseconds(300), scheduler: RunLoop.main)
@@ -234,12 +214,6 @@ extension AppState {
                 }
             }
             .store(in: &cancellables)
-
-        nc.publisher(for: NSNotification.Name("PDFRefreshAnnotations"))
-            .receive(on: DispatchQueue.main)
-            .sink { [weak self] _ in self?.refreshAnnotations() }
-            .store(in: &cancellables)
-            
 
         // 监听内存模式动态切换，实时更新 PDFView 的渲染策略
         nc.publisher(for: UserDefaults.didChangeNotification)
@@ -277,31 +251,5 @@ extension AppState {
         .sink { [weak self] _ in self?.objectWillChange.send() }
         .store(in: &cancellables)
         
-        // [极限原生优化：内存告警压缩]
-        // 监听 macOS 底层的虚拟内存压力。这是最原生的手段，比任何黑科技都稳健。
-        setupMemoryPressureObserver()
-    }
-    
-    private func setupMemoryPressureObserver() {
-        // 创建底层 DispatchSource 监听内存压力
-        let source = DispatchSource.makeMemoryPressureSource(eventMask: [.warning, .critical], queue: .main)
-        source.setEventHandler { [weak self] in
-            guard let self = self else { return }
-            let event = self.memoryPressureSource?.data ?? []
-            
-            // 如果不是节约模式，不激进清理
-            guard MemoryMode.current.policy.aggressivePurgeOnClose else { return }
-            
-            if event.contains(.warning) || event.contains(.critical) {
-                // 1. 瞬间清空缩略图排队任务与所有图片缓存
-                self.thumbnailManager.clearCache()
-                
-                // 2. 强迫 PDFKit 吐出非可视区域的瓦片（Tile Cache）
-                // 这个原生调用会让 PDFView 重新评估可视区域，从而释放大量积压在 CoreAnimation 里的高清贴图。
-                self.pdfView.layoutDocumentView()
-            }
-        }
-        source.resume()
-        self.memoryPressureSource = source
     }
 }

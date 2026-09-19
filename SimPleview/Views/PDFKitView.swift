@@ -22,6 +22,8 @@ class CustomPDFView: PDFView {
     var isRenderSnapshotScheduled = false
     nonisolated(unsafe) var renderObservers: [NSObjectProtocol] = []
     weak var observedRenderClipView: NSClipView?
+    weak var backgroundGeometryDocument: PDFDocument?
+    var backgroundGeometryBox: PDFDisplayBox?
 
     /// 只改变 PDFPage 的绘图开关，不写入批注 /F，也不移除批注。
     /// PDFKit 序列化不会保存此页面开关，因此隐藏时保存/打印仍包含标注。
@@ -131,6 +133,7 @@ class CustomPDFView: PDFView {
     /// 文件替换和关闭共用的引用释放点。弹窗、悬停和拖动状态都可能拥有旧页；
     /// 先关观察者/弹窗，再清状态，避免重载后回调修改已不属于当前文档的批注。
     func prepareForDocumentReplacement() {
+        backgroundGeometryDocument = nil
         scanCache.removeAll()
         cleanupMenuObservers()
         discardDraftInk()
@@ -190,6 +193,7 @@ class CustomPDFView: PDFView {
     var onColorChanged: ((PlatformColor, String) -> Void)?
     var onMouseUp: (() -> Void)?
     var onSaveRequired: (() -> Void)?
+    var onInkCommitted: ((PDFAnnotation) -> Void)?
     var onAnnotationContentsChanged: ((PDFAnnotation, String) -> Void)?
     
     var inkColor: PlatformColor = .systemBlue {

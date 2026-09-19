@@ -233,8 +233,12 @@ final class AnnotationManager: ObservableObject {
             onThumbnailUpdate(index)
         }
         
-        pdfView.setPlatformNeedsDisplay()
-        PlatformUtils.updateWindows()
+        // PDFKit 已将新标注挂到对应页面；补充局部重绘即可。
+        // 不强制刷新整个视口及所有窗口，避免旧矢量标注一起闪动。
+        for annotation in newAnnots {
+            guard let page = annotation.page else { continue }
+            pdfView.setNeedsDisplay(pdfView.convert(annotation.bounds, from: page).insetBy(dx: -10, dy: -10))
+        }
         return true
     }
     

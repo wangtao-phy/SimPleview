@@ -9,6 +9,13 @@ struct LinkPreviewPopoverView: View {
     var onHoverStateChanged: ((Bool) -> Void)?
     
     @State private var previewImage: NSImage?
+    @Environment(\.displayScale) private var displayScale
+    private static let renderQueue: OperationQueue = {
+        let queue = OperationQueue()
+        queue.maxConcurrentOperationCount = 1
+        queue.qualityOfService = .utility
+        return queue
+    }()
     
     // Resolve Destination either from direct property or action
     var resolvedDestination: PDFDestination? {
@@ -54,70 +61,55 @@ struct LinkPreviewPopoverView: View {
         .onHover { hovering in
             onHoverStateChanged?(hovering)
         }
-        .onAppear {
-            generateThumbnail()
-        }
+        .task(id: ObjectIdentifier(annotation)) { await generateThumbnail() }
     }
     
-    private func generateThumbnail() {
-        guard let dest = resolvedDestination, let page = dest.page else { return }
-        
-        guard let pageData = StandardInk.exportData(of: page) else { return }
-        let point = dest.point
-        DispatchQueue.global(qos: .userInitiated).async {
-            guard let document = PDFDocument(data: pageData), let safePage = document.page(at: 0) else { return }
-            let pageBounds = safePage.bounds(for: .cropBox)
-            
-            let cropWidth = pageBounds.width
-            let cropHeight = cropWidth / 3.0
-            let targetY = point.y
-            
-            var cropRect = NSRect(
-                x: pageBounds.minX, 
-                y: targetY - cropHeight + 40, 
-                width: cropWidth, 
-                height: cropHeight
-            )
-            
-            if cropRect.minY < pageBounds.minY { cropRect.origin.y = pageBounds.minY }
-            
-            // High-resolution rendering scale factor
-            let scale: CGFloat = 2.0
-            
-            let pixelSize = NSSize(width: cropRect.width * scale, height: cropRect.height * scale)
-            guard pixelSize.width.isFinite, pixelSize.height.isFinite,
-                  pixelSize.width > 0, pixelSize.height > 0,
-                  pixelSize.width <= 4096, pixelSize.height <= 4096 else { return }
-            let image = NSImage(size: pixelSize)
-            
-            image.lockFocus()
-            guard let context = NSGraphicsContext.current?.cgContext else {
-                image.unlockFocus()
-                return
-            }
-            
-            // White background (PDFs are often transparent)
-            NSColor.white.setFill()
-            NSRect(origin: .zero, size: pixelSize).fill()
-            
-            // Apply scale
-            context.scaleBy(x: scale, y: scale)
-            // Shift context so cropRect.origin aligns to (0,0)
-            context.translateBy(x: -cropRect.minX, y: -cropRect.minY)
-            
-            safePage.draw(with: .cropBox, to: context)
-            
-            image.unlockFocus()
-            
-            // Set the logical size to match the exact 1.5x display size.
-            // This guarantees the image scales down properly and its intrinsic size matches the UI frame.
-            image.size = NSSize(width: cropWidth * 1.5, height: cropHeight * 1.5)
-            
-            DispatchQueue.main.async {
-                self.previewImage = image
-            }
+    private func generateThumbnail() async {
+        guard !Task.isCancelled, let dest = resolvedDestination, let page = dest.page,
+              let data = StandardInk.exportData(of: page) else { return }
+        let point = dest.point, scale = 1.5 * displayScale
+        let work = BlockOperation()
+        let result = OSAllocatedUnfairLock<CGImage?>(initialState: nil)
+        work.addExecutionBlock { [weak work] in
+            guard work?.isCancelled == false else { return }
+            let image = autoreleasepool { Self.render(data: data, point: point, scale: scale) }
+            result.withLock { $0 = image }
         }
+        // 关闭弹窗会取消 .task；未开始的预览不再绘制，已开始的图像不回填。
+        // 共用串行队列，快速扫过多个链接时不并发解码多份 PDF。
+        let image = await withTaskCancellationHandler {
+            await withCheckedContinuation { continuation in
+                work.completionBlock = { continuation.resume(returning: result.withLock { $0 }) }
+                Self.renderQueue.addOperation(work)
+            }
+        } onCancel: { work.cancel() }
+        guard !Task.isCancelled, let image else { return }
+        previewImage = NSImage(cgImage: image, size: NSSize(width: innerWidth, height: innerHeight))
     }
+
+    nonisolated private static func render(data: Data, point: CGPoint, scale: CGFloat) -> CGImage? {
+        guard let document = PDFDocument(data: data), let page = document.page(at: 0) else { return nil }
+        defer { withExtendedLifetime(document) {} }
+        let bounds = page.bounds(for: .cropBox)
+        let crop = CGRect(x: bounds.minX, y: max(bounds.minY, point.y - bounds.width / 3 + 40),
+                          width: bounds.width, height: bounds.width / 3)
+        guard crop.width.isFinite, crop.height.isFinite, crop.width > 0, crop.height > 0,
+              scale.isFinite, scale > 0 else { return nil }
+        let scale = min(scale, 4096 / max(crop.width, crop.height))
+        let width = Int(ceil(crop.width * scale)), height = Int(ceil(crop.height * scale))
+        // 后台只使用独立 PDF 和显式像素缓冲，避免 lockFocus 隐式分配
+        // 多倍率 AppKit 图像。分辨率对应弹窗实际大小和屏幕像素密度。
+        guard let context = CGContext(data: nil, width: width, height: height, bitsPerComponent: 8,
+            bytesPerRow: width * 4, space: CGColorSpaceCreateDeviceRGB(),
+            bitmapInfo: CGImageAlphaInfo.noneSkipLast.rawValue) else { return nil }
+        context.setFillColor(CGColor(gray: 1, alpha: 1))
+        context.fill(CGRect(x: 0, y: 0, width: width, height: height))
+        context.scaleBy(x: scale, y: scale)
+        context.translateBy(x: -crop.minX, y: -crop.minY)
+        page.draw(with: .cropBox, to: context)
+        return context.makeImage()
+    }
+
 }
 
 #if os(macOS)
@@ -126,6 +118,45 @@ import VisionKit
 struct SelectableImageView: NSViewRepresentable {
     let image: NSImage
     
+    @MainActor final class Coordinator {
+        weak var imageView: NSImageView?
+        weak var overlay: ImageAnalysisOverlayView?
+        var image: NSImage?
+        var task: Task<Void, Never>?
+        let analyzer = ImageAnalyzer()
+
+        func update(_ image: NSImage) {
+            guard self.image !== image else { return }
+            task?.cancel()
+            self.image = image
+            imageView?.image = image
+            overlay?.analysis = nil
+            guard let cg = image.cgImage(forProposedRect: nil, context: nil, hints: nil) else { return }
+            let analyzer = analyzer
+            task = Task { [weak self, weak overlay] in
+                do {
+                    let analysis = try await analyzer.analyze(cg, orientation: .up, configuration: .init([.text]))
+                    guard !Task.isCancelled else { return }
+                    overlay?.analysis = analysis
+                    self?.task = nil
+                } catch {
+                    if !Task.isCancelled { Logger.view.error("VisionKit analysis failed: \(error)") }
+                }
+            }
+        }
+        func stop() {
+            task?.cancel(); task = nil
+            overlay?.analysis = nil; overlay?.trackingImageView = nil
+            imageView?.image = nil; image = nil
+        }
+        deinit { task?.cancel() }
+    }
+    func makeCoordinator() -> Coordinator { Coordinator() }
+    static func dismantleNSView(_ view: NSView, coordinator: Coordinator) {
+        // SwiftUI 即使暂存原生容器，关闭后的图像与文字识别也立即释放。
+        coordinator.stop()
+    }
+
     func makeNSView(context: Context) -> NSView {
         let container = NSView()
         
@@ -163,25 +194,17 @@ struct SelectableImageView: NSViewRepresentable {
                 overlay.bottomAnchor.constraint(equalTo: imageView.bottomAnchor)
             ])
             
-            let analyzer = ImageAnalyzer()
-            Task {
-                if let cgImage = image.cgImage(forProposedRect: nil, context: nil, hints: nil) {
-                    do {
-                        let configuration = ImageAnalyzer.Configuration([.text])
-                        let analysis = try await analyzer.analyze(cgImage, orientation: .up, configuration: configuration)
-                        overlay.analysis = analysis
-                    } catch {
-                        Logger.view.error("VisionKit analysis failed: \(error)")
-                    }
-                }
-            }
+            context.coordinator.overlay = overlay
+
         }
         
+        context.coordinator.imageView = imageView
+        context.coordinator.update(image)
         return container
     }
     
     func updateNSView(_ nsView: NSView, context: Context) {
-        // If image is static, no update needed.
+        context.coordinator.update(image)
     }
 }
 #endif

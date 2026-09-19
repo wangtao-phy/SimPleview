@@ -354,15 +354,15 @@ class WindowRegistry: NSObject, NSWindowDelegate, ObservableObject {
     // 监听窗口被点击红叉关闭的事件
     func windowWillClose(_ notification: Notification) {
         if let window = notification.object as? NSWindow {
+            // 对比窗口没有 AppState.cleanup，也要主动卸下文档和预热缓存。
+            // 原生视图可能被 AppKit 暂存，不能让它继续持有整本 PDF。
+            if let view = (window.windowController as? CompareWindowController)?.pdfView {
+                view.prepareForDocumentReplacement()
+                view.document = nil
+                view.removeFromSuperview()
+            }
             if let wc = window.windowController as? AppWindowController, let state = wc.appState {
-                
-                // 【终极斩杀】：拔掉 PDF 引擎
                 state.cleanup()
-                
-                // 触发智能保存
-                if let url = state.fileURL {
-                    state.autoTagDocumentIfCompleted(url: url)
-                }
             }
             
             window.delegate = nil
@@ -370,11 +370,10 @@ class WindowRegistry: NSObject, NSWindowDelegate, ObservableObject {
             DispatchQueue.main.async {
                 // 确保无论是匹配上的，还是因为某种原因 window 已经变 nil 的游离 Controller，全部删掉！
                 self.controllers.removeAll { $0.window === window || $0.window == nil }
-                // 清空根视图引用，强制打破循环，并触发底层 NSWindow 彻底释放图形缓存（IOSurface）
+                // 清空根视图引用，释放界面持有的文档及图像。
                 window.contentViewController = nil
                 
-                // [强制释放窗口]
-                window.close()
+                // willClose 之后由 AppKit 完成关闭，不再次 close 产生重复通知。
             }
         }
     }

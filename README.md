@@ -16,13 +16,13 @@ SimPleview is a PDF reader and annotation app developed with AI-assisted program
 - **PDF 阅读与标注**：页面缩略图、搜索、页面管理、高亮、下划线、删除线、文字笔记和手绘。
 - **标注保存**：普通标注写入 PDF，可在其他设备读取；可切换全部标注的显示与隐藏。
 - **AI 对话**：支持多个兼容 Chat Completions 的 API，分别配置密钥和模型 ID。回答按句显示，可暂停；使用视觉模型时可主动读取当前页或整份 PDF。详见 [AI 功能说明（macOS）](AI_FEATURES.md) 和 [iPad 版说明](iPad/README.md)。
-- **macOS**：另有签名管理、阅读记录、内部链接悬停预览、独立对比窗口、标签分组和在 Finder 中显示文件。闲置后台窗口会清理缓存，但不卸载整份 PDF。
+- **macOS**：另有签名管理、阅读记录、内部链接悬停预览、独立对比窗口、标签分组和在 Finder 中显示文件。闲置后台窗口会暂停后台渲染，保留文档和已生成的缩略图；内存压力较高时缩减缓存。
 - **iPadOS**：使用 PencilKit 手写，可创建空白、横线、方格、点阵笔记本，用文件夹整理。支持 Apple Pencil，也可启用手指书写。未移植 Mac 的签名库和 Finder 操作。
 
 - **PDF reading and annotation**: Thumbnails, search, page management, highlights, underlines, strikeouts, text notes, and handwriting.
 - **Annotation storage**: Standard annotations are saved in the PDF for use on other devices. Annotations can be shown or hidden together.
 - **AI chat**: Multiple Chat Completions-compatible APIs with separate keys and model IDs, sentence-by-sentence display, and pause. Page images are sent to a vision model when the user requests current-page or whole-document reading.
-- **macOS**: Signature management, reading records, internal-link previews, comparison windows, tab groups, and Reveal in Finder. Idle background windows clear caches while keeping the PDF loaded.
+- **macOS**: Signature management, reading records, internal-link previews, comparison windows, tab groups, and Reveal in Finder. Idle background windows pause background rendering while keeping the document and generated thumbnails. Caches shrink under memory pressure.
 - **iPadOS**: PencilKit handwriting, blank/lined/grid/dotted notebooks, and folder organization. Supports Apple Pencil and optional finger drawing. The Mac signature library and Finder actions are not included.
 
 ## 安装 / Installation
@@ -73,6 +73,12 @@ On macOS, standard annotations are saved to the original PDF after two seconds w
 使用 Swift 6、SwiftUI 和 PDFKit；macOS 使用 AppKit，iPadOS 使用 UIKit 和 PencilKit。两个工程的源码和资源分别管理。仓库保留编译需要的资源及第三方许可证；本地测试、调试文件、用户配置和构建产物不随源码提交。
 
 Built with Swift 6, SwiftUI, and PDFKit, using AppKit on macOS and UIKit/PencilKit on iPadOS. The projects keep separate source and resource directories. Required runtime resources and third-party licenses are included; local tests, debug files, user settings, and build products are excluded.
+
+## 捐赠 / Donate
+
+如果这个应用对你有帮助，可以通过 [PayPal 捐赠](https://www.paypal.com/ncp/payment/JDG2WJY9ZLNH8) 支持开发。捐赠自愿，不影响使用。
+
+If you find the app useful, you can support development by [donating via PayPal](https://www.paypal.com/ncp/payment/JDG2WJY9ZLNH8). Donations are optional and do not affect access to the app.
 
 ## License & Notes / 说明
 

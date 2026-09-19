@@ -20,6 +20,9 @@ final class SearchManager: ObservableObject {
     @Published var isSearching: Bool = false
     
     private var cancellables = Set<AnyCancellable>()
+    private var searchGeneration: UInt = 0
+
+    deinit { searchQueue.cancelAllOperations() }
     
     // [核心引擎：搜索队列]
     // 因为 PDF 搜索非常消耗 CPU，如果用户连续快速打字 "h", "he", "hel", "hello"
@@ -46,6 +49,10 @@ final class SearchManager: ObservableObject {
     func performSearch(in document: PDFDocument?, pdfView: PDFView?) {
         // 第一步：立刻废弃掉之前正在进行的旧搜索（因为用户的 query 可能已经变了）
         searchQueue.cancelAllOperations()
+        // 已完成的 Operation 可能还有主队列回调，cancelAllOperations 不会
+        // 再取消它。使用请求代数，防止旧结果在清空、换词或关闭后回填。
+        searchGeneration &+= 1
+        let generation = searchGeneration
         
         let query = searchQuery.trimmingCharacters(in: .whitespacesAndNewlines)
         
@@ -58,6 +65,7 @@ final class SearchManager: ObservableObject {
         }
         
         isSearching = true
+        currentSearchIndex = nil
         let currentQuery = query
 
         let startIndex = pdfView?.currentPage.map { document.index(for: $0) } ?? 0
@@ -70,7 +78,10 @@ final class SearchManager: ObservableObject {
             // 刚进来就先查一下有没有被取消，不要浪费算力
             guard let operation = operation, !operation.isCancelled else { return }
             guard let safeDocument = PDFDocument(data: documentData) else {
-                DispatchQueue.main.async { [weak self] in self?.isSearching = false }
+                DispatchQueue.main.async { [weak self] in
+                    guard let self, self.searchGeneration == generation else { return }
+                    self.isSearching = false
+                }
                 return
             }
             
@@ -142,7 +153,7 @@ final class SearchManager: ObservableObject {
                     if matches.count == 1 || matches.count % 15 == 0 {
                         let currentMatchesSnapshot = matches
                         DispatchQueue.main.async {
-                            guard let self = self, !operation.isCancelled else { return }
+                            guard let self = self, !operation.isCancelled, self.searchGeneration == generation else { return }
                             self.searchResults = currentMatchesSnapshot
                             if self.currentSearchIndex == nil {
                                 self.currentSearchIndex = 0
@@ -157,7 +168,7 @@ final class SearchManager: ObservableObject {
             
             // 收尾动作：先投递最后一批未上屏的结果（防止总数非 15 倍数时遗漏尾部），再标记搜索结束
             DispatchQueue.main.async {
-                guard let self = self, !operation.isCancelled else { return }
+                guard let self = self, !operation.isCancelled, self.searchGeneration == generation else { return }
                 self.searchResults = matches
                 if self.currentSearchIndex == nil && !matches.isEmpty {
                     self.currentSearchIndex = 0
@@ -213,6 +224,7 @@ final class SearchManager: ObservableObject {
 
     // 清空重置
     func clear() {
+        searchGeneration &+= 1
         searchQueue.cancelAllOperations()
         searchQuery = ""
         searchResults = []

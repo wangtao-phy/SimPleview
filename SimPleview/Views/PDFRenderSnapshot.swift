@@ -24,10 +24,33 @@ nonisolated struct PDFRenderSnapshot: @unchecked Sendable {
         let rect: CGRect
     }
     var background = 0
+    var backgroundBounds: [ObjectIdentifier: CGRect] = [:]
     var pages: [ObjectIdentifier: Page] = [:]
 }
 
 extension CustomPDFView {
+    /// PDFKit 会预绘不可见页。背景范围必须覆盖整本文档，不能依赖可见页的
+    /// 标注快照；这里只保存矩形，不生成图片、不保留 PDFPage，也不解析笔迹。
+    /// 文档/页数/显示框不变时复用这份字典，滚动不会重复遍历全书。
+    func preparePageBackground(for document: PDFDocument?) {
+        let background = _threadSafePageBackgroundColor.rawValue
+        guard background != 0, let document else {
+            backgroundGeometryDocument = nil
+            renderSnapshot.withLock { $0.background = background; $0.backgroundBounds = [:] }
+            return
+        }
+        let count = renderSnapshot.withLock { $0.backgroundBounds.count }
+        guard backgroundGeometryDocument !== document || backgroundGeometryBox != displayBox || count != document.pageCount else { return }
+        var bounds: [ObjectIdentifier: CGRect] = [:]
+        for index in 0..<document.pageCount {
+            guard let page = document.page(at: index) else { continue }
+            bounds[ObjectIdentifier(page)] = page.bounds(for: displayBox).applying(page.transform(for: displayBox)).standardized
+        }
+        backgroundGeometryDocument = document
+        backgroundGeometryBox = displayBox
+        renderSnapshot.withLock { [bounds] in $0.background = background; $0.backgroundBounds = bounds }
+    }
+
     /// PDFKit 的窗口/滚动通知可能先于内部可见页更新。合并到下一轮主队列
     /// 再取 visiblePages，避免把尚未完成布局的空列表当成最终视口。
     /// 每个视图最多排队一次，弱引用不延长窗口寿命；手绘仍同步发布快照。
@@ -50,8 +73,10 @@ extension CustomPDFView {
         isPublishingRenderSnapshot = true
         defer { isPublishingRenderSnapshot = false }
         observeRenderViewport()
+        preparePageBackground(for: document)
         var snapshot = PDFRenderSnapshot()
         snapshot.background = _threadSafePageBackgroundColor.rawValue
+        snapshot.backgroundBounds = renderSnapshot.withLock { $0.backgroundBounds }
         var pages = visiblePages
         for page in [draftInkPage, currentDrawingPage, currentHoveredLink?.page].compactMap({ $0 }) {
             if !pages.contains(where: { $0 === page }) { pages.append(page) }

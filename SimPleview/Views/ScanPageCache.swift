@@ -50,6 +50,7 @@ final class ScanPageCache {
     nonisolated private struct Key: Hashable, Sendable {
         let page: ObjectIdentifier
         let geometry: [CGFloat]
+        let scale: CGFloat
         let width: Int
         let height: Int
     }
@@ -81,10 +82,19 @@ final class ScanPageCache {
     private var activeKey: Key?
     private var snapshotTask: Task<Void, Never>?
     private var pausedUntil = ContinuousClock.now
+    private var isSuspended = false
     private var generation: UInt = 0
     private let byteLimit = 48 * 1024 * 1024
 
     deinit { snapshotTask?.cancel(); operation?.cancel() }
+
+    /// 休眠期间布局通知仍可能到达，显式暂停才能防止刚释放的正文缓存被重新填满。
+    func suspend() {
+        isSuspended = true
+        removeAll()
+    }
+
+    func resume() { isSuspended = false }
 
     func removeAll(pauseFor seconds: TimeInterval = 0) {
         generation &+= 1
@@ -96,13 +106,16 @@ final class ScanPageCache {
     }
 
     nonisolated private static func key(for scan: ScanPage, scale: CGFloat) -> Key? {
+        // PDFKit 的瓦片变换会产生浮点尾差（例如 2.4 与 2.400000000000006）。
+        // 统一到十位小数，避免同一显示倍率无法命中；这不是降低图像分辨率。
+        let scale = (scale * 10_000_000_000).rounded() / 10_000_000_000
         let rect = scan.displayBounds, t = scan.transform
         let w = ceil(rect.width * scale), h = ceil(rect.height * scale)
         guard scale.isFinite, scale > 0, w.isFinite, h.isFinite, w > 0, h > 0,
               w * h * 4 <= Double(24 * 1024 * 1024) else { return nil }
         return Key(page: ObjectIdentifier(scan.reference),
             geometry: [rect.minX, rect.minY, rect.width, rect.height, t.a, t.b, t.c, t.d, t.tx, t.ty],
-            width: Int(w), height: Int(h))
+            scale: scale, width: Int(w), height: Int(h))
     }
 
     /// 热路径只取一次短锁；没有等待后台任务、序列化或读取活动 PDFKit 对象。
@@ -118,14 +131,23 @@ final class ScanPageCache {
     /// 调用者按可见页、相邻页顺序传入。不断滚动时替换待办范围，已离开的
     /// 页面不再生成；正在解码的任务只允许结束，不强行中断系统绘图。
     func update(pages: [PDFPage], scale: CGFloat) {
-        guard ContinuousClock.now >= pausedUntil else { return }
+        guard !isSuspended, ContinuousClock.now >= pausedUntil else { return }
         var seen = Set<Key>()
+        var reservedBytes = 0
         let requests: [Request] = pages.compactMap { page in
             guard let scan = ScanPage.capture(page), let key = Self.key(for: scan, scale: scale),
                   seen.insert(key).inserted else { return nil }
+            // 一次预热的工作集合必须能同时放进预算。否则视口及相邻页轮流
+            // 淘汰、重新解码，快速滚动后即使停住也可能持续占用 CPU。
+            let cost = key.width * key.height * 4
+            guard reservedBytes + cost <= byteLimit else { seen.remove(key); return nil }
+            reservedBytes += cost
             return Request(page: page, scan: scan, key: key)
         }
-        if let activeKey, !seen.contains(activeKey) { operation?.cancel() }
+        // CoreGraphics 绘图开始后无法中断；取消也省不了这次解码。
+        // 让正在绘制的页面完成并进入有界缓存，返回时可直接复用；
+        // 尚未开始的过期任务则取消，文档替换/内存压力仍由 generation 拦截。
+        if let activeKey, !seen.contains(activeKey), operation?.isExecuting != true { operation?.cancel() }
         pending = requests.filter {
             ($0.key != activeKey || operation?.isCancelled == true) && image(for: $0.scan, scale: scale) == nil
         }
@@ -194,9 +216,14 @@ final class ScanPageCache {
         let rect = scan.displayBounds
         context.setFillColor(CGColor(gray: 1, alpha: 1))
         context.fill(CGRect(x: 0, y: 0, width: key.width, height: key.height))
-        context.scaleBy(x: CGFloat(key.width) / rect.width, y: CGFloat(key.height) / rect.height)
+        // 页面边界可含小数。保持原始倍率，让多出的不足一像素留在边缘，
+        // 不能把内容拉伸到 ceil 后的宽高，否则显示时再次缩放会使文字发虚。
+        context.scaleBy(x: key.scale, y: key.scale)
         context.translateBy(x: -rect.minX, y: -rect.minY)
         context.concatenate(scan.transform)
+        // 与 PDFKit 一样裁剪到页面范围；小数裁剪边缘不能把框外内容
+        // 绘入取整后多出的像素，否则旋转后页边会出现一条深色细线。
+        context.clip(to: scan.bounds)
         context.interpolationQuality = .high
         context.drawPDFPage(page)
         return context.makeImage()

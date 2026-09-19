@@ -126,19 +126,19 @@ extension CustomPDFView {
            let image = scanCache.image(for: scan, scale: scale) {
             context.saveGState()
             context.interpolationQuality = .high
-            context.draw(image, in: scan.displayBounds)
+            // 缓存的像素网格与瓦片一致；不把取整多出的边缘压回页面的小数边界。
+            let bounds = scan.displayBounds
+            context.draw(image, in: CGRect(origin: bounds.origin,
+                size: CGSize(width: CGFloat(image.width) / scale, height: CGFloat(image.height) / scale)))
             context.restoreGState()
         } else {
             VectorInkDrawingScope.perform(suppressing: snapshot.pages[ObjectIdentifier(page)]?.vectorInkIDs ?? []) {
                 unsafeBitCast(implementation, to: Draw.self)(self, selector, page, context)
             }
         }
-        guard let content = snapshot.pages[ObjectIdentifier(page)] else { return }
-        context.saveGState()
-        defer { context.restoreGState() }
-        context.concatenate(content.transform)
-        context.setShouldAntialias(true)
-        if snapshot.background != 0 {
+        // 背景独立于可见标注快照，预绘页及其所有瓦片使用同一页面矩形。
+        // 矩形已转换到显示坐标，不能再次叠加页面旋转/裁剪变换。
+        if snapshot.background != 0, let bounds = snapshot.backgroundBounds[ObjectIdentifier(page)] {
             context.saveGState()
             switch snapshot.background {
             case 1:
@@ -151,9 +151,14 @@ extension CustomPDFView {
                 context.setFillColor(CGColor(gray: 1, alpha: 1))
                 context.setBlendMode(.difference)
             }
-            context.fill(content.bounds)
+            context.fill(bounds)
             context.restoreGState()
         }
+        guard let content = snapshot.pages[ObjectIdentifier(page)] else { return }
+        context.saveGState()
+        defer { context.restoreGState() }
+        context.concatenate(content.transform)
+        context.setShouldAntialias(true)
         for stroke in content.strokes {
             context.saveGState()
             context.addPath(stroke.path)

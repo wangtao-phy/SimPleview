@@ -125,7 +125,7 @@ extension AppState {
         if annotationManager.undo(in: pdfView.document, pdfView: pdfView, onThumbnailUpdate: { [weak self] index in
             // 如果撤销的是“删除页面”这类影响全局的操作，index 会是 -1
             if index == -1 {
-                self?.thumbnailManager.clearCache()
+                if let self, let document = self.pdfView.document { self.thumbnailManager.reconcile(with: document) }
                 self?.documentVersion = UUID() // 强刷整个文档的 UI
             } else {
                 // 否则只是局部页面的批注撤销，单独重绘那一页即可
@@ -141,7 +141,7 @@ extension AppState {
     func redo() {
         if annotationManager.redo(in: pdfView.document, pdfView: pdfView, onThumbnailUpdate: { [weak self] index in
             if index == -1 {
-                self?.thumbnailManager.clearCache()
+                if let self, let document = self.pdfView.document { self.thumbnailManager.reconcile(with: document) }
                 self?.documentVersion = UUID()
             } else {
                 self?.thumbnailManager.invalidateThumbnail(at: index)

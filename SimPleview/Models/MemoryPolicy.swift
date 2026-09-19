@@ -10,10 +10,6 @@ protocol MemoryPolicy {
     /// 是否开启高级页面阴影
     var pageShadowsEnabled: Bool { get }
     
-    // MARK: - 缓存级策略
-    /// 缩略图最大生成边长
-    var thumbnailMaxEdge: CGFloat { get }
-    
     // MARK: - 交互级策略
     /// 侧边栏极速滚动时，是否为了防抖而延迟跳转（防渲染风暴）
     var delaysNavigationJumps: Bool { get }
@@ -31,9 +27,6 @@ struct PerformanceMemoryPolicy: MemoryPolicy {
     var interpolationQuality: PDFInterpolationQuality { .high }
     var pageShadowsEnabled: Bool { true }
     
-    // 最终像素边长。缓存容量由 ThumbnailStore 统一按字节计费。
-    var thumbnailMaxEdge: CGFloat { 640 }
-    
     var delaysNavigationJumps: Bool { false }
     
     var aggressivePurgeOnClose: Bool { true } // 关闭后释放该窗口缓存
@@ -45,9 +38,6 @@ struct PerformanceMemoryPolicy: MemoryPolicy {
 struct SavingMemoryPolicy: MemoryPolicy {
     var interpolationQuality: PDFInterpolationQuality { .none } // 追求最低内存占用和最快渲染
     var pageShadowsEnabled: Bool { false }
-    
-    // [极限内存节约]：极大地缩减缩略图的占用大小和缓存数量，以空间换取极低的常驻内存
-    var thumbnailMaxEdge: CGFloat { 320 }
     
     var delaysNavigationJumps: Bool { true }
     

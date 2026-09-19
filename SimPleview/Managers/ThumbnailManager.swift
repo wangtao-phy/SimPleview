@@ -1,15 +1,19 @@
 import SwiftUI
-import os
 @preconcurrency import PDFKit
 import Combine
 
-/// [教程注释：极速缩略图引擎 (ThumbnailManager)]
-/// PDF 的缩略图渲染非常耗费 CPU，如果你滚动得很快，瞬间触发几百页的渲染，主线程会当场卡死。
-/// 所以我们需要一个专门的引擎，利用后台队列和缓存机制来解决这个问题。
+/// 页面状态只在主线程管理；后台只渲染独立的单页 PDF 数据。
+/// 成品图像与任务寿命分开：取消任务、切换模式和休眠不丢弃有效缩略图。
+@MainActor
 final class ThumbnailManager: ObservableObject {
-    
+    static let displayWidth: CGFloat = 140
     private let cacheOwner = UUID()
     private var cacheGeneration: UInt = 0
+    private var isSuspended = false
+    private var displayScale: CGFloat = 2
+    private struct WeakPage { weak var value: PDFPage? }
+    private var knownPages: [Int: WeakPage] = [:]
+    private var dirtyIndices = Set<Int>()
     private struct PendingSnapshot {
         let readyAt: ContinuousClock.Instant
         var isPrefetch: Bool
@@ -17,166 +21,141 @@ final class ThumbnailManager: ObservableObject {
     }
     private var pendingSnapshots: [Int: PendingSnapshot] = [:]
     private var snapshotTask: Task<Void, Never>?
-    // 防止对同一页重复发起请求；图像由 ThumbnailStore 统一持有。
     private var generatingIndices = Set<Int>()
-    private let lock = OSAllocatedUnfairLock() // 采用性能最高的 OSAllocatedUnfairLock
-    
-    // [并发调度器]
-    // 专门的渲染队列，使用 OperationQueue 支持取消。
-    // 每窗口至多两张独立 PDF 快照并行，缩短整屏等待时间，
-    // 不随页数增加工作线程；主线程仍每轮只准备一页。
-    private let renderQueue: OperationQueue = {
-        let q = OperationQueue()
-        q.maxConcurrentOperationCount = 2
-        q.qualityOfService = .utility // 侧栏缩略图不能与正文瓦片争抢交互优先级
-        return q
+
+    // 所有窗口共用两个后台工作线程；每个窗口最多提前准备两份快照。
+    // 不能取消整个共享队列，只能取消本管理器持有的工作项。
+    private static let renderQueue: OperationQueue = {
+        let queue = OperationQueue()
+        queue.maxConcurrentOperationCount = 2
+        queue.qualityOfService = .utility
+        return queue
     }()
-    
-    // 记录正在执行的请求，方便随时精准取消
     private var operations = [Int: (id: UUID, operation: Operation)]()
-    
-    // 用来通知 UI 某张图画好了的信号发射器
     let thumbnailUpdateSubject = PassthroughSubject<(Int, PlatformImage), Never>()
     let thumbnailInvalidatedSubject = PassthroughSubject<Int, Never>()
-    
-    // 用来通知所有存活（可见）的缩略图重新发起渲染请求（热重载唤醒机制）
     let hotReloadSubject = PassthroughSubject<Void, Never>()
-    
-    private var currentMemoryMode: MemoryMode
-    nonisolated(unsafe) private var observer: NSObjectProtocol?
-    
-    init() {
-        self.currentMemoryMode = MemoryMode.current
-        applyMemoryMode()
-        
-        // 仅监听 memoryMode 键的变化，避免任意 UserDefaults 变更都触发缓存策略重评估
-        observer = NotificationCenter.default.addObserver(forName: UserDefaults.didChangeNotification, object: nil, queue: .main) { [weak self] _ in
-            Task { @MainActor [weak self] in
-                guard let self = self else { return }
-                let newMode = MemoryMode.current
-                if self.currentMemoryMode != newMode {
-                    self.currentMemoryMode = newMode
-                    self.applyMemoryMode()
-                }
-            }
-        }
-    }
-    
-    deinit {
-        let owner = cacheOwner
-        Task { @MainActor in ThumbnailStore.shared.remove(owner: owner) }
-        renderQueue.cancelAllOperations()
+
+    isolated deinit {
+        ThumbnailStore.shared.remove(owner: cacheOwner)
+        for entry in operations.values { entry.operation.cancel() }
         snapshotTask?.cancel()
-        if let observer = observer {
-            NotificationCenter.default.removeObserver(observer)
-        }
-    }
-    
-    private func applyMemoryMode() {
-        clearCache()
-        hotReloadSubject.send()
     }
 
     func getThumbnail(for index: Int) -> PlatformImage? {
         ThumbnailStore.shared.image(owner: cacheOwner, page: index)
     }
 
-    func removeThumbnail(for index: Int) {
-        cancelThumbnail(for: index)
-        ThumbnailStore.shared.remove(owner: cacheOwner, page: index)
+    func suspend() {
+        isSuspended = true
+        cancelPendingWork()
     }
 
-    func handleMemoryPressure() {
-        clearCache()
+    func resume() {
+        guard isSuspended else { return }
+        isSuspended = false
+        hotReloadSubject.send()
     }
 
-    /// 编辑、撤销和删除只让该页缓存失效，不在主线程同步解码/绘图。
-    /// 可见单元收到通知后走同一条后台管线；离屏页等再次出现时才生成。
+    /// 旧图继续显示，新图完成后原位替换；离屏页的脏标记保留到下次请求。
     func invalidateThumbnail(at index: Int) {
-        removeThumbnail(for: index)
+        cancelThumbnail(for: index)
+        dirtyIndices.insert(index)
         thumbnailInvalidatedSubject.send(index)
     }
 
-    // [紧急制动]
-    // 当文档关闭或页面发生大规模改变时，紧急杀掉所有正在排队画图的线程，清空一切。
+    /// 仅文档替换、显示内容整体改变或关闭时彻底清空。
     func clearCache() {
+        cancelPendingWork()
+        knownPages.removeAll(); dirtyIndices.removeAll()
+        ThumbnailStore.shared.remove(owner: cacheOwner)
+    }
+
+    private func cancelPendingWork() {
         cacheGeneration &+= 1
         snapshotTask?.cancel(); snapshotTask = nil
         pendingSnapshots.removeAll()
-        renderQueue.cancelAllOperations()
-        ThumbnailStore.shared.remove(owner: cacheOwner)
-        lock.lock()
-        operations.removeAll()
-        generatingIndices.removeAll()
-        lock.unlock()
+        for entry in operations.values { entry.operation.cancel() }
+        operations.removeAll(); generatingIndices.removeAll()
     }
-    
-    // [核心渲染逻辑]
-    func generateThumbnail(for page: PDFPage, at index: Int, in doc: PDFDocument, prefetch: Bool = false, currentDocChecker: @escaping @MainActor @Sendable () -> Bool) {
-        // 1. 原子性地检查并在生成集合中注册，消除 TOCTOU 竞态
-        lock.lock()
+
+    /// 用页面对象身份重新定位缓存。弱引用不延长被删除页面或旧文档的寿命。
+    func reconcile(with document: PDFDocument) {
+        cancelPendingWork()
+        var positions: [ObjectIdentifier: Int] = [:]
+        for index in 0..<document.pageCount {
+            if let page = document.page(at: index) { positions[ObjectIdentifier(page)] = index }
+        }
+        var mapping: [Int: Int] = [:]
+        var retained: [Int: WeakPage] = [:]
+        for (oldIndex, weakPage) in knownPages {
+            guard let page = weakPage.value, let index = positions[ObjectIdentifier(page)] else { continue }
+            mapping[oldIndex] = index; retained[index] = weakPage
+        }
+        ThumbnailStore.shared.remap(owner: cacheOwner, pages: mapping)
+        dirtyIndices = Set(dirtyIndices.compactMap { mapping[$0] })
+        knownPages = retained
+    }
+
+    /// 按侧栏宽度 × 屏幕倍率生成真实像素；长宽比与旋转保持不变。
+    /// 极窄长页限制最大边长，防止异常页面尺寸造成无上限的位图分配。
+    static func pixelSize(bounds: CGRect, rotation: Int, scale: CGFloat) -> CGSize? {
+        let rotated = abs(rotation % 180) == 90
+        let width = rotated ? bounds.height : bounds.width
+        let height = rotated ? bounds.width : bounds.height
+        guard width.isFinite, height.isFinite, width > 0, height > 0, scale.isFinite, scale > 0 else { return nil }
+        let pixelWidth = ceil(displayWidth * scale)
+        let pixelHeight = ceil(pixelWidth * height / width)
+        guard pixelWidth.isFinite, pixelHeight.isFinite else { return nil }
+        let factor = min(1, 2048 / max(pixelWidth, pixelHeight))
+        return CGSize(width: max(1, floor(pixelWidth * factor)), height: max(1, floor(pixelHeight * factor)))
+    }
+
+    func generateThumbnail(for page: PDFPage, at index: Int, in doc: PDFDocument, prefetch: Bool = false,
+                           currentDocChecker: @escaping @MainActor @Sendable () -> Bool) {
+        guard !isSuspended, let size = Self.pixelSize(bounds: page.bounds(for: .cropBox), rotation: page.rotation, scale: displayScale) else { return }
+        knownPages[index] = WeakPage(value: page)
         if generatingIndices.contains(index) {
             if !prefetch { pendingSnapshots[index]?.isPrefetch = false }
-            lock.unlock()
             return
         }
+        if !dirtyIndices.contains(index), ThumbnailStore.shared.contains(owner: cacheOwner, page: index, pixels: size) { return }
+        if pendingSnapshots.count + operations.count >= 60 { cancelPendingWork() }
         generatingIndices.insert(index)
-        lock.unlock()
-        
-        // 2. 检查是否已有缓存（getThumbnail 内部自行处理线程安全）
-        if getThumbnail(for: index) != nil {
-            markAsFinished(index, id: nil)
-            return
-        }
-
-        // 延迟准备也计入队列上限，防止大量尚未离屏的单元积压快照任务。
-        // 保留已完成缓存，只取消过时工作；旧渲染凭请求 ID 无法回填新任务。
-        if pendingSnapshots.count + operations.count >= 60 {
-            snapshotTask?.cancel(); snapshotTask = nil
-            pendingSnapshots.removeAll()
-            renderQueue.cancelAllOperations()
-            operations.removeAll()
-            generatingIndices = [index]
-        }
-        
-        // 请求先登记，下一轮才准备；快速经过且已离屏的页仍可及时取消。
-        // 首次可见页不再强制等 180 ms；只预取视口附近两页，不扫描整本书。
         pendingSnapshots[index] = PendingSnapshot(readyAt: .now, isPrefetch: prefetch) { [weak self, weak page, weak doc] in
             guard let self else { return }
             guard let page, let doc, page.document === doc, currentDocChecker() else {
                 self.markAsFinished(index, id: nil); return
             }
-            self.enqueueThumbnail(for: page, at: index, currentDocChecker: currentDocChecker)
+            self.enqueueThumbnail(for: page, at: index, size: size, currentDocChecker: currentDocChecker)
         }
         scheduleNextSnapshot()
     }
 
-    /// 可见范围是调度依据；提前两页填充缓存，使普通速度滚动时直接复用图像。
-    /// 真正离开范围才取消任务，不能在单元刚出屏幕时把紧邻预取也一起取消。
-    func updateViewport(_ indices: [Int], in document: PDFDocument,
+    /// 只预取视口前后两页。切换到高倍率屏幕时保留旧图，逐页补齐清晰图像。
+    func updateViewport(_ indices: [Int], in document: PDFDocument, displayScale: CGFloat = 2,
                         currentDocChecker: @escaping @MainActor @Sendable () -> Bool) {
-        let visible = Set(indices.filter { $0 >= 0 && $0 < document.pageCount })
-        var wanted = visible
-        for index in visible {
-            wanted.formUnion(max(0, index - 2)...min(document.pageCount - 1, index + 2))
+        if displayScale.isFinite, displayScale > 0, self.displayScale != displayScale {
+            self.displayScale = displayScale
+            cancelPendingWork()
         }
+        let visible = Set(indices.filter { $0 >= 0 && $0 < document.pageCount })
+        ThumbnailStore.shared.setVisible(visible, owner: cacheOwner)
+        var wanted = visible
+        for index in visible { wanted.formUnion(max(0, index - 2)...min(document.pageCount - 1, index + 2)) }
         for index in generatingIndices.subtracting(wanted) { cancelThumbnail(for: index) }
         for index in visible.sorted() + wanted.subtracting(visible).sorted() {
             guard let page = document.page(at: index) else { continue }
-            generateThumbnail(for: page, at: index, in: document,
-                prefetch: !visible.contains(index), currentDocChecker: currentDocChecker)
+            generateThumbnail(for: page, at: index, in: document, prefetch: !visible.contains(index), currentDocChecker: currentDocChecker)
         }
     }
 
-    /// 每次至少让出 16 ms 给输入/布局；准备最多领先两个工作项。
-    /// 可见页优先于预取。空闲时没有轮询，也不一次性序列化整屏页面。
     private func scheduleNextSnapshot() {
-        guard snapshotTask == nil, operations.count < 2, !pendingSnapshots.isEmpty else { return }
+        guard !isSuspended, snapshotTask == nil, operations.count < 2, !pendingSnapshots.isEmpty else { return }
         snapshotTask = Task { @MainActor [weak self] in
             do { try await Task.sleep(for: .milliseconds(16)) } catch { return }
             guard let self else { return }
             self.snapshotTask = nil
-            // 睡眠期间视口可能改变，执行前再选当前最需要的页面。
             guard let (index, request) = self.pendingSnapshots.min(by: {
                 if $0.value.isPrefetch != $1.value.isPrefetch { return !$0.value.isPrefetch }
                 return $0.value.readyAt < $1.value.readyAt
@@ -187,128 +166,49 @@ final class ThumbnailManager: ObservableObject {
         }
     }
 
-    private func enqueueThumbnail(for page: PDFPage, at index: Int,
+    private func enqueueThumbnail(for page: PDFPage, at index: Int, size: CGSize,
                                   currentDocChecker: @escaping @MainActor @Sendable () -> Bool) {
-        let safeCurrentDocChecker = currentDocChecker
-        let maxEdge = currentMemoryMode.policy.thumbnailMaxEdge
-        
-        // 在文档所有者上创建单页快照，后台只打开这份独立数据。
-        // 不能把当前显示的 PDFDocument/PDFPage 直接交给渲染队列。
-        guard let pageData = StandardInk.exportData(of: page) else {
-            markAsFinished(index, id: nil)
-            return
-        }
-
+        // 活动页面只在主线程序列化；后台不能与正文共享 PDFKit 对象及其内部缓存。
+        guard let pageData = StandardInk.exportData(of: page) else { markAsFinished(index, id: nil); return }
         let showsAnnotations = page.displaysAnnotations
-        let generation = cacheGeneration
-        let operationID = UUID()
+        let generation = cacheGeneration, operationID = UUID()
         let operation = BlockOperation()
         operation.addExecutionBlock { [weak self, weak operation] in
-            guard let self = self, let operation = operation, !operation.isCancelled else {
-                DispatchQueue.main.async { self?.markAsFinished(index, id: operationID) }
-                return
+            guard let operation, !operation.isCancelled else { return }
+            let thumb: NSImage? = autoreleasepool {
+                guard let document = PDFDocument(data: pageData), let page = document.page(at: 0) else { return nil }
+                // PDFPage 不拥有 PDFDocument；明确保留独立文档直到绘制结束。
+                defer { withExtendedLifetime(document) {} }
+                page.displaysAnnotations = showsAnnotations
+                return page.platformThumbnail(of: size, for: .cropBox)
             }
-            
-            // 3. 及时释放内存 (极其重要)
-            autoreleasepool {
-                // [极其关键的卡顿修复]
-                // 在后台线程提取 page，彻底消除主线程因为初次解析 PDF 页面对象引发的严重掉帧！
-                guard let safeDoc = PDFDocument(data: pageData), let safePage = safeDoc.page(at: 0) else {
-                    DispatchQueue.main.async { self.markAsFinished(index, id: operationID) }
-                    return
-                }
-                
-                safePage.displaysAnnotations = showsAnnotations
-
-                // 4. 执行高性能渲染，按页面原始比例动态计算目标尺寸
-                let pageBounds = safePage.bounds(for: .cropBox)
-                guard pageBounds.width.isFinite, pageBounds.height.isFinite,
-                      pageBounds.width > 0, pageBounds.height > 0 else {
-                    DispatchQueue.main.async { self.markAsFinished(index, id: operationID) }
-                    return
-                }
-                // 修复旋转 bug：PDF 页面旋转后 bounds 不会改变，必须根据 rotation 手动交换宽高
-                let isRotated = safePage.rotation == 90 || safePage.rotation == 270
-                let effectiveWidth = isRotated ? pageBounds.height : pageBounds.width
-                let effectiveHeight = isRotated ? pageBounds.width : pageBounds.height
-                
-                // maxEdge 已经在主线程提前获取
-                let targetSize: CGSize
-                if effectiveWidth > effectiveHeight {
-                    // 横向页面（如 PPT）
-                    let scale = maxEdge / effectiveWidth
-                    targetSize = CGSize(width: maxEdge, height: effectiveHeight * scale)
-                } else {
-                    // 竖向页面（标准 A4 等）
-                    let scale = maxEdge / effectiveHeight
-                    targetSize = CGSize(width: effectiveWidth * scale, height: maxEdge)
-                }
-                
-                // 策略给出最终像素边长；此处不再次乘倍率，以免每张图膨胀到十余 MiB。
-                let retinaSize = targetSize
-                
-                // 这里只渲染独立单页文档，不访问主视图正在编辑的 PDFPage。
-                let thumb = safePage.platformThumbnail(of: retinaSize, for: .cropBox)
-                
-                guard !operation.isCancelled else {
-                    DispatchQueue.main.async { self.markAsFinished(index, id: operationID) }
-                    return
-                }
-                
-                // 画好了，通知主线程更新 UI
-                DispatchQueue.main.async { [weak self] in
-                    guard let self else { return }
-                    // 同一 PDFDocument 的页序也会改变；仅检查文档身份不足够。
-                    // 清缓存版本、请求身份和取消状态全部通过才允许按页码回填。
-                    guard !operation.isCancelled, self.cacheGeneration == generation,
-                          self.operations[index]?.id == operationID, safeCurrentDocChecker() else {
-                        self.markAsFinished(index, id: operationID)
-                        return
-                    }
-                    
-                    ThumbnailStore.shared.insert(thumb, owner: self.cacheOwner, page: index)
-                    self.thumbnailUpdateSubject.send((index, thumb))
-                    self.markAsFinished(index, id: operationID)
-                }
+            DispatchQueue.main.async { [weak self] in
+                guard let self, !operation.isCancelled, self.cacheGeneration == generation,
+                      self.operations[index]?.id == operationID, currentDocChecker(), let thumb else { return }
+                ThumbnailStore.shared.insert(thumb, owner: self.cacheOwner, page: index)
+                self.dirtyIndices.remove(index)
+                self.thumbnailUpdateSubject.send((index, thumb))
             }
         }
-        
-        lock.lock()
+        // 被取消且尚未开始的任务不会执行工作闭包，完成回调仍必须释放调度槽位。
+        operation.completionBlock = { [weak self] in
+            DispatchQueue.main.async { [weak self] in self?.markAsFinished(index, id: operationID) }
+        }
         operations[index] = (operationID, operation)
-        lock.unlock()
-        
-        renderQueue.addOperation(operation)
+        Self.renderQueue.addOperation(operation)
     }
-    
+
     private func markAsFinished(_ index: Int, id: UUID?) {
-        lock.lock()
-        if let id, operations[index]?.id != id {
-            lock.unlock()
-            return
-        }
-        generatingIndices.remove(index)
-        operations.removeValue(forKey: index)
-        lock.unlock()
-        scheduleNextSnapshot()
-    }
-    
-    // [极限内存优化：精准击杀滞后任务]
-    // 当缩略图因为用户快速滚动而离开屏幕时，如果它还在排队渲染，直接将其取消，节约宝贵的 CPU 和内存。
-    func cancelThumbnail(for index: Int) {
-        if pendingSnapshots.removeValue(forKey: index) != nil {
-            generatingIndices.remove(index)
-        }
-        lock.lock()
-        if let entry = operations[index] {
-            entry.operation.cancel()
-            operations.removeValue(forKey: index)
-            generatingIndices.remove(index)
-        }
-        lock.unlock()
-        if pendingSnapshots.isEmpty {
-            snapshotTask?.cancel(); snapshotTask = nil
-        }
+        if let id, operations[index]?.id != id { return }
+        generatingIndices.remove(index); operations[index] = nil
         scheduleNextSnapshot()
     }
 
+    func cancelThumbnail(for index: Int) {
+        pendingSnapshots[index] = nil
+        operations.removeValue(forKey: index)?.operation.cancel()
+        generatingIndices.remove(index)
+        if pendingSnapshots.isEmpty { snapshotTask?.cancel(); snapshotTask = nil }
+        scheduleNextSnapshot()
+    }
 }

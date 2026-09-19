@@ -74,21 +74,13 @@ final class AppState: NSObject, ObservableObject, PDFViewDelegate {
     
     // MARK: - Hibernation System
     
-    /// 指示应用是否已进入深度内存休眠模式。
-    /// 
-    /// **深度休眠 (Deep Hibernation)**: 
-    /// macOS 上 `PDFKit` 会在阅读大文档时持续吃满缓存。此机制会在应用退至后台且长时间无交互时，
-    /// 精确剥离底层 `PDFDocument` 并释放大量堆内存，而在用户重新激活应用时无缝重建。
+    /// 休眠仅暂停后台工作，保留活动文档与缩略图。
     @Published var isHibernating: Bool = false
     var hibernationWorkItem: DispatchWorkItem? // 用来取消延时执行的闭包任务
-    // [缩略图刷新节流] 记录应用上次失去活跃状态的时刻，用于判断"离开多久"才值得全量刷新缩略图。
-    var lastResignActiveDate: Date?
     // [O(1)级极速恢复] 用于保存休眠前的物理状态，使用基础数据类型避免强引用泄漏
     var hibernatedPosition: (pageIndex: Int, point: CGPoint, zoom: CGFloat)?
     var originalWindowTitle: String?
     
-    // [原生内存优化] 监听操作系统的底层内存压力告警
-    var memoryPressureSource: DispatchSourceMemoryPressure?
     
     #if os(macOS)
     // 弱引用宿主窗口，防止循环引用导致内存泄漏
@@ -320,14 +312,7 @@ final class AppState: NSObject, ObservableObject, PDFViewDelegate {
         autosaveTask = nil
         loadGeneration &+= 1
         cancelHibernation()
-        // 节约模式下关闭文档时强制清空 CoreAnimation 缓存
-        if MemoryMode.current.policy.aggressivePurgeOnClose {
-            #if os(macOS)
-            pdfView.clearSelection()
-            pdfView.layoutDocumentView()
-            #endif
-        }
-        
+        // 直接释放文档及交互状态，不在关闭前重新布局即将丢弃的页面。
         pdfView.prepareForDocumentReplacement()
         pdfView.document = nil
         pdfView.removeFromSuperview()
@@ -382,16 +367,10 @@ final class AppState: NSObject, ObservableObject, PDFViewDelegate {
         cancellables.forEach { $0.cancel() }
         cancellables.removeAll()
 
-        // [内存防漏] 取消本实例专属的内存压力监听源，避免窗口反复开关累积活跃的 DispatchSource
-        memoryPressureSource?.cancel()
-        memoryPressureSource = nil
     }
 
     deinit {
         statisticsTask?.cancel()
-        // [内存防漏兜底] 即便 cleanup() 未被调用，对象销毁时也确保底层内存压力源被取消
-        memoryPressureSource?.cancel()
-        memoryPressureSource = nil
     }
     
     
@@ -428,6 +407,7 @@ final class AppState: NSObject, ObservableObject, PDFViewDelegate {
         // 复用主窗口同款的护眼色渲染逻辑（draw(_:to:) 中的背景滤镜）
         let purePDFView = CustomPDFView()
         purePDFView._threadSafePageBackgroundColor = self.pageBackgroundColor
+        purePDFView.preparePageBackground(for: currentDoc)
         purePDFView.document = currentDoc
         purePDFView.autoScales = true
         purePDFView.displayMode = .singlePageContinuous

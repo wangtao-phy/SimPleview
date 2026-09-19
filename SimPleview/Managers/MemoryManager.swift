@@ -1,9 +1,7 @@
 import Foundation
-import Combine
 import os
 
-/// 内存大管家 (Memory Manager)
-/// 专门负责监听底层操作系统的物理内存压力，执行被动释放（被系统警告时）和主动释放（文档关闭时）。
+/// 单一系统压力入口：优先回收正文预热图像，按压力级别调整缩略图预算。
 final class MemoryManager {
     static let shared = MemoryManager()
     
@@ -19,15 +17,16 @@ final class MemoryManager {
         // macOS 和 iOS 通用的底层物理内存压力监听
         // .warning: 内存开始紧张
         // .critical: 极度危险，如果不立即释放很可能被系统强制 Kill
-        let source = DispatchSource.makeMemoryPressureSource(eventMask: [.warning, .critical], queue: .main)
+        let source = DispatchSource.makeMemoryPressureSource(eventMask: [.normal, .warning, .critical], queue: .main)
         
         source.setEventHandler { [weak self] in
             let event = self?.memoryPressureSource?.data ?? []
-            if event.contains(.warning) {
-                self?.handleMemoryPressure(level: "Warning")
-            }
             if event.contains(.critical) {
                 self?.handleMemoryPressure(level: "Critical")
+            } else if event.contains(.warning) {
+                self?.handleMemoryPressure(level: "Warning")
+            } else if event.contains(.normal) {
+                ThumbnailStore.shared.trim(to: ThumbnailStore.shared.byteLimit)
             }
         }
         
@@ -43,34 +42,13 @@ final class MemoryManager {
     private func handleMemoryPressure(level: String) {
         logger.warning("🚨 [MemoryManager] Received System Memory Pressure: \(level)")
         
-        // 我们听从用户的要求：无论什么模式，都不直接置空 PDFView 实例（因为那会破坏阅读体验）。
-        // 我们只做“最安全的极限操作”：清理后台一切闲置缓存。
-        
-        // 1. 强行砍掉缩略图渲染队列和图片池
-        // 因为就算当前在“性能模式”保活了 500 张图，在系统要命的关头，也必须让步。
-        Task { @MainActor in
-            for weakState in AppState.allInstances {
-                if let state = weakState.value {
-                    state.thumbnailManager.handleMemoryPressure()
-                    state.pdfView.scanCache.removeAll(pauseFor: 30)
-                }
-            }
+        // 全应用只保留一个压力监听器。可见行仍持有正在显示的图像；
+        // 缩略图预算逐级收缩，大幅正文缓存暂停预热，避免清理后立即再次生成。
+        let limit = level == "Critical" ? 32 : 96
+        ThumbnailStore.shared.trim(to: limit * 1024 * 1024)
+        for weakState in AppState.allInstances {
+            weakState.value?.pdfView.scanCache.removeAll(pauseFor: 30)
         }
-        
-        logger.warning("✅ [MemoryManager] Aggressively purged all background caches to survive.")
     }
     
-    /// 手动清理系统所有全局可用内存缓存
-    func clearCaches() {
-        Task { @MainActor in
-            for weakState in AppState.allInstances {
-                if let state = weakState.value {
-                    state.thumbnailManager.clearCache()
-                    state.pdfView.scanCache.removeAll()
-                    // 可以加更多全局缓存清理逻辑
-                }
-            }
-        }
-        logger.info("♻️ [MemoryManager] Manually cleared caches.")
-    }
 }

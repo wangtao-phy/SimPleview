@@ -43,11 +43,11 @@ extension AppState {
             doc.insert(page, at: insertAt + i)
         }
         
-        // 7. 更新选区和视图状态，并清除所有缩略图缓存
+        // 7. 更新选区，并把内容未变的缩略图映射到新的页码。
         self.selectedIndices = Set(insertAt..<(insertAt + pagesToMove.count))
         self.liveState.currentPageIndex = insertAt
         self.liveState.totalPageCount = doc.pageCount
-        thumbnailManager.clearCache()
+        thumbnailManager.reconcile(with: doc)
         self.rebuildPageAspectRatios()
         self.documentVersion = UUID()
         self.pageStructureChanged = UUID()
@@ -78,9 +78,9 @@ extension AppState {
         batchStack.append(.insertPages(count: 1, startIndex: insertAt))
         redoStack.removeAll()
         liveState.totalPageCount = doc.pageCount
-        thumbnailManager.clearCache()
+        thumbnailManager.reconcile(with: doc)
         rebuildPageAspectRatios()
-        thumbnailManager.hotReloadSubject.send() // 重建可见缩略图（避免全量重建导致闪白）
+        thumbnailManager.hotReloadSubject.send() // 已有图像直接复用，仅新页面需要生成
         pageStructureChanged = UUID() // 通知视图层重新聚焦缩略图列表
         
         // 自动跳转并选中新页面
@@ -117,9 +117,9 @@ extension AppState {
         }
         selectedIndices.removeAll()
         liveState.totalPageCount = doc.pageCount
-        thumbnailManager.clearCache()
+        thumbnailManager.reconcile(with: doc)
         rebuildPageAspectRatios()
-        thumbnailManager.hotReloadSubject.send() // 重建可见缩略图（避免全量重建导致闪白）
+        thumbnailManager.hotReloadSubject.send() // 已有图像直接复用，仅新页面需要生成
         pageStructureChanged = UUID() // 通知视图层重新聚焦缩略图列表
         if liveState.currentPageIndex >= liveState.totalPageCount { liveState.currentPageIndex = liveState.totalPageCount - 1 }
         pdfView.setPlatformNeedsDisplay()
@@ -137,9 +137,9 @@ extension AppState {
         batchStack.append(.insertPages(count: insertDoc.pageCount, startIndex: insertAt))
         redoStack.removeAll()
         liveState.totalPageCount = doc.pageCount
-        thumbnailManager.clearCache()
+        thumbnailManager.reconcile(with: doc)
         rebuildPageAspectRatios()
-        thumbnailManager.hotReloadSubject.send() // 重建可见缩略图（避免全量重建导致闪白）
+        thumbnailManager.hotReloadSubject.send() // 已有图像直接复用，仅新页面需要生成
         pageStructureChanged = UUID() // 通知视图层重新聚焦缩略图列表
         if liveState.currentPageIndex >= insertAt { liveState.currentPageIndex += insertDoc.pageCount }
         pdfView.setPlatformNeedsDisplay()
@@ -153,6 +153,8 @@ extension AppState {
         // PDFKit 角度要求为 0, 90, 180, 270 (不能是负数)
         let newRotation = (page.rotation - 90) % 360
         page.rotation = newRotation < 0 ? newRotation + 360 : newRotation
+        pdfView.backgroundGeometryDocument = nil
+        pdfView.preparePageBackground(for: doc)
         
         // [Bug修复核心] 旋转后，页面的物理宽高比例发生了反转（比如横版变竖版）。
         // 如果不同步更新内存中的 pageAspectRatios，左侧边栏的骨架屏占位框高度就会错乱。

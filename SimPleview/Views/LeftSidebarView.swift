@@ -65,13 +65,14 @@ struct LeftSidebarView: View {
 struct ThumbnailListView: View {
     @ObservedObject var state: AppState
     @FocusState.Binding var isThumbnailFocused: Bool
+    @Environment(\.displayScale) private var displayScale
     @State private var visibleIndices: [Int] = []
     @State private var isScrolling = false
 
     private func updateViewport(_ indices: [Int]) {
         guard let document = state.pdfView.document else { return }
         let identity = ObjectIdentifier(document)
-        state.thumbnailManager.updateViewport(indices, in: document) { [weak state] in
+        state.thumbnailManager.updateViewport(indices, in: document, displayScale: displayScale) { [weak state] in
             state?.pdfView.document.map(ObjectIdentifier.init) == identity
         }
     }
@@ -155,6 +156,7 @@ struct ThumbnailListView: View {
                 visibleIndices = indices
                 updateViewport(indices)
             }
+            .onChange(of: displayScale) { _, _ in updateViewport(visibleIndices) }
             .onScrollPhaseChange { _, phase in isScrolling = phase != .idle }
             .onReceive(state.thumbnailManager.hotReloadSubject) { _ in updateViewport(visibleIndices) }
             .onDisappear { updateViewport([]) }
@@ -265,15 +267,15 @@ struct ThumbnailItem: View, Equatable {
                         .interpolation(.high)
                         .contrast(1.15)
                         .scaledToFit()
-                        .frame(width: 140)
+                        .frame(width: ThumbnailManager.displayWidth)
                 } else {
                     // [骨架屏 / Skeleton] 如果图片还没渲染出来，先显示一个空白框
                     Color.primary.opacity(0.03)
                         .aspectRatio(ratio, contentMode: .fit)
-                        .frame(width: 140)
+                        .frame(width: ThumbnailManager.displayWidth)
                 }
             }
-            .frame(width: 140).background(Color.white).cornerRadius(4)
+            .frame(width: ThumbnailManager.displayWidth).background(Color.white).cornerRadius(4)
 
             .shadow(color: .black.opacity(0.05), radius: 1, x: 0, y: 1)
             // 选中时的蓝色外加粗框
@@ -300,7 +302,7 @@ struct ThumbnailItem: View, Equatable {
         }
         // 接收热重载的“唤醒”信号！仅当前可见的 ThumbnailItem 会收到此信号，触发自身的精准重绘
         .onReceive(state.thumbnailManager.hotReloadSubject) { _ in
-            thumbnail = nil
+            thumbnail = isVisible ? state.getThumbnail(for: index) : nil
         }
         // LazyVStack 可能保留离屏行及其订阅，通知本身不代表该行可见。
         // 显式可见性门禁阻止热重载/预取通知重新填满离屏强引用。

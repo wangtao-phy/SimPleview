@@ -60,6 +60,10 @@ class AuthorsWindowManager {
             queue: .main
         ) { [weak self] _ in
             MainActor.assumeIsolated {
+                if let observer = self?.closeObserver {
+                    NotificationCenter.default.removeObserver(observer)
+                    self?.closeObserver = nil
+                }
                 self?.windowController = nil
             }
         }
