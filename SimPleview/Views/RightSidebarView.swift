@@ -272,7 +272,10 @@ class ArrowMonitorNSView: NSView {
                 monitor = nil
             }
             monitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
-                guard let self = self else { return event }
+                // 旧标签页的搜索焦点可能尚未复位，但不能消费新标签页的按键。
+                guard let self, let window = self.window,
+                      event.window === window, window.isKeyWindow,
+                      !self.isHiddenOrHasHiddenAncestor else { return event }
                 
                 // [修复] 只在搜索框获得焦点时拦截方向键。
                 // 旧实现用 `!isPDFViewFocused` 判断，范围过宽：当焦点在缩略图列表（同样不是 PDFView）时，

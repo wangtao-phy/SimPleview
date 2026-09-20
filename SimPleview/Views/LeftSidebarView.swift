@@ -435,7 +435,11 @@ final class ThumbnailKeyMonitorNSView: NSView {
     private func installMonitorIfNeeded() {
         guard monitor == nil else { return }
         monitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
-            guard let self = self, self.isFocused else { return event }
+            // 本地监听覆盖整个应用；后台标签页可能保留 FocusState，不能仅凭它吞键。
+            // 只处理当前活动窗口发给本侧栏的事件，切换标签或独立窗口时都适用。
+            guard let self, self.isFocused, let window = self.window,
+                  event.window === window, window.isKeyWindow,
+                  !self.isHiddenOrHasHiddenAncestor else { return event }
             // [焦点精确门控] SwiftUI 的 FocusState 在焦点转移到 AppKit 控件时不会自动复位：
             // 用户先点缩略图再点进搜索框/页数输入框/PDF 视图后，isFocused 仍是 true，
             // 若不检查真实的第一响应者，这些控件里的退格键/方向键会被这里误吞。
