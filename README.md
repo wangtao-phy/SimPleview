@@ -74,6 +74,8 @@ On macOS, standard annotations are saved to the original PDF after two seconds w
 
 Built with Swift 6, SwiftUI, and PDFKit, using AppKit on macOS and UIKit/PencilKit on iPadOS. The projects keep separate source and resource directories. Required runtime resources and third-party licenses are included; local tests, debug files, user settings, and build products are excluded.
 
+源码结构和常见维护入口见 [代码结构说明](ARCHITECTURE.md)。
+
 ## 捐赠 / Donate
 
 如果这个应用对你有帮助，可以通过 [PayPal 捐赠](https://www.paypal.com/ncp/payment/JDG2WJY9ZLNH8) 支持开发。捐赠自愿，不影响使用。
