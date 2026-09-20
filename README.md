@@ -82,6 +82,12 @@ Built with Swift 6, SwiftUI, and PDFKit, using AppKit on macOS and UIKit/PencilK
 
 If you find the app useful, you can support development by [donating via PayPal](https://www.paypal.com/ncp/payment/JDG2WJY9ZLNH8). Donations are optional and do not affect access to the app.
 
+也可扫码支持：**支付宝请对准右下角，微信请对准中间。**
+
+You can also scan the code to donate: **aim Alipay at the bottom-right code, or WeChat at the central code.**
+
+<a href="docs/assets/PayQrcode.png"><img src="docs/assets/PayQrcode.png" alt="支付宝与微信收款二维码 / Alipay and WeChat donation QR codes" width="360"></a>
+
 ## License & Notes / 说明
 
 The source code of this application is open to everyone for learning and personal use, but commercial use is strictly prohibited. Users are encouraged to build upon this framework and leverage AI to add customized features that suit their own preferences. If you use code from this project, please provide proper attribution by citing the source.
