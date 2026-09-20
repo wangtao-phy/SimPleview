@@ -58,7 +58,7 @@ struct DayScheduleTimelineView: View {
 
                 Spacer()
 
-                Text("双击时间槽新建")
+                Text(state.L("New Event Slot Hint"))
                     .font(.system(size: 9))
                     .foregroundColor(.secondary)
             }
@@ -111,7 +111,7 @@ struct DayScheduleTimelineView: View {
     }
 
     private func formatDayHeader(_ date: Date) -> String {
-        ScheduleDateFormatters.dayHeader.string(from: date)
+        ScheduleDateFormatters.string(date, style: .dayHeader, language: state.appLanguage)
     }
 }
 
@@ -146,7 +146,7 @@ struct HourlySlotRow: View {
                             HStack(spacing: 4) {
                                 Image(systemName: "plus")
                                     .font(.system(size: 8))
-                                Text("双击在此时间添加日程")
+                                Text(state.L("Add Event Here"))
                                     .font(.system(size: 9))
                             }
                             .foregroundColor(.accentColor.opacity(0.8))

@@ -14,7 +14,7 @@ extension AnnotationManager {
     }
 
     private struct HistoryChange {
-        let inverse: UndoAction?
+        let inverse: UndoAction
         var affectedPages: Set<Int> = []
         var navigateTo: Int? = nil
     }
@@ -22,13 +22,7 @@ extension AnnotationManager {
     private func performHistory(isUndo: Bool, in document: PDFDocument?, pdfView: PDFView?, onThumbnailUpdate: (Int) -> Void, onPageChange: (Int) -> Void) -> Bool {
         guard let document, let action = isUndo ? batchStack.last : redoStack.last,
               let change = applyHistoryAction(action, to: document) else { return false }
-        if isUndo {
-            batchStack.removeLast()
-            if let inverse = change.inverse { redoStack.append(inverse) } else { redoStack.removeAll() }
-        } else {
-            redoStack.removeLast()
-            if let inverse = change.inverse { batchStack.append(inverse) } else { batchStack.removeAll() }
-        }
+        finishHistory(isUndo: isUndo, inverse: change.inverse)
         if let index = change.navigateTo {
             onThumbnailUpdate(-1)
             onPageChange(index)
@@ -57,8 +51,7 @@ extension AnnotationManager {
                 }
             }
             guard !removed.isEmpty else { return nil }
-            let removedSet = Set(removed)
-            allAnnotations.removeAll { removedSet.contains($0) }
+            removeFromSidebar(removed)
             return HistoryChange(inverse: .deleteAnnotation(annotations: removed, pageIndices: pageIndices), affectedPages: Set(pageIndices))
 
         case .deleteAnnotation(let annotations, let indices):
@@ -69,7 +62,7 @@ extension AnnotationManager {
             for (annotation, index) in zip(annotations, indices) {
                 document.page(at: index)?.addAnnotation(annotation)
             }
-            insertRestoredAnnotations(annotations)
+            for annotation in annotations { register(annotation, in: document) }
             return HistoryChange(inverse: .annotation(batchID: batchID, pageIndices: Set(indices)), affectedPages: Set(indices))
 
         case .deletePage(let page, let index):
@@ -86,21 +79,19 @@ extension AnnotationManager {
         case .removePages(let indices):
             return removePages(at: indices, in: document)
 
-        case .reorderPages(let originalIndices, let insertedAt):
-            let count = originalIndices.count
-            guard count > 0, insertedAt >= 0, insertedAt <= document.pageCount,
-                  Set(originalIndices).count == count,
-                  originalIndices.allSatisfy({ (0..<document.pageCount).contains($0) }) else { return nil }
-            let offset = originalIndices.filter { $0 < insertedAt }.count
-            let start = max(0, min(insertedAt - offset, document.pageCount - count))
-            let pages = (start..<(start + count)).compactMap { document.page(at: $0) }
+        case .movePages(let sources, let destinations):
+            let count = sources.count
+            guard count > 0, count == destinations.count,
+                  Set(sources).count == count, Set(destinations).count == count,
+                  (sources + destinations).allSatisfy({ (0..<document.pageCount).contains($0) }) else { return nil }
+            let pages = sources.compactMap { document.page(at: $0) }
             guard pages.count == count else { return nil }
-            for _ in pages { document.removePage(at: start) }
-            for (page, index) in zip(pages, originalIndices).sorted(by: { $0.1 < $1.1 }) {
+            // 先逆序移出，再按最终位置升序插入；交换两组索引即得到逆操作。
+            for index in sources.sorted(by: >) { document.removePage(at: index) }
+            for (page, index) in zip(pages, destinations).sorted(by: { $0.1 < $1.1 }) {
                 document.insert(page, at: index)
             }
-            // 沿用原有约定：重排可撤销，撤销后清空重做栈。
-            return HistoryChange(inverse: nil, navigateTo: originalIndices.min())
+            return HistoryChange(inverse: .movePages(from: destinations, to: sources), navigateTo: destinations.min())
         }
     }
 
@@ -126,16 +117,4 @@ extension AnnotationManager {
         return HistoryChange(inverse: .deletePages(pages: pages, indices: sorted), navigateTo: sorted.first)
     }
 
-    private func insertRestoredAnnotations(_ annotations: [PDFAnnotation]) {
-        for annotation in annotations {
-            let id = annotation.userName ?? ""
-            // 多行手绘/高亮只保留一个侧栏代表，普通外部标注按对象身份区分。
-            guard !allAnnotations.contains(where: {
-                $0 === annotation || (id.hasPrefix("B-") && $0.userName == id)
-            }) else { continue }
-            let key = Self.annotationSortKey(annotation)
-            let index = allAnnotations.firstIndex { key < Self.annotationSortKey($0) } ?? allAnnotations.endIndex
-            allAnnotations.insert(annotation, at: index)
-        }
-    }
 }

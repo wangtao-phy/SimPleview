@@ -94,7 +94,7 @@ struct EditEventPopoverView: View {
 
                 Picker("", selection: $recurrence) {
                     ForEach(EventRecurrenceOption.allCases) { opt in
-                        Text(opt.localizedTitle).tag(opt)
+                        Text(opt.localizedTitle(in: state.appLanguage)).tag(opt)
                     }
                 }
                 .labelsHidden()
@@ -115,7 +115,7 @@ struct EditEventPopoverView: View {
                         ForEach(calendars, id: \.calendarIdentifier) { cal in
                             HStack(spacing: 6) {
                                 Circle().fill(Color(nsColor: cal.color)).frame(width: 7, height: 7)
-                                Text(cal.title)
+                                Text(EventManager.displayTitle(of: cal, language: state.appLanguage))
                             }
                             .tag(cal as EKCalendar?)
                         }
@@ -135,7 +135,7 @@ struct EditEventPopoverView: View {
 
                 Picker("", selection: $alert) {
                     ForEach(EventAlertOption.allCases) { opt in
-                        Text(opt.localizedTitle).tag(opt)
+                        Text(opt.localizedTitle(in: state.appLanguage)).tag(opt)
                     }
                 }
                 .labelsHidden()
@@ -186,12 +186,12 @@ struct EditEventPopoverView: View {
                     .foregroundColor(.red.opacity(0.85))
                 }
                 .buttonStyle(.plain)
-                .help("删除此日程")
+                .help(state.L("Delete Event"))
                 .disabled(isSaving)
 
                 Spacer()
 
-                Button("取消") {
+                Button(state.L("Cancel")) {
                     onDismiss()
                 }
                 .keyboardShortcut(.cancelAction)
@@ -204,7 +204,7 @@ struct EditEventPopoverView: View {
                             let finalEnd = isAllDay ? endDate : (endDate >= startDate ? endDate : startDate.addingTimeInterval(7200))
                             try await eventManager.updateEvent(
                                 event,
-                                title: title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "未命名日程" : title,
+                                title: title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? state.L("Untitled Event") : title,
                                 startDate: startDate,
                                 endDate: finalEnd,
                                 isAllDay: isAllDay,

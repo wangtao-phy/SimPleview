@@ -4,6 +4,7 @@ import SwiftUI
 // MARK: - 待办单行视图组件
 
 struct ReminderRowView: View {
+    let language: AppLanguage
     let reminder: EKReminder
     let currentDocTitle: String
     var showCalendarBadge: Bool = false
@@ -37,7 +38,7 @@ struct ReminderRowView: View {
 
             // 文本与元数据
             VStack(alignment: .leading, spacing: 3) {
-                Text(reminder.title ?? "未命名待办")
+                Text(reminder.title ?? L.s("Untitled Task", language))
                     .font(.system(size: 12, weight: .medium))
                     .strikethrough(reminder.isCompleted)
                     .foregroundColor(reminder.isCompleted ? .secondary : .primary)
@@ -55,7 +56,7 @@ struct ReminderRowView: View {
                     if showCalendarBadge, let cal = reminder.calendar {
                         HStack(spacing: 3) {
                             Circle().fill(Color(nsColor: cal.color)).frame(width: 5, height: 5)
-                            Text(cal.title)
+                            Text(EventManager.displayTitle(of: cal, language: language))
                                 .font(.system(size: 9))
                         }
                         .foregroundColor(.secondary)
@@ -85,7 +86,7 @@ struct ReminderRowView: View {
                         HStack(spacing: 2) {
                             Image(systemName: "doc.text")
                                 .font(.system(size: 9))
-                            Text("本文献")
+                            Text(L.s("Current Paper", language))
                                 .font(.system(size: 9))
                         }
                         .foregroundColor(.accentColor)
@@ -107,30 +108,23 @@ struct ReminderRowView: View {
                         .foregroundColor(.red.opacity(0.8))
                 }
                 .buttonStyle(.plain)
-                .help("删除此事项")
+                .help(L.s("Delete Task", language))
             }
         }
         .padding(.vertical, 3)
         .onHover { isHovered = $0 }
         .contextMenu {
             Button(action: onToggle) {
-                Text(reminder.isCompleted ? "标记为未完成" : "标记为已完成")
+                Text(reminder.isCompleted ? L.s("Mark Incomplete", language) : L.s("Mark Complete", language))
             }
             Button(role: .destructive, action: onDelete) {
-                Text("删除待办")
+                Text(L.s("Delete Task", language))
             }
         }
     }
 
     private func formatDueDate(_ date: Date) -> String {
-        let cal = Calendar.current
-        if cal.isDateInToday(date) {
-            return ScheduleDateFormatters.todayDue.string(from: date)
-        } else if cal.isDateInTomorrow(date) {
-            return ScheduleDateFormatters.tomorrowDue.string(from: date)
-        } else {
-            return ScheduleDateFormatters.otherDue.string(from: date)
-        }
+        ScheduleDateFormatters.due(date, language: language)
     }
 }
 
@@ -150,10 +144,10 @@ struct AllDayEventRowView: View {
             RoundedRectangle(cornerRadius: 2)
                 .fill(Color(nsColor: event.calendar?.color ?? .systemBlue))
                 .frame(width: 3, height: 16)
-            Text(event.title ?? "全天日程")
+            Text(event.title ?? state.L("All-day Event"))
                 .font(.system(size: 11, weight: .medium))
             Spacer()
-            Text("全天")
+            Text(state.L("All Day"))
                 .font(.system(size: 9))
                 .foregroundColor(.secondary)
 
@@ -164,7 +158,7 @@ struct AllDayEventRowView: View {
                         .foregroundColor(.red.opacity(0.8))
                 }
                 .buttonStyle(.plain)
-                .help("删除此日程")
+                .help(state.L("Delete Event"))
             }
         }
         .padding(.horizontal, 8)
@@ -223,7 +217,7 @@ struct EventRowView: View {
                 .padding(.vertical, 2)
 
             VStack(alignment: .leading, spacing: 3) {
-                Text(event.title ?? "未命名日程")
+                Text(event.title ?? state.L("Untitled Event"))
                     .font(.system(size: 12, weight: .medium))
                     .foregroundColor(.primary)
                     .lineLimit(2)
@@ -244,7 +238,7 @@ struct EventRowView: View {
                     HStack(spacing: 2) {
                         Image(systemName: "doc.text")
                             .font(.system(size: 9))
-                        Text("本文献")
+                        Text(state.L("Current Paper"))
                             .font(.system(size: 9))
                     }
                     .foregroundColor(.accentColor)
@@ -264,7 +258,7 @@ struct EventRowView: View {
                         .foregroundColor(.red.opacity(0.8))
                 }
                 .buttonStyle(.plain)
-                .help("删除此日程")
+                .help(state.L("Delete Event"))
             }
         }
         .padding(.vertical, 3)
@@ -296,17 +290,17 @@ struct EventRowView: View {
 
     private func formatEventTime(_ event: EKEvent) -> String {
         if event.isAllDay {
-            return ScheduleDateFormatters.allDay.string(from: event.startDate)
+            return ScheduleDateFormatters.string(event.startDate, style: .dayHeader, language: state.appLanguage) + " " + state.L("All Day")
         }
 
         let cal = Calendar.current
         if cal.isDate(event.startDate, inSameDayAs: event.endDate) {
-            let startStr = ScheduleDateFormatters.timeOnly.string(from: event.startDate)
-            let endStr = ScheduleDateFormatters.timeOnly.string(from: event.endDate)
+            let startStr = ScheduleDateFormatters.string(event.startDate, style: .timeOnly, language: state.appLanguage)
+            let endStr = ScheduleDateFormatters.string(event.endDate, style: .timeOnly, language: state.appLanguage)
             return "\(startStr) - \(endStr)"
         } else {
-            let startStr = ScheduleDateFormatters.dateAndHour.string(from: event.startDate)
-            let endStr = ScheduleDateFormatters.dateAndHour.string(from: event.endDate)
+            let startStr = ScheduleDateFormatters.string(event.startDate, style: .dateAndHour, language: state.appLanguage)
+            let endStr = ScheduleDateFormatters.string(event.endDate, style: .dateAndHour, language: state.appLanguage)
             return "\(startStr) - \(endStr)"
         }
     }

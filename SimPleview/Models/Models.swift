@@ -13,6 +13,8 @@ extension Logger {
 /// 应用级选项；翻译字典位于 Localization.swift，编辑历史动作位于 UndoAction.swift。
 enum AppLanguage: String, CaseIterable {
     case zh, en
+
+    var locale: Locale { Locale(identifier: self == .zh ? "zh_Hans_CN" : "en_US") }
     
     // [核心概念：计算属性]
     // 这不是一个普通的变量，而是计算属性 (Computed Property)。它不占用额外的内存存储，每次调用都会实时走 switch 逻辑返回结果。

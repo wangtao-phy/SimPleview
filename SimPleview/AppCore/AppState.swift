@@ -175,19 +175,9 @@ final class AppState: NSObject, ObservableObject, PDFViewDelegate {
     /// Shift+方向键连选的锚点：记录按下 Shift 时的起始页码，松开 Shift 后清除
     var shiftSelectionAnchor: Int?
     
-    var allAnnotations: [PDFAnnotation] {
-        get { annotationManager.allAnnotations }
-        set { annotationManager.allAnnotations = newValue }
-    }
-    var batchStack: [UndoAction] {
-        get { annotationManager.batchStack }
-        set { annotationManager.batchStack = newValue }
-    }
-    
-    var redoStack: [UndoAction] {
-        get { annotationManager.redoStack }
-        set { annotationManager.redoStack = newValue }
-    }
+    var allAnnotations: [PDFAnnotation] { annotationManager.allAnnotations }
+    var batchStack: [UndoAction] { annotationManager.batchStack }
+    var redoStack: [UndoAction] { annotationManager.redoStack }
     var canUndo: Bool { annotationManager.canUndo }
     var canRedo: Bool { annotationManager.canRedo }
     
@@ -341,9 +331,7 @@ final class AppState: NSObject, ObservableObject, PDFViewDelegate {
         
         // [内存防漏防御：强行斩断业务数据关联]
         // 彻底清空可能对 PDFPage 和 PDFDocument 造成强引用的批注和历史记录，防止循环引用导致文档内存无法释放
-        allAnnotations.removeAll()
-        batchStack.removeAll()
-        redoStack.removeAll()
+        annotationManager.reset()
         selectedAnnotation = nil
         navigationManager.clearHistory()
         

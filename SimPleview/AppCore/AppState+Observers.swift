@@ -8,51 +8,27 @@ extension AppState {
         // [闭包与弱引用]
         // [weak self] 是 Swift 避免闭包造成循环引用（互相抓住不放）的终极武器。
         pdfView.onAnnotationSelected = { [weak self] annot in
-            DispatchQueue.main.async { self?.selectedAnnotation = annot }
+            DispatchQueue.main.async {
+                guard let self, !self.isClosed else { return }
+                if let annot, annot.page?.document !== self.pdfView.document { return }
+                self.selectedAnnotation = annot
+            }
         }
         pdfView.onAnnotationContentsChanged = { [weak self] annot, text in
             DispatchQueue.main.async {
-                // [极速稳健跨行同步]：与其扫描全书成百上千页，不如只扫描当前批注所在页的相邻 ±2 页
-                // 这样既能完美归结跨越多行的批注，又能将性能损耗降至几乎为 0，实现真正的瞬时响应！
-                if let doc = self?.pdfView.document, let id = annot.userName, !id.isEmpty, let page = annot.page {
-                    let pageIndex = doc.index(for: page)
-                    let start = max(0, pageIndex - 2)
-                    let end = min(doc.pageCount, pageIndex + 3)
-                    
-                    for i in start..<end {
-                        if let searchPage = doc.page(at: i) {
-                            for searchAnnot in searchPage.annotations where searchAnnot.userName == id {
-                                searchAnnot.simPleNote = text
-                                searchAnnot.modificationDate = Date()
-                            }
-                        }
-                    }
-                } else {
-                    annot.simPleNote = text // 兜底
-                    annot.modificationDate = Date()
+                guard let self, !self.isClosed, let doc = self.pdfView.document,
+                      annot.page?.document === doc else { return }
+                if self.annotationManager.updateContents(text, of: annot, in: doc) {
+                    self.isDirty = true
                 }
-                self?.isDirty = true
-                self?.objectWillChange.send()
-                
-                // [极致性能优化] 由于修改时间变成了最新 (Date())，不需要全量排序（频繁访问 modificationDate 会引发严重的 CPU 耗时和卡顿），
-                // 只需要把这个批注从数组中找到，抽出来，放到最后面即可。时间复杂度从 O(N log N) 且高消耗，直接降到 O(N) 且零消耗。
-                if let am = self?.annotationManager, let id = annot.userName {
-                    if let idx = am.allAnnotations.firstIndex(where: { $0.userName == id }) {
-                        let updatedAnnot = am.allAnnotations.remove(at: idx)
-                        am.allAnnotations.append(updatedAnnot)
-                    }
-                }
-                
-                // [P1-2优化] 移除 Array(current) 全量克隆
-                // objectWillChange.send() 已在上方调用，足以让 SwiftUI 感知变化
-                // 额外通知 annotationManager 刷新侧边栏显示
-                self?.annotationManager.objectWillChange.send()
             }
         }
         pdfView.onAnnotationDeleted = { [weak self] annot in
             DispatchQueue.main.async {
-                self?.selectedAnnotation = annot
-                self?.deleteSelectedAnnotation()
+                guard let self, !self.isClosed, let document = self.pdfView.document,
+                      annot.page?.document === document else { return }
+                self.selectedAnnotation = annot
+                self.deleteSelectedAnnotation()
             }
         }
         pdfView.onColorChanged = { [weak self] color, type in
@@ -68,6 +44,9 @@ extension AppState {
                 self?.resetAnnotationTimer()
             }
         }
+        pdfView.onAnnotationPagesChanged = { [weak self] indices in
+            for index in indices { self?.thumbnailManager.invalidateThumbnail(at: index) }
+        }
         pdfView.onSaveRequired = { [weak self] in
             self?.isDirty = true
         }
@@ -78,9 +57,7 @@ extension AppState {
                 guard let self, !self.isClosed, let page = annotation.page,
                       let document = self.pdfView.document, page.document === document else { return }
                 // 侧栏首次展开可能已读到这一笔，延迟回调不能再追加一次。
-                if !self.annotationManager.allAnnotations.contains(where: { $0 === annotation }) {
-                    self.annotationManager.allAnnotations.append(annotation)
-                }
+                self.annotationManager.register(annotation, in: document)
                 self.thumbnailManager.invalidateThumbnail(at: document.index(for: page))
             }
         }

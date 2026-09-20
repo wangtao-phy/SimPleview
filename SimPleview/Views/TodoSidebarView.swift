@@ -39,7 +39,7 @@ struct TodoSidebarView: View {
     
     private var currentContextCitation: String {
         guard !currentDocTitle.isEmpty else { return "" }
-        return "来自文献: 《\(currentDocTitle)》 第 \(currentPageNumber) 页"
+        return L.format("Paper Citation", state.appLanguage, currentDocTitle, currentPageNumber)
     }
     
     var body: some View {
@@ -61,7 +61,7 @@ struct TodoSidebarView: View {
                         Picker("", selection: $selectedReminderCalendarID) {
                             Text(state.L("All Lists")).tag("ALL")
                             ForEach(calendars, id: \.calendarIdentifier) { cal in
-                                Text(cal.title).tag(cal.calendarIdentifier)
+                                Text(EventManager.displayTitle(of: cal, language: state.appLanguage)).tag(cal.calendarIdentifier)
                             }
                         }
                         .pickerStyle(.menu)
@@ -103,7 +103,7 @@ struct TodoSidebarView: View {
                             .foregroundColor(.secondary)
                     }
                     .buttonStyle(.plain)
-                    .help("刷新")
+                    .help(state.L("Refresh"))
                     
                     // 新建按钮 (+)
                     Button(action: {
@@ -140,6 +140,7 @@ struct TodoSidebarView: View {
                 }
             }
         }
+        .environment(\.locale, state.appLanguage.locale)
         .alert(state.L("Operation Failed"), isPresented: Binding(
             get: { operationError != nil }, set: { if !$0 { operationError = nil } }
         )) {
@@ -168,7 +169,7 @@ struct TodoSidebarView: View {
         .sheet(isPresented: $showingAddEventSheet) {
             AddEventSheetView(
                 state: state,
-                defaultTitle: !currentDocTitle.isEmpty ? "研读: \(currentDocTitle)" : "",
+                defaultTitle: !currentDocTitle.isEmpty ? L.format("Reading Paper", state.appLanguage, currentDocTitle) : "",
                 defaultNotes: currentContextCitation,
                 initialStartDate: presetEventStartDate,
                 initialEndDate: presetEventEndDate,
@@ -239,6 +240,7 @@ struct TodoSidebarView: View {
                             Section(header: reminderSectionHeader(cal: cal, count: items.count)) {
                                 ForEach(items, id: \.calendarItemIdentifier) { reminder in
                                     ReminderRowView(
+                                    language: state.appLanguage,
                                         reminder: reminder,
                                         currentDocTitle: currentDocTitle,
                                         showCalendarBadge: false,
@@ -265,6 +267,7 @@ struct TodoSidebarView: View {
                         Section(header: completedSectionHeader(count: completedList.count)) {
                             ForEach(completedList, id: \.calendarItemIdentifier) { reminder in
                                 ReminderRowView(
+                                    language: state.appLanguage,
                                     reminder: reminder,
                                     currentDocTitle: currentDocTitle,
                                     showCalendarBadge: true,
@@ -297,12 +300,12 @@ struct TodoSidebarView: View {
                 .fill(Color(nsColor: cal.color))
                 .frame(width: 8, height: 8)
             
-            Text(cal.title)
+            Text(EventManager.displayTitle(of: cal, language: state.appLanguage))
                 .font(.system(size: 11, weight: .semibold))
                 .foregroundColor(.primary)
             
-            if cal.title == "SimPleview阅读" {
-                Text("App专属")
+            if cal.title == EventManager.readingCalendarTitle {
+                Text(state.L("App List"))
                     .font(.system(size: 9))
                     .padding(.horizontal, 4)
                     .padding(.vertical, 1)
@@ -409,14 +412,14 @@ struct TodoSidebarView: View {
                 .font(.system(size: 36))
                 .foregroundColor(isDenied ? .red : .orange)
             
-            Text(isDenied ? "权限未开启或已被拒绝" : state.L("Permission Required"))
+            Text(isDenied ? state.L("Permission Not Enabled") : state.L("Permission Required"))
                 .font(.headline)
                 .multilineTextAlignment(.center)
                 .padding(.horizontal, 16)
             
             Text(isDenied
-                 ? "macOS 系统已限制访问\(title)。请在『系统设置 > 隐私与安全性 > \(isCalendar ? "日历" : "提醒事项")』中允许 SimPleview。"
-                 : "SimPleview 需要访问您的系统\(title)，以实现与 macOS 原生 App 的双向实时同步。")
+                 ? L.format("Schedule Access Denied", state.appLanguage, title, state.L(isCalendar ? "Calendar" : "Reminders"))
+                 : L.format("Schedule Access Purpose", state.appLanguage, title))
                 .font(.caption)
                 .foregroundColor(.secondary)
                 .multilineTextAlignment(.center)

@@ -12,140 +12,96 @@ extension AppState {
     
     // MARK: - Page Management
     
-    // [逻辑流程：页面重排与拖拽移动]
-    func movePages(from sourceIndices: Set<Int>, to destinationIndex: Int) {
-        guard let doc = pdfView.document, !sourceIndices.isEmpty else { return }
-        
-        // 1. 过滤：保证拿到的都是合法的页码，并从小到大排序
-        let validSources = sourceIndices.filter { $0 >= 0 && $0 < doc.pageCount }.sorted()
-        guard !validSources.isEmpty else { return }
-        
-        // 2. 将要移动的页面先保存在内存数组里
-        let pagesToMove = validSources.compactMap { doc.page(at: $0) }
-        
-        // 3. 将这次移动操作压入撤销栈，以便用户反悔
-        annotationManager.batchStack.append(.reorderPages(originalIndices: validSources, insertedAt: destinationIndex))
-        annotationManager.redoStack.removeAll()
-        
-        // 4. 计算插入点的数学偏移（因为当你删掉前面的页面后，原本的 destination 索引会发生改变）
-        let offset = validSources.filter { $0 < destinationIndex }.count
-        let insertAt = max(0, min(destinationIndex - offset, doc.pageCount - validSources.count))
-        
-        // 5. 必须倒序删除！如果你正序删除，删了第0页，原来的第1页就变成了第0页，接下来你要删第1页时就乱套了。
-        for src in validSources.reversed() {
-            if src < doc.pageCount {
-                doc.removePage(at: src)
-            }
-        }
-        
-        // 6. 按顺序插入到目标位置
-        for (i, page) in pagesToMove.enumerated() {
-            doc.insert(page, at: insertAt + i)
-        }
-        
-        // 7. 更新选区，并把内容未变的缩略图映射到新的页码。
-        self.selectedIndices = Set(insertAt..<(insertAt + pagesToMove.count))
-        self.liveState.currentPageIndex = insertAt
-        self.liveState.totalPageCount = doc.pageCount
-        thumbnailManager.reconcile(with: doc)
-        self.rebuildPageAspectRatios()
-        self.documentVersion = UUID()
-        self.pageStructureChanged = UUID()
-        
+    /// 页面结构改变后统一更新索引、缩略图映射和几何数据。
+    /// 异步布局前检查文档身份，防止换文件后执行上一份文档的跳转。
+    func pageStructureDidChange(in document: PDFDocument, navigateTo index: Int? = nil) {
+        guard pdfView.document === document else { return }
+        annotationManager.refreshAnnotations(in: document)
+        thumbnailManager.reconcile(with: document)
+        liveState.totalPageCount = document.pageCount
+        liveState.currentPageIndex = max(0, min(liveState.currentPageIndex, document.pageCount - 1))
+        selectedIndices = selectedIndices.filter { (0..<document.pageCount).contains($0) }
+        rebuildPageAspectRatios()
+        pdfView.backgroundGeometryDocument = nil
+        pdfView.preparePageBackground(for: document)
+        documentVersion = UUID()
+        let revision = UUID()
+        pageStructureChanged = revision
+        if let annotation = selectedAnnotation, annotation.page?.document !== document { selectedAnnotation = nil }
+        thumbnailManager.hotReloadSubject.send()
         DispatchQueue.main.async { [weak self] in
-            self?.pdfView.layoutDocumentView()
-            if let targetPage = doc.page(at: insertAt) { self?.pdfView.go(to: targetPage) }
-            self?.pdfView.setPlatformNeedsDisplay()
+            guard let self, self.pdfView.document === document, self.pageStructureChanged == revision else { return }
+            self.pdfView.layoutDocumentView()
+            if let index, let page = document.page(at: index) { self.pdfView.go(to: page) }
+            self.pdfView.setPlatformNeedsDisplay()
         }
-        self.isDirty = true
     }
-    
-    // [功能点：插入空白页]
+
+    func movePages(from sourceIndices: Set<Int>, to destinationIndex: Int) {
+        guard let doc = pdfView.document else { return }
+        let sources = sourceIndices.filter { (0..<doc.pageCount).contains($0) }.sorted()
+        guard !sources.isEmpty else { return }
+        let destination = max(0, min(destinationIndex, doc.pageCount))
+        let offset = sources.filter { $0 < destination }.count
+        let start = destination - offset
+        let targets = Array(start..<(start + sources.count))
+        guard sources != targets else { return }
+        let pages = sources.compactMap { doc.page(at: $0) }
+        guard pages.count == sources.count else { return }
+        for index in sources.reversed() { doc.removePage(at: index) }
+        for (page, index) in zip(pages, targets) { doc.insert(page, at: index) }
+        annotationManager.record(.movePages(from: targets, to: sources))
+        selectedIndices = Set(targets)
+        liveState.currentPageIndex = start
+        pageStructureDidChange(in: doc, navigateTo: start)
+        isDirty = true
+    }
+
     func insertBlankPage(at index: Int) {
         guard let doc = pdfView.document else { return }
-        let insertAt = max(0, min(index, doc.pageCount))
-        
-        // 参考上一页的尺寸，如果不在这中间，就给个标准的国际 A4 纸大小 (595 x 842 pt)
-        let refPage = doc.page(at: max(0, min(insertAt, doc.pageCount - 1)))
-        let bounds = refPage?.bounds(for: .mediaBox) ?? CGRect(x: 0, y: 0, width: 595, height: 842)
-        
-        let newPage = PDFPage()
-        newPage.setBounds(bounds, for: .mediaBox) // mediaBox 代表纸张物理大小
-        
-        doc.insert(newPage, at: insertAt)
-        
-        // 压入撤销栈
-        batchStack.append(.insertPages(count: 1, startIndex: insertAt))
-        redoStack.removeAll()
-        liveState.totalPageCount = doc.pageCount
-        thumbnailManager.reconcile(with: doc)
-        rebuildPageAspectRatios()
-        thumbnailManager.hotReloadSubject.send() // 已有图像直接复用，仅新页面需要生成
-        pageStructureChanged = UUID() // 通知视图层重新聚焦缩略图列表
-        
-        // 自动跳转并选中新页面
-        self.liveState.currentPageIndex = insertAt
-        self.selectedIndices = [insertAt]
-        
-        pdfView.setPlatformNeedsDisplay()
+        let index = max(0, min(index, doc.pageCount))
+        let reference = doc.page(at: max(0, min(index, doc.pageCount - 1)))
+        let bounds = reference?.bounds(for: .mediaBox) ?? CGRect(x: 0, y: 0, width: 595, height: 842)
+        let page = PDFPage()
+        page.setBounds(bounds, for: .mediaBox)
+        doc.insert(page, at: index)
+        annotationManager.record(.insertPages(count: 1, startIndex: index))
+        selectedIndices = [index]
+        liveState.currentPageIndex = index
+        pageStructureDidChange(in: doc, navigateTo: index)
         isDirty = true
-        
-        DispatchQueue.main.async { [weak self] in
-            self?.pdfView.layoutDocumentView()
-            if let targetPage = doc.page(at: insertAt) {
-                self?.pdfView.go(to: targetPage)
-            }
-        }
     }
-    
+
     func deletePage(at index: Int) {
-        // [防呆设计] 如果只剩最后一页了，就绝不让它删，不然底层引擎崩溃
         guard let doc = pdfView.document, doc.pageCount > 1 else { return }
-        
-        // 如果右键点击的那一页恰好是被多选（按住了Cmd）的那些页里面，我们就把他们一块删了。
-        let targetIndices = selectedIndices.contains(index) ? selectedIndices.sorted(by: >) : [index]
-        let validTargetIndices = targetIndices.filter { $0 >= 0 && $0 < doc.pageCount }
-        
-        if validTargetIndices.isEmpty || validTargetIndices.count >= doc.pageCount { return }
-        
-        for idx in validTargetIndices {
-            if let pageToDelete = doc.page(at: idx) {
-                doc.removePage(at: idx)
-                batchStack.append(.deletePage(page: pageToDelete, index: idx))
-                redoStack.removeAll()
-            }
-        }
+        let indices = (selectedIndices.contains(index) ? selectedIndices : [index])
+            .filter { (0..<doc.pageCount).contains($0) }.sorted()
+        guard !indices.isEmpty, indices.count < doc.pageCount else { return }
+        let pages = indices.compactMap { doc.page(at: $0) }
+        guard pages.count == indices.count else { return }
+        for index in indices.reversed() { doc.removePage(at: index) }
+        // 一次多选删除对应一个历史动作，撤销时按原位置完整恢复。
+        annotationManager.record(.deletePages(pages: pages, indices: indices))
         selectedIndices.removeAll()
-        liveState.totalPageCount = doc.pageCount
-        thumbnailManager.reconcile(with: doc)
-        rebuildPageAspectRatios()
-        thumbnailManager.hotReloadSubject.send() // 已有图像直接复用，仅新页面需要生成
-        pageStructureChanged = UUID() // 通知视图层重新聚焦缩略图列表
-        if liveState.currentPageIndex >= liveState.totalPageCount { liveState.currentPageIndex = liveState.totalPageCount - 1 }
-        pdfView.setPlatformNeedsDisplay()
+        pageStructureDidChange(in: doc)
         isDirty = true
     }
-    
-    // 把另一个 PDF 文件的所有页面塞入到现在的文档中
+
     func insertPDF(url: URL, at index: Int) {
-        guard let doc = pdfView.document, let insertDoc = PDFDocument(url: url) else { return }
-        let insertAt = max(0, min(index, doc.pageCount))
-        
-        for i in 0..<insertDoc.pageCount {
-            if let page = insertDoc.page(at: i) { doc.insert(page, at: insertAt + i) }
-        }
-        batchStack.append(.insertPages(count: insertDoc.pageCount, startIndex: insertAt))
-        redoStack.removeAll()
-        liveState.totalPageCount = doc.pageCount
-        thumbnailManager.reconcile(with: doc)
-        rebuildPageAspectRatios()
-        thumbnailManager.hotReloadSubject.send() // 已有图像直接复用，仅新页面需要生成
-        pageStructureChanged = UUID() // 通知视图层重新聚焦缩略图列表
-        if liveState.currentPageIndex >= insertAt { liveState.currentPageIndex += insertDoc.pageCount }
-        pdfView.setPlatformNeedsDisplay()
+        guard let doc = pdfView.document else { return }
+        let accessing = url.startAccessingSecurityScopedResource()
+        defer { if accessing { url.stopAccessingSecurityScopedResource() } }
+        guard let source = PDFDocument(url: url), !source.isLocked, source.pageCount > 0 else { return }
+        let pages = (0..<source.pageCount).compactMap { source.page(at: $0) }
+        guard pages.count == source.pageCount else { return }
+        let index = max(0, min(index, doc.pageCount))
+        for (offset, page) in pages.enumerated() { doc.insert(page, at: index + offset) }
+        annotationManager.record(.insertPages(count: pages.count, startIndex: index))
+        if liveState.currentPageIndex >= index { liveState.currentPageIndex += pages.count }
+        pageStructureDidChange(in: doc)
         isDirty = true
     }
-    
+
     /// [功能点：原生的逆时针旋转当前页 90 度]
     func rotateCurrentPageLeft() {
         guard let doc = pdfView.document, let page = doc.page(at: liveState.currentPageIndex) else { return }

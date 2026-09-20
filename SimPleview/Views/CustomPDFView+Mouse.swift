@@ -250,19 +250,6 @@ extension CustomPDFView {
         
         let viewPoint = convert(event.locationInWindow, from: nil)
         
-        // Optimization: don't restart everything if we are still hovering the exact same link
-        if let currentLink = self.currentHoveredLink,
-           let currentPage = currentLink.page {
-            let pointInPage = self.convert(viewPoint, to: currentPage)
-            let expandedBounds = currentLink.bounds.insetBy(dx: -15, dy: -15)
-            if expandedBounds.contains(pointInPage) {
-                // If we have a popover showing or timer running for this link, don't do anything
-                if self.hoverPopover?.isShown == true || self.hoverTask != nil {
-                    return
-                }
-            }
-        }
-        
         guard let page = page(for: viewPoint, nearest: false) else {
             handleMouseLeaveLink()
             return
@@ -280,93 +267,79 @@ extension CustomPDFView {
                 return
             }
             
-            // Cancel any pending hide
-            self.hoverTask?.cancel()
-            
-            // Check if it's actually a different link (compare bounds and page since instances might vary)
-            let isDifferentLink = self.currentHoveredLink == nil ||
-                linkAnnot.bounds != self.currentHoveredLink?.bounds ||
-                linkAnnot.page != self.currentHoveredLink?.page
-                
-            if isDifferentLink {
-                // New link hovered
-                // Clear old state but without immediately closing the popover to avoid flicker
-                if self.currentHoveredLink?.page != nil {
-                    self.setNeedsDisplay(self.bounds)
-                }
-                
-                self.currentHoveredLink = linkAnnot
-                self._threadSafeHoveredLinkBounds = linkAnnot.bounds
-                self._threadSafeHoveredLinkPage = linkAnnot.page
-                self.setNeedsDisplay(self.bounds)
-                
-                self.hoverTask?.cancel()
-                
-                // Start a task to show popover
-                self.hoverTask = Task { @MainActor [weak self] in
-                    try? await Task.sleep(nanoseconds: 500_000_000)
-                    guard !Task.isCancelled, let self = self, self.currentHoveredLink == linkAnnot else { return }
-                    self.showLinkPreviewPopover(for: linkAnnot, at: viewPoint, in: self)
-                }
+            // 同一链接内移动不重复创建任务；命中范围严格使用当前页面的链接区域。
+            guard currentHoveredLink?.page !== linkAnnot.page ||
+                  currentHoveredLink?.bounds != linkAnnot.bounds else { return }
+            hoverTask?.cancel()
+            updateHoveredLink(linkAnnot)
+            hoverTask = Task { @MainActor [weak self] in
+                try? await Task.sleep(for: .milliseconds(500))
+                guard !Task.isCancelled, let self, self.currentHoveredLink === linkAnnot else { return }
+                self.hoverTask = nil
+                self.showLinkPreviewPopover(for: linkAnnot, in: self)
             }
         } else {
             handleMouseLeaveLink()
         }
     }
     
+    /// 先更新状态，再发布绘制快照。反过来会把旧阴影留到下一次页面刷新。
+    /// 只使旧、新链接所在的小区域失效，不为悬停效果刷新整个阅读视图。
+    func updateHoveredLink(_ annotation: PDFAnnotation?) {
+        var dirty = CGRect.null
+        for link in [currentHoveredLink, annotation].compactMap({ $0 }) {
+            if let page = link.page, page.document === document {
+                dirty = dirty.union(convert(link.bounds.insetBy(dx: -2, dy: -2), from: page))
+            }
+        }
+        currentHoveredLink = annotation
+        _threadSafeHoveredLinkBounds = annotation?.bounds
+        _threadSafeHoveredLinkPage = annotation?.page
+        if !dirty.isNull { setNeedsDisplay(dirty) }
+        else { publishRenderSnapshot() }
+    }
+
     func handleMouseLeaveLink() {
-        // Only trigger hide if we have something tracked
-        guard self.currentHoveredLink != nil || self.hoverPopover != nil else { return }
-        
-        self.hoverTask?.cancel()
-        
-        // Use a debounce task to avoid flickering when crossing the 1px gaps between PDF text characters
-        // [用户体验升级]: 设置为 0.25s，既避免闪烁，又不会让用户觉得滞留太久
-        self.hoverTask = Task { @MainActor [weak self] in
-            try? await Task.sleep(nanoseconds: 250_000_000)
-            guard !Task.isCancelled else { return }
-            self?.setNeedsDisplay(self?.bounds ?? .zero)
-            self?.currentHoveredLink = nil
-            self?._threadSafeHoveredLinkBounds = nil
-            self?._threadSafeHoveredLinkPage = nil
-            self?.hoverPopover?.close()
-            self?.hoverPopover = nil
+        if currentHoveredLink != nil {
+            hoverTask?.cancel()
+            hoverTask = nil
+            updateHoveredLink(nil)
+        }
+        // 阴影立即消失；仅浮窗保留 250 ms，允许鼠标从链接进入浮窗。
+        // 已经在等待关闭时不重新计时，避免连续 mouseMoved 无限推迟关闭。
+        guard hoverPopover != nil, !isHoveringLinkPreview, hoverTask == nil else { return }
+        hoverTask = Task { @MainActor [weak self] in
+            try? await Task.sleep(for: .milliseconds(250))
+            guard !Task.isCancelled, let self else { return }
+            self.hoverTask = nil
+            let popover = self.hoverPopover
+            self.hoverPopover = nil
+            popover?.close()
         }
     }
-    
-    private func showLinkPreviewPopover(for linkAnnot: PDFAnnotation, at viewPoint: NSPoint, in view: NSView) {
+
+    private func showLinkPreviewPopover(for linkAnnot: PDFAnnotation, in view: NSView) {
         guard let page = linkAnnot.page else { return }
-        self.hoverPopover?.close()
-        
-        // Create SwiftUI View with hover state callback
-        let popoverView = LinkPreviewPopoverView(annotation: linkAnnot) { [weak self] isHovering in
+        let previous = hoverPopover
+        hoverPopover = nil
+        previous?.close()
+        isHoveringLinkPreview = false
+        let popover = NSPopover()
+        let popoverView = LinkPreviewPopoverView(annotation: linkAnnot) { [weak self, weak popover] isHovering in
             Task { @MainActor in
-                guard let self = self else { return }
+                // 已关闭浮窗的迟到回调不能取消新链接的展示任务。
+                guard let self, let popover, self.hoverPopover === popover else { return }
+                self.isHoveringLinkPreview = isHovering
+                guard self.currentHoveredLink == nil else { return }
                 if isHovering {
-                    // 如果鼠标进入了悬浮窗，立刻取消隐藏计时器，保持悬浮窗显示
                     self.hoverTask?.cancel()
+                    self.hoverTask = nil
                 } else {
-                    // 如果鼠标离开了悬浮窗，先检查鼠标是否刚好还在 PDF 的那个链接上
-                    if let window = self.window {
-                        let mouseLoc = window.mouseLocationOutsideOfEventStream
-                        let viewPoint = self.convert(mouseLoc, from: nil)
-                        if let page = self.page(for: viewPoint, nearest: false) {
-                            let pagePoint = self.convert(viewPoint, to: page)
-                            // Re-check with expanded bounds to prevent immediate hide when moving slightly off link
-                            if let annot = self.currentHoveredLink {
-                                let expandedBounds = annot.bounds.insetBy(dx: -15, dy: -15)
-                                if expandedBounds.contains(pagePoint) {
-                                    return
-                                }
-                            }
-                        }
-                    }
-                    // 如果鼠标既不在悬浮窗，也不在链接上，触发隐藏逻辑
                     self.handleMouseLeaveLink()
                 }
             }
         }
-        
+
         let dest = linkAnnot.destination ?? (linkAnnot.action as? PDFActionGoTo)?.destination
         let a = dest?.page?.bounds(for: .cropBox).width ?? 800.0
         let innerWidth = a * 1.5
@@ -374,7 +347,6 @@ extension CustomPDFView {
         let outerWidth = innerWidth + 100.0
         let outerHeight = innerHeight
         
-        let popover = NSPopover()
         popover.behavior = .transient
         popover.animates = false // Prevent animation delays from causing tracking issues
         
@@ -540,8 +512,7 @@ extension CustomPDFView {
         
         if let doc = page.document {
             let index = doc.index(for: page)
-            self.manager?.batchStack.append(.annotation(batchID: batchID, pageIndices: [index]))
-            self.manager?.redoStack.removeAll()
+            self.manager?.record(.annotation(batchID: batchID, pageIndices: [index]))
             
             annot.modificationDate = Date()
             self.manager?.pendingColorOverride = nil

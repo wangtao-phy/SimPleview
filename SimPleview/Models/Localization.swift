@@ -9,6 +9,43 @@ struct L {
     // 如果字典里找不到对应的语言翻译，则使用 `??` (Nil-Coalescing Operator) 降级返回原 Key。
     // [P0修复] 将字典提升为 static let，避免每次调用都重新创建 100+ 条目的字典
     private static let dict: [String: [AppLanguage: String]] = [
+            "Refresh": [.zh: "刷新", .en: "Refresh"],
+            "Tomorrow": [.zh: "明天", .en: "Tomorrow"],
+            "Current Paper": [.zh: "本文献", .en: "Current Paper"],
+            "App List": [.zh: "App专属", .en: "App List"],
+            "Return to Today": [.zh: "回到今天", .en: "Return to Today"],
+            "New Event Slot Hint": [.zh: "双击时间槽新建", .en: "Double-click a time slot to add an event"],
+            "Add Event Here": [.zh: "双击在此时间添加日程", .en: "Double-click to add an event here"],
+            "Task Example": [.zh: "例如：精读第三节哈密顿量推导", .en: "For example: review the Hamiltonian derivation in section 3"],
+            "Event Example": [.zh: "例如：文献阅读与推导研讨", .en: "For example: paper reading and derivation discussion"],
+            "Add to Reminders": [.zh: "添加至提醒事项", .en: "Add to Reminders"],
+            "Add to Calendar": [.zh: "添加至日历", .en: "Add to Calendar"],
+            "Untitled Task": [.zh: "未命名待办", .en: "Untitled Task"],
+            "Untitled Event": [.zh: "未命名日程", .en: "Untitled Event"],
+            "All-day Event": [.zh: "全天日程", .en: "All-day Event"],
+            "Delete Task": [.zh: "删除待办", .en: "Delete Task"],
+            "Mark Incomplete": [.zh: "标记为未完成", .en: "Mark Incomplete"],
+            "Mark Complete": [.zh: "标记为已完成", .en: "Mark Complete"],
+            "Permission Not Enabled": [.zh: "权限未开启或已被拒绝", .en: "Access is disabled or denied"],
+            "Schedule Access Denied": [.zh: "macOS 已限制访问%@。请在“系统设置 → 隐私与安全性 → %@”中允许 SimPleview。", .en: "macOS has restricted access to %@. Allow SimPleview in System Settings → Privacy & Security → %@."],
+            "Schedule Access Purpose": [.zh: "SimPleview 需要访问系统%@，以显示和更新待办或日程。", .en: "SimPleview needs access to %@ to display and update reminders or events."],
+            "Paper Citation": [.zh: "来自文献: 《%@》 第 %ld 页", .en: "From paper: %@, page %ld"],
+            "Reading Paper": [.zh: "研读: %@", .en: "Reading: %@"],
+            "No Repeat": [.zh: "无", .en: "None"],
+            "Repeat Daily": [.zh: "每天", .en: "Daily"],
+            "Repeat Weekly": [.zh: "每周", .en: "Weekly"],
+            "Repeat Biweekly": [.zh: "每两周", .en: "Every Two Weeks"],
+            "Repeat Monthly": [.zh: "每月", .en: "Monthly"],
+            "Repeat Yearly": [.zh: "每年", .en: "Yearly"],
+            "No Alert": [.zh: "无", .en: "None"],
+            "At Event Time": [.zh: "日程发生时", .en: "At Time of Event"],
+            "5 Minutes Before": [.zh: "5 分钟前", .en: "5 Minutes Before"],
+            "15 Minutes Before": [.zh: "15 分钟前", .en: "15 Minutes Before"],
+            "30 Minutes Before": [.zh: "30 分钟前", .en: "30 Minutes Before"],
+            "1 Hour Before": [.zh: "1 小时前", .en: "1 Hour Before"],
+            "2 Hours Before": [.zh: "2 小时前", .en: "2 Hours Before"],
+            "1 Day Before": [.zh: "1 天前", .en: "1 Day Before"],
+            "2 Days Before": [.zh: "2 天前", .en: "2 Days Before"],
             "Thumbnails": [.zh: "缩略图", .en: "Thumbnails"],
             "Outline": [.zh: "目录", .en: "Outline"],
             "Annotations": [.zh: "标注", .en: "Annotations"],
@@ -306,4 +343,8 @@ struct L {
     static func s(_ key: String, _ lang: AppLanguage) -> String {
         return dict[key]?[lang] ?? key
     }
+    static func format(_ key: String, _ language: AppLanguage, _ arguments: CVarArg...) -> String {
+        String(format: s(key, language), locale: language.locale, arguments: arguments)
+    }
+
 }

@@ -44,7 +44,7 @@ struct AddEventSheetView: View {
         self._endDate = State(initialValue: end)
 
         // 表单初始化只读取分类；确实点击保存时才创建专属列表，取消不写入系统。
-        let defaultCal = eventManager.availableEventCalendars().first { $0.title == "SimPleview阅读" }
+        let defaultCal = eventManager.availableEventCalendars().first { $0.title == EventManager.readingCalendarTitle }
         self._selectedCalendar = State(initialValue: defaultCal)
     }
 
@@ -57,7 +57,7 @@ struct AddEventSheetView: View {
                 if let cal = selectedCalendar {
                     HStack(spacing: 4) {
                         Circle().fill(Color(nsColor: cal.color)).frame(width: 8, height: 8)
-                        Text(cal.title).font(.caption).foregroundColor(.secondary)
+                        Text(EventManager.displayTitle(of: cal, language: state.appLanguage)).font(.caption).foregroundColor(.secondary)
                     }
                 }
             }
@@ -68,7 +68,7 @@ struct AddEventSheetView: View {
                 Text(state.L("Event Title"))
                     .font(.caption)
                     .foregroundColor(.secondary)
-                TextField("例如：文献阅读与推导研讨", text: $title)
+                TextField(state.L("Event Example"), text: $title)
                     .textFieldStyle(.roundedBorder)
             }
 
@@ -100,7 +100,7 @@ struct AddEventSheetView: View {
 
                 Picker("", selection: $recurrence) {
                     ForEach(EventRecurrenceOption.allCases) { opt in
-                        Text(opt.localizedTitle).tag(opt)
+                        Text(opt.localizedTitle(in: state.appLanguage)).tag(opt)
                     }
                 }
                 .labelsHidden()
@@ -118,13 +118,13 @@ struct AddEventSheetView: View {
                         .frame(width: 50, alignment: .leading)
 
                     Picker("", selection: $selectedCalendar) {
-                        if !calendars.contains(where: { $0.title == "SimPleview阅读" }) {
+                        if !calendars.contains(where: { $0.title == EventManager.readingCalendarTitle }) {
                             Text(state.L("SimPleview Reading")).tag(nil as EKCalendar?)
                         }
                         ForEach(calendars, id: \.calendarIdentifier) { cal in
                             HStack {
                                 Circle().fill(Color(nsColor: cal.color)).frame(width: 6, height: 6)
-                                Text(cal.title)
+                                Text(EventManager.displayTitle(of: cal, language: state.appLanguage))
                             }
                             .tag(cal as EKCalendar?)
                         }
@@ -144,7 +144,7 @@ struct AddEventSheetView: View {
 
                 Picker("", selection: $alert) {
                     ForEach(EventAlertOption.allCases) { opt in
-                        Text(opt.localizedTitle).tag(opt)
+                        Text(opt.localizedTitle(in: state.appLanguage)).tag(opt)
                     }
                 }
                 .labelsHidden()
@@ -166,14 +166,14 @@ struct AddEventSheetView: View {
             Divider()
 
             HStack {
-                Button("取消") {
+                Button(state.L("Cancel")) {
                     dismiss()
                 }
                 .keyboardShortcut(.cancelAction)
 
                 Spacer()
 
-                Button("添加至日历") {
+                Button(state.L("Add to Calendar")) {
                     guard !isSaving else { return }
                     isSaving = true
                     errorMessage = nil

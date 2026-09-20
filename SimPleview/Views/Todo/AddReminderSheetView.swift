@@ -23,7 +23,7 @@ struct AddReminderSheetView: View {
         self._notes = State(initialValue: defaultNotes)
         self.eventManager = eventManager
         // 初始化不创建系统列表；点击保存时才按默认分类落盘。
-        let readingCal = eventManager.availableReminderCalendars().first { $0.title == "SimPleview阅读" }
+        let readingCal = eventManager.availableReminderCalendars().first { $0.title == EventManager.readingCalendarTitle }
         self._selectedCalendar = State(initialValue: readingCal)
 
         // 核心优化 1：提醒事项默认截止时间为当前时间的 1 天以后
@@ -41,7 +41,7 @@ struct AddReminderSheetView: View {
                 if let cal = selectedCalendar {
                     HStack(spacing: 4) {
                         Circle().fill(Color(nsColor: cal.color)).frame(width: 8, height: 8)
-                        Text(cal.title).font(.caption).foregroundColor(.secondary)
+                        Text(EventManager.displayTitle(of: cal, language: state.appLanguage)).font(.caption).foregroundColor(.secondary)
                     }
                 }
             }
@@ -53,7 +53,7 @@ struct AddReminderSheetView: View {
                 Text(state.L("Task Title"))
                     .font(.caption)
                     .foregroundColor(.secondary)
-                TextField("例如：精读第三节哈密顿量推导", text: $title)
+                TextField(state.L("Task Example"), text: $title)
                     .textFieldStyle(.roundedBorder)
             }
 
@@ -70,11 +70,11 @@ struct AddReminderSheetView: View {
             let calendars = eventManager.availableReminderCalendars()
             if !calendars.isEmpty {
                 Picker(state.L("List"), selection: $selectedCalendar) {
-                    if !calendars.contains(where: { $0.title == "SimPleview阅读" }) {
+                    if !calendars.contains(where: { $0.title == EventManager.readingCalendarTitle }) {
                         Text(state.L("SimPleview Reading")).tag(nil as EKCalendar?)
                     }
                     ForEach(calendars, id: \.calendarIdentifier) { cal in
-                        Text(cal.title).tag(cal as EKCalendar?)
+                        Text(EventManager.displayTitle(of: cal, language: state.appLanguage)).tag(cal as EKCalendar?)
                     }
                 }
                 .pickerStyle(.menu)
@@ -95,14 +95,14 @@ struct AddReminderSheetView: View {
             Divider()
 
             HStack {
-                Button("取消") {
+                Button(state.L("Cancel")) {
                     dismiss()
                 }
                 .keyboardShortcut(.cancelAction)
 
                 Spacer()
 
-                Button("添加至提醒事项") {
+                Button(state.L("Add to Reminders")) {
                     guard !isSaving else { return }
                     isSaving = true
                     errorMessage = nil

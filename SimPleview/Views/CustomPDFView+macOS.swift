@@ -23,6 +23,7 @@ extension CustomPDFView {
         hoverTask = nil
         hoverPopover?.close()
         hoverPopover = nil
+        isHoveringLinkPreview = false
     }
     
     override func viewWillMove(toSuperview newSuperview: NSView?) {

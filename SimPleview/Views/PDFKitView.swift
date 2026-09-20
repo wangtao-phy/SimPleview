@@ -113,6 +113,7 @@ class CustomPDFView: PDFView {
     var trackingArea: NSTrackingArea?
     var hoverTask: Task<Void, Never>?
     var hoverPopover: NSPopover?
+    var isHoveringLinkPreview = false
     var currentHoveredLink: PDFAnnotation?
     var _threadSafeHoveredLinkBounds: CGRect?
     var _threadSafeHoveredLinkPage: PDFPage?
@@ -225,6 +226,7 @@ class CustomPDFView: PDFView {
     var onColorChanged: ((PlatformColor, String) -> Void)?
     var onMouseUp: (() -> Void)?
     var onSaveRequired: (() -> Void)?
+    var onAnnotationPagesChanged: ((Set<Int>) -> Void)?
     var onInkCommitted: ((PDFAnnotation) -> Void)?
     var onAnnotationContentsChanged: ((PDFAnnotation, String) -> Void)?
     
@@ -267,23 +269,10 @@ class CustomPDFView: PDFView {
     // [颜色批次同步]
     // 当改变了某一个笔画的颜色时，我们需要顺藤摸瓜，用 batchID 把属于同一个字的所有其他笔画全部染成新颜色！
     func syncBatchColor(for annot: PDFAnnotation) {
-        guard let batchID = annot.userName, let doc = document else { return }
-        let color = annot.color
-        StandardInk.setColor(color, to: annot)
-        // 【极致 O(1) 优化】相邻页检索
-        if let basePage = annot.page {
-            let baseIndex = doc.index(for: basePage)
-            let start = max(0, baseIndex - 2)
-            let end = min(doc.pageCount, baseIndex + 3)
-            
-            for i in start..<end {
-                if let page = doc.page(at: i) {
-                    for a in page.annotations where a.userName == batchID && a != annot {
-                        StandardInk.setColor(color, to: a)
-                    }
-                }
-            }
-        }
+        guard let document, annot.page?.document === document else { return }
+        StandardInk.setColor(annot.color, to: annot)
+        let indices = manager?.syncBatchColor(for: annot, in: document, pdfView: nil) ?? []
+        onAnnotationPagesChanged?(indices)
         onSaveRequired?() // 右键改色也是文档编辑，必须触发保存。
         setPlatformNeedsDisplay() // 命令底层重绘 PDF
     }

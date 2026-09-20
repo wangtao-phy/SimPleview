@@ -227,15 +227,13 @@ extension AppState {
                 
                 // [防内存泄漏与崩溃] 热重载时底层 PDFDocument 实例已换新，必须清空撤销栈，
                 // 否则旧的 PDFPage/PDFAnnotation 被强引用会导致内存泄漏，且 Undo 会崩溃。
-                self.annotationManager.batchStack.removeAll()
-                self.annotationManager.redoStack.removeAll()
+                self.annotationManager.clearHistory()
             }
             
         } else {
             // 这是全新打开文件：重置历史、清空缓存、强迫 UI 重绘
             self.navigationHistory.removeAll()
-            self.annotationManager.batchStack.removeAll() // 换了新文件，肯定要清空上个文件的撤销栈
-            self.annotationManager.redoStack.removeAll()
+            self.annotationManager.clearHistory()
             
             let pageKey = "PDFLastPage_" + DocumentIdentity.id(for: url)
             let legacyPageKey = "PDFLastPage_" + url.lastPathComponent

@@ -5,19 +5,20 @@ import Combine
 /// 管理标注颜色、侧栏索引和编辑操作；撤销/重做由 AnnotationManager+History 实现。
 /// PDFKit 对象与发布状态均在主执行器内访问。
 final class AnnotationManager: ObservableObject {
+    let batchIndex = AnnotationBatchIndex()
     
     // MARK: - Data Source & Undo Stack
     
     /// 已经被引擎收集的所有合法批注数组。
     /// UI 层的右侧边栏 (Sidebar) 通过订阅该数组进行 `ForEach` 实时大纲渲染。
-    @Published var allAnnotations: [PDFAnnotation] = []
+    @Published private(set) var allAnnotations: [PDFAnnotation] = []
     
     /// 撤销动作栈 (Undo Stack)。
     /// 采用自定义的 `UndoAction` 枚举封装每一次原子绘制动作，通过堆栈机制实现 Cmd+Z 无损回滚。
-    @Published var batchStack: [UndoAction] = []
+    @Published private(set) var batchStack: [UndoAction] = []
     
     /// 重做动作栈 (Redo Stack)。
-    @Published var redoStack: [UndoAction] = []
+    @Published private(set) var redoStack: [UndoAction] = []
     
     // [颜色管理]
     // 给不同的批注类型设定当前选中的颜色，带有 @Published，一旦修改，UI 上所有使用了这颜色的画笔图标都会跟着变
@@ -73,6 +74,70 @@ final class AnnotationManager: ObservableObject {
         inkColor = Self.color(from: defaults.string(forKey: "defaultInkColor"), defaultColor: .platformBlue)
     }
 
+    /// 新编辑统一清空重做栈；外部调用方只能提交动作，不能直接改历史数组。
+    func record(_ action: UndoAction) {
+        batchStack.append(action)
+        redoStack.removeAll()
+        batchIndex.invalidate()
+    }
+
+    func clearHistory() {
+        batchStack.removeAll()
+        redoStack.removeAll()
+    }
+
+    func reset() {
+        clearHistory()
+        allAnnotations.removeAll()
+        batchIndex.invalidate()
+    }
+
+    /// 仅供历史执行器在动作成功后转移栈顶。
+    func finishHistory(isUndo: Bool, inverse: UndoAction) {
+        if isUndo { batchStack.removeLast(); redoStack.append(inverse) }
+        else { redoStack.removeLast(); batchStack.append(inverse) }
+        batchIndex.invalidate()
+    }
+
+    func removeFromSidebar(_ annotations: [PDFAnnotation]) {
+        let removed = Set(annotations)
+        allAnnotations.removeAll { removed.contains($0) }
+    }
+
+    /// 已挂入当前文档的标注才可进入侧栏，批次去重与排序都由管理器维护。
+    func register(_ annotation: PDFAnnotation, in document: PDFDocument) {
+        guard annotation.page?.document === document else { return }
+        let id = annotation.userName ?? ""
+        guard !allAnnotations.contains(where: {
+            $0 === annotation || (id.hasPrefix("B-") && $0.userName == id)
+        }) else { return }
+        let key = Self.annotationSortKey(annotation)
+        let index = allAnnotations.firstIndex { key < Self.annotationSortKey($0) } ?? allAnnotations.endIndex
+        allAnnotations.insert(annotation, at: index)
+    }
+
+    @discardableResult
+    func updateContents(_ text: String, of annotation: PDFAnnotation, in document: PDFDocument) -> Bool {
+        guard annotation.page?.document === document else { return false }
+        let date = Date()
+        for index in batchIndex.pages(for: annotation, in: document) {
+            guard let page = document.page(at: index) else { continue }
+            for target in page.annotations where target === annotation ||
+                ((annotation.userName ?? "").hasPrefix("B-") && target.userName == annotation.userName) {
+                target.simPleNote = text
+                target.modificationDate = date
+            }
+        }
+        let batchID = annotation.userName
+        if let index = allAnnotations.firstIndex(where: {
+            $0 === annotation || (batchID?.hasPrefix("B-") == true && $0.userName == batchID)
+        }) {
+            let representative = allAnnotations.remove(at: index)
+            register(representative, in: document)
+        }
+        return true
+    }
+
     var canUndo: Bool { !batchStack.isEmpty }
     var canRedo: Bool { !redoStack.isEmpty }
     
@@ -80,6 +145,7 @@ final class AnnotationManager: ObservableObject {
     // 遍历整个 PDF 每一页，把我们关心的批注挖出来，缓存给 UI
     func refreshAnnotations(in document: PDFDocument?) {
         guard let document = document else {
+            batchIndex.invalidate()
             self.allAnnotations = []
             return
         }
@@ -118,6 +184,7 @@ final class AnnotationManager: ObservableObject {
             }
         }
         
+        batchIndex.rebuild(in: document)
         // PDFKit 和侧栏数组由主执行器持有；扫描没有挂起点，不需要刷新令牌。
         // 按修改时间及标识排序，撤销恢复也使用相同规则。
         // 先提取排序键，避免 O(n log n) 次比较反复读取 PDFKit 属性。
@@ -185,8 +252,7 @@ final class AnnotationManager: ObservableObject {
         guard !affectedPageIndices.isEmpty else { return false }
         
         // 压入撤销栈
-        batchStack.append(.annotation(batchID: batchID, pageIndices: affectedPageIndices))
-        redoStack.removeAll()
+        record(.annotation(batchID: batchID, pageIndices: affectedPageIndices))
         // 画完后自动取消文字选中状态，体验更好
         pdfView.clearSelection()
         
@@ -196,7 +262,7 @@ final class AnnotationManager: ObservableObject {
             // 给新创建的批注打上时间戳
             first.modificationDate = Date()
             // 与页面修改同步发布，避免关闭或换文档后迟到的回调回填旧标注。
-            allAnnotations.append(first)
+            if let document = pdfView.document { register(first, in: document) }
         }
         
         pendingColorOverride = nil
@@ -227,10 +293,9 @@ final class AnnotationManager: ObservableObject {
         page.addAnnotation(annotation)
         
         // 压入撤销栈，以便 Cmd+Z 时能和普通标注一样被正常拔除
-        batchStack.append(.annotation(batchID: batchID, pageIndices: [pageIndex]))
-        redoStack.removeAll()
+        record(.annotation(batchID: batchID, pageIndices: [pageIndex]))
         
-        allAnnotations.append(annotation)
+        register(annotation, in: doc)
         
         onThumbnailUpdate(pageIndex)
         pdfView?.setPlatformNeedsDisplay()
@@ -252,46 +317,25 @@ final class AnnotationManager: ObservableObject {
         var pageIndices: [Int] = []
         var affectedPageIndices = Set<Int>()
         
-        if isInternalBatch {
-            // 内部批注：通过 batchID 批量删除同一笔画出的所有分段
-            if let basePage = annotation.page {
-                let baseIndex = doc.index(for: basePage)
-                let start = max(0, baseIndex - 2)
-                let end = min(doc.pageCount, baseIndex + 3)
-                
-                for i in start..<end {
-                    if let page = doc.page(at: i) {
-                        var hasRemoved = false
-                        for a in page.annotations where a.userName == batchID {
-                            deletedAnnots.append(a)
-                            pageIndices.append(i)
-                            page.removeAnnotation(a)
-                            hasRemoved = true
-                        }
-                        if hasRemoved {
-                            affectedPageIndices.insert(i)
-                        }
-                    }
-                }
+        guard annotation.page?.document === doc else { return false }
+        for index in batchIndex.pages(for: annotation, in: doc).sorted() {
+            guard let page = doc.page(at: index) else { continue }
+            let targets = isInternalBatch ? page.annotations.filter { $0.userName == batchID } : [annotation]
+            for target in targets {
+                deletedAnnots.append(target)
+                pageIndices.append(index)
+                page.removeAnnotation(target)
             }
-        } else {
-            // 外部批注（来自系统 Markup 等）：精确删除单个标注对象
-            if let page = annotation.page {
-                let pageIndex = doc.index(for: page)
-                page.removeAnnotation(annotation)
-                deletedAnnots.append(annotation)
-                pageIndices.append(pageIndex)
-                affectedPageIndices.insert(pageIndex)
-            }
+            if !targets.isEmpty { affectedPageIndices.insert(index) }
         }
-        
+        batchIndex.invalidate()
+
         if !deletedAnnots.isEmpty {
             if isInternalBatch {
                 // 将删除动作压入撤销栈
                 // [防崩溃保护]：系统 Markup 产生的外部标注在被移除后，若强行重新 addAnnotation 会触发 PDFKit 的底层 C++ 崩溃。
                 // 按照用户的合理逻辑：外部手绘被删除后直接视为永久删除，不纳入撤销回退栈。
-                batchStack.append(.deleteAnnotation(annotations: deletedAnnots, pageIndices: pageIndices))
-                redoStack.removeAll()
+                record(.deleteAnnotation(annotations: deletedAnnots, pageIndices: pageIndices))
             }
         } else {
             return false
@@ -308,30 +352,20 @@ final class AnnotationManager: ObservableObject {
         return true
     }
     
-    // 强制同步特定 ID 批注的所有部分的颜色（解决跨页批注颜色断层的问题）
+    /// 返回实际涉及的页码，供调用方只刷新相关缩略图。
     @discardableResult
-    func syncBatchColor(for annot: PDFAnnotation, in document: PDFDocument?, pdfView: PDFView?) -> Bool {
-        guard let batchID = annot.userName, let doc = document else { return false }
-        let color = StandardInk.displayColor(of: annot)
-        var changed = false
-        // 【极致 O(1) 优化】相邻页检索
-        if let basePage = annot.page {
-            let baseIndex = doc.index(for: basePage)
-            let start = max(0, baseIndex - 2)
-            let end = min(doc.pageCount, baseIndex + 3)
-            
-            for i in start..<end {
-                if let page = doc.page(at: i) {
-                    for a in page.annotations where a.userName == batchID && a != annot && StandardInk.displayColor(of: a) != color {
-                        StandardInk.setColor(color, to: a)
-                        changed = true
-                    }
-                }
+    func syncBatchColor(for annotation: PDFAnnotation, in document: PDFDocument?, pdfView: PDFView?) -> Set<Int> {
+        guard let document, annotation.page?.document === document else { return [] }
+        let indices = batchIndex.pages(for: annotation, in: document)
+        let color = StandardInk.displayColor(of: annotation)
+        for index in indices {
+            guard let page = document.page(at: index) else { continue }
+            for target in page.annotations where target === annotation ||
+                ((annotation.userName ?? "").hasPrefix("B-") && target.userName == annotation.userName) {
+                if StandardInk.displayColor(of: target) != color { StandardInk.setColor(color, to: target) }
             }
         }
-        if changed {
-            pdfView?.setPlatformNeedsDisplay()
-        }
-        return changed
+        pdfView?.setPlatformNeedsDisplay()
+        return indices
     }
 }

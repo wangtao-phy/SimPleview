@@ -8,6 +8,11 @@ import os
 /// 通知只触发合并刷新；面板关闭后，订阅随管理器释放。
 @MainActor
 final class EventManager: ObservableObject {
+    // 已有系统日历的名称作为兼容标识保留，只翻译界面显示，不重命名用户数据。
+    static let readingCalendarTitle = "SimPleview阅读"
+    static func displayTitle(of calendar: EKCalendar, language: AppLanguage) -> String {
+        calendar.title == readingCalendarTitle ? L.s("SimPleview Reading", language) : calendar.title
+    }
     let eventStore: EKEventStore
     
     // 响应式状态发布
@@ -237,7 +242,7 @@ final class EventManager: ObservableObject {
         guard hasReminderAccess else { return nil }
         
         let reminderCalendars = eventStore.calendars(for: .reminder)
-        if let existing = reminderCalendars.first(where: { $0.title == "SimPleview阅读" }) {
+        if let existing = reminderCalendars.first(where: { $0.title == Self.readingCalendarTitle }) {
             return existing
         }
         
@@ -250,7 +255,7 @@ final class EventManager: ObservableObject {
         }
         
         let newCal = EKCalendar(for: .reminder, eventStore: eventStore)
-        newCal.title = "SimPleview阅读"
+        newCal.title = Self.readingCalendarTitle
         newCal.source = source
         newCal.color = NSColor.systemIndigo
         
@@ -358,7 +363,7 @@ final class EventManager: ObservableObject {
     func getOrCreateSimPleviewEventCalendar() -> EKCalendar? {
         guard hasCalendarAccess else { return nil }
         let eventCalendars = eventStore.calendars(for: .event)
-        if let existing = eventCalendars.first(where: { $0.title == "SimPleview阅读" }) {
+        if let existing = eventCalendars.first(where: { $0.title == Self.readingCalendarTitle }) {
             return existing
         }
         
@@ -369,7 +374,7 @@ final class EventManager: ObservableObject {
         }
         
         let newCal = EKCalendar(for: .event, eventStore: eventStore)
-        newCal.title = "SimPleview阅读"
+        newCal.title = Self.readingCalendarTitle
         newCal.source = source
         newCal.color = NSColor.systemIndigo
         

@@ -14,14 +14,14 @@ enum EventRecurrenceOption: String, CaseIterable, Identifiable {
 
     var id: String { rawValue }
 
-    var localizedTitle: String {
+    func localizedTitle(in language: AppLanguage) -> String {
         switch self {
-        case .none: return "无"
-        case .daily: return "每天"
-        case .weekly: return "每周"
-        case .biweekly: return "每两周"
-        case .monthly: return "每月"
-        case .yearly: return "每年"
+        case .none: return L.s("No Repeat", language)
+        case .daily: return L.s("Repeat Daily", language)
+        case .weekly: return L.s("Repeat Weekly", language)
+        case .biweekly: return L.s("Repeat Biweekly", language)
+        case .monthly: return L.s("Repeat Monthly", language)
+        case .yearly: return L.s("Repeat Yearly", language)
         }
     }
 
@@ -87,17 +87,17 @@ enum EventAlertOption: String, CaseIterable, Identifiable {
         }
     }
 
-    var localizedTitle: String {
+    func localizedTitle(in language: AppLanguage) -> String {
         switch self {
-        case .none: return "无"
-        case .atTime: return "日程发生时"
-        case .before5m: return "5 分钟前"
-        case .before15m: return "15 分钟前"
-        case .before30m: return "30 分钟前"
-        case .before1h: return "1 小时前"
-        case .before2h: return "2 小时前"
-        case .before1d: return "1 天前"
-        case .before2d: return "2 天前"
+        case .none: return L.s("No Alert", language)
+        case .atTime: return L.s("At Event Time", language)
+        case .before5m: return L.s("5 Minutes Before", language)
+        case .before15m: return L.s("15 Minutes Before", language)
+        case .before30m: return L.s("30 Minutes Before", language)
+        case .before1h: return L.s("1 Hour Before", language)
+        case .before2h: return L.s("2 Hours Before", language)
+        case .before1d: return L.s("1 Day Before", language)
+        case .before2d: return L.s("2 Days Before", language)
         }
     }
 

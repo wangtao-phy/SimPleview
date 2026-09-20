@@ -12,7 +12,7 @@ struct MiniMonthCalendarView: View {
     let onMonthChanged: (Date) -> Void
 
     private let calendar = Calendar.current
-    private let weekdays = ["日", "一", "二", "三", "四", "五", "六"]
+    private var weekdays: [String] { ScheduleDateFormatters.weekdays(language: state.appLanguage, calendar: calendar) }
 
     // 计算当前月份的元数据
     private var monthMetadata: (start: Date, days: Int, leadOffset: Int) {
@@ -59,7 +59,7 @@ struct MiniMonthCalendarView: View {
                         .cornerRadius(3)
                 }
                 .buttonStyle(.plain)
-                .help("回到今天")
+                .help(state.L("Return to Today"))
 
                 Button(action: { changeMonth(by: 1) }) {
                     Image(systemName: "chevron.right")
@@ -146,7 +146,7 @@ struct MiniMonthCalendarView: View {
     }
 
     private func formatMonthHeader(_ date: Date) -> String {
-        ScheduleDateFormatters.monthHeader.string(from: date)
+        ScheduleDateFormatters.string(date, style: .monthHeader, language: state.appLanguage)
     }
 
     private func eventsForDate(_ date: Date) -> [EKEvent] {
