@@ -29,7 +29,7 @@ struct PadPDFView: UIViewRepresentable {
     }
 
     // PDFKit 的覆盖视图回调来自 UI 线程，但 SDK 协议尚未标注 MainActor。
-    @MainActor final class Coordinator: NSObject, @preconcurrency PDFPageOverlayViewProvider, PKCanvasViewDelegate {
+    @MainActor final class Coordinator: NSObject, @preconcurrency PDFPageOverlayViewProvider, PKCanvasViewDelegate, PKToolPickerObserver {
         let session: NotebookSession
         // 只开放已定义矢量几何的笔刷；荧光效果使用半透明实线笔。
         let picker = PKToolPicker(toolItems: [
@@ -42,11 +42,14 @@ struct PadPDFView: UIViewRepresentable {
         var scrollObservation: NSKeyValueObservation?
         var visibility: Bool?
         private var writingEnabled = false
+        private var selectedToolIdentifier: String?
         init(_ session: NotebookSession) {
             self.session = session
             super.init()
             picker.showsDrawingPolicyControls = false
             picker.stateAutosaveName = "SimPleviewPadTools"
+            selectedToolIdentifier = picker.selectedToolItemIdentifier
+            picker.addObserver(self)
         }
         func observe(_ view: PDFView) {
             for name in [Notification.Name.PDFViewPageChanged, .PDFViewScaleChanged, .PDFViewVisiblePagesChanged] {
@@ -108,7 +111,10 @@ struct PadPDFView: UIViewRepresentable {
             guard let canvas = (overlayView as? PageInkOverlay)?.canvas else { return }
             picker.removeObserver(canvas)
             canvas.delegate = nil
-            if session.canvas === canvas { session.canvas = nil }
+            if session.canvas === canvas {
+                session.canvas = nil
+                session.isUsingTool = false
+            }
             if canvases[ObjectIdentifier(page)]?.1 === canvas {
                 canvases.removeValue(forKey: ObjectIdentifier(page))
             }
@@ -135,7 +141,7 @@ struct PadPDFView: UIViewRepresentable {
                 session.pdfView?.setNeedsDisplay()
             }
             for (_, canvas) in canvases.values { configure(canvas) }
-            if let page = session.pdfView?.currentPage, let (_, canvas) = canvases[ObjectIdentifier(page)] {
+            if !session.isUsingTool, let page = session.pdfView?.currentPage, let (_, canvas) = canvases[ObjectIdentifier(page)] {
                 let canvasChanged = session.canvas !== canvas
                 session.canvas = canvas
                 // 只在进入书写或切换画布时转移焦点。笔迹/保存状态更新
@@ -146,20 +152,41 @@ struct PadPDFView: UIViewRepresentable {
                 }
             }
         }
+        func toolPickerSelectedToolItemDidChange(_ toolPicker: PKToolPicker) {
+            let identifier = toolPicker.selectedToolItemIdentifier
+            guard identifier != selectedToolIdentifier else { return }
+            selectedToolIdentifier = identifier
+            // 工具面板可能临时取得焦点。明确换笔后立即归还当前画布，不能等
+            // 下次翻页或保存触发 update；同一工具的颜色/粗细编辑不抢文本焦点。
+            guard session.writing, session.annotationsVisible,
+                  let canvas = session.canvas, canvas.window != nil else { return }
+            if !canvas.isFirstResponder { canvas.becomeFirstResponder() }
+        }
+
         func canvasViewDrawingDidChange(_ canvasView: PKCanvasView) {
             guard let (page, _) = canvases.values.first(where: { $0.1 === canvasView }) else { return }
             session.update(canvasView.drawing, on: page)
         }
-        func canvasViewDidBeginUsingTool(_ canvasView: PKCanvasView) { session.isUsingTool = true }
+        func canvasViewDidBeginUsingTool(_ canvasView: PKCanvasView) {
+            session.isUsingTool = true
+            // 连续阅读时，实际落笔页不一定是 PDFKit 的 currentPage。
+            // 工具栏和撤销应跟随正在使用的画布，而不是仍可见的上一页。
+            if session.canvas !== canvasView {
+                session.canvas = canvasView
+                picker.setVisible(true, forFirstResponder: canvasView)
+                canvasView.becomeFirstResponder()
+            }
+        }
         func canvasViewDidEndUsingTool(_ canvasView: PKCanvasView) {
             session.isUsingTool = false; session.scheduleSave()
         }
         func stop() {
+            picker.removeObserver(self)
             for observer in observers { NotificationCenter.default.removeObserver(observer) }
             observers.removeAll()
             scrollObservation?.invalidate(); scrollObservation = nil
             for (_,canvas) in canvases.values { picker.removeObserver(canvas); canvas.delegate = nil }
-            canvases.removeAll(); session.canvas = nil; session.pdfView = nil
+            canvases.removeAll(); session.canvas = nil; session.isUsingTool = false; session.pdfView = nil
         }
     }
 }

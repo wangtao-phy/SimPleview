@@ -6,6 +6,7 @@ import Combine
 /// 成品图像与任务寿命分开：取消任务、切换模式和休眠不丢弃有效缩略图。
 @MainActor
 final class ThumbnailManager: ObservableObject {
+    var renderSource: PDFRenderSource?
     static let displayWidth: CGFloat = 140
     private let cacheOwner = UUID()
     private var cacheGeneration: UInt = 0
@@ -90,6 +91,7 @@ final class ThumbnailManager: ObservableObject {
 
     /// 仅打开另一份文档或关闭窗口时彻底清空。
     func clearCache() {
+        renderSource = nil
         cancelPendingWork()
         knownPages.removeAll(); dirtyIndices.removeAll()
         ThumbnailStore.shared.remove(owner: cacheOwner)
@@ -205,15 +207,15 @@ final class ThumbnailManager: ObservableObject {
 
     private func enqueueThumbnail(for page: PDFPage, at index: Int, size: CGSize,
                                   currentDocChecker: @escaping @MainActor @Sendable () -> Bool) {
-        // 活动页面只在主线程序列化；后台不能与正文共享 PDFKit 对象及其内部缓存。
-        guard let pageData = StandardInk.exportData(of: page) else { markAsFinished(index, id: nil); return }
+        // 未编辑页不在主线程导出；编辑页保留实时标注。后台始终独立解析。
+        guard let input = PDFPageRenderInput.capture(page, source: renderSource) else { markAsFinished(index, id: nil); return }
         let showsAnnotations = page.displaysAnnotations
         let generation = cacheGeneration, operationID = UUID()
         let operation = BlockOperation()
         operation.addExecutionBlock { [weak self, weak operation] in
             guard let operation, !operation.isCancelled else { return }
             let thumb: NSImage? = autoreleasepool {
-                guard let document = PDFDocument(data: pageData), let page = document.page(at: 0) else { return nil }
+                guard let document = PDFDocument(data: input.data), let page = document.page(at: input.index) else { return nil }
                 // PDFPage 不拥有 PDFDocument；明确保留独立文档直到绘制结束。
                 defer { withExtendedLifetime(document) {} }
                 page.displaysAnnotations = showsAnnotations

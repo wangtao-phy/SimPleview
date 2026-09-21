@@ -65,6 +65,7 @@ struct LibraryEntry: Identifiable {
         if folder { try FileManager.default.createDirectory(at: url, withIntermediateDirectories: false) }
         else {
             let document = PDFDocument(); document.insert(try paper.page(), at: 0)
+            document.documentAttributes = [PDFDocumentAttribute.keywordsAttribute: [paper.keyword]]
             guard let data = document.dataRepresentation() else { throw PadError.message("无法创建笔记本。") }
             try data.write(to: url, options: .withoutOverwriting)
         }

@@ -63,6 +63,9 @@ final class NotebookSession: ObservableObject {
                 guard let page = pdf.page(at: index) else { continue }
                 loadedDrawings[ObjectIdentifier(page)] = try VectorInk.takeEditableDrawing(from: page)
             }
+            // 记住新建笔记本的纸张，重新打开后追加页面沿用相同底色。
+            if let keywords = pdf.documentAttributes?[PDFDocumentAttribute.keywordsAttribute] as? [String],
+               let savedPaper = NotebookPaper.allCases.first(where: { keywords.contains($0.keyword) }) { paper = savedPaper }
             drawings = loadedDrawings
             self.version = version
             document = pdf

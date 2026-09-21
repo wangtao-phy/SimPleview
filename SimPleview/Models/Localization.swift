@@ -9,6 +9,9 @@ struct L {
     // 如果字典里找不到对应的语言翻译，则使用 `??` (Nil-Coalescing Operator) 降级返回原 Key。
     // [P0修复] 将字典提升为 static let，避免每次调用都重新创建 100+ 条目的字典
     private static let dict: [String: [AppLanguage: String]] = [
+            "Link Preview Unavailable": [.zh: "暂时无法生成预览，可直接跳转到链接位置。", .en: "Preview unavailable. You can go directly to the link destination."],
+            "Go to Link Destination": [.zh: "跳转到链接位置", .en: "Go to link destination"],
+            "Unknown Link": [.zh: "无法识别链接", .en: "Unknown link"],
             "Refresh": [.zh: "刷新", .en: "Refresh"],
             "Tomorrow": [.zh: "明天", .en: "Tomorrow"],
             "Current Paper": [.zh: "本文献", .en: "Current Paper"],

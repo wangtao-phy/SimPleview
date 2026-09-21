@@ -165,6 +165,7 @@ class CustomPDFView: PDFView {
     /// 文件替换和关闭共用的引用释放点。弹窗、悬停和拖动状态都可能拥有旧页；
     /// 先关观察者/弹窗，再清状态，避免重载后回调修改已不属于当前文档的批注。
     func prepareForDocumentReplacement() {
+        scanCache.source = nil
         backgroundGeometryDocument = nil
         navigationRenderPage = nil
         scanCache.removeAll()

@@ -325,7 +325,17 @@ extension CustomPDFView {
         previous?.close()
         isHoveringLinkPreview = false
         let popover = NSPopover()
-        let popoverView = LinkPreviewPopoverView(annotation: linkAnnot) { [weak self, weak popover] isHovering in
+        let popoverView = LinkPreviewPopoverView(
+            annotation: linkAnnot,
+            renderSource: scanCache.source,
+            onOpenDestination: { [weak self, weak popover] in
+                guard let self,
+                      let destination = linkAnnot.destination ?? (linkAnnot.action as? PDFActionGoTo)?.destination,
+                      destination.page?.document === self.document else { return }
+                popover?.close()
+                self.go(to: destination)
+            }
+        ) { [weak self, weak popover] isHovering in
             Task { @MainActor in
                 // 已关闭浮窗的迟到回调不能取消新链接的展示任务。
                 guard let self, let popover, self.hoverPopover === popover else { return }
@@ -340,20 +350,13 @@ extension CustomPDFView {
             }
         }
 
-        let dest = linkAnnot.destination ?? (linkAnnot.action as? PDFActionGoTo)?.destination
-        let a = dest?.page?.bounds(for: .cropBox).width ?? 800.0
-        let innerWidth = a * 1.5
-        let innerHeight = (a / 3.0) * 1.5
-        let outerWidth = innerWidth + 100.0
-        let outerHeight = innerHeight
-        
         popover.behavior = .transient
         popover.animates = false // Prevent animation delays from causing tracking issues
         
         let host = NSHostingController(rootView: popoverView)
         popover.contentViewController = host
         // Explicitly set the initial content size dynamically so NSPopover correctly calculates screen edge collisions BEFORE it appears
-        popover.contentSize = NSSize(width: outerWidth, height: outerHeight)
+        popover.contentSize = NSSize(width: popoverView.outerWidth, height: popoverView.outerHeight)
         
         self.hoverPopover = popover
         

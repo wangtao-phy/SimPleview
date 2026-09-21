@@ -24,9 +24,12 @@ struct TodoSidebarView: View {
     // 弹窗表单状态与预填参数
     @State private var operationError: String?
     @State private var showingAddReminderSheet: Bool = false
-    @State private var showingAddEventSheet: Bool = false
-    @State private var presetEventStartDate: Date? = nil
-    @State private var presetEventEndDate: Date? = nil
+    // 时间与展示身份一起传入 sheet，避免首次打开时捕获到旧的预填状态。
+    private struct EventSlot: Identifiable {
+        let id = UUID()
+        let start: Date
+    }
+    @State private var eventSlot: EventSlot?
     
     // 当前文献坐标
     private var currentDocTitle: String {
@@ -113,10 +116,7 @@ struct TodoSidebarView: View {
                             let cal = Calendar.current
                             let baseHour = cal.isDateInToday(selectedDate) ? cal.component(.hour, from: Date()) : 9
                             let start = cal.date(bySettingHour: baseHour, minute: 0, second: 0, of: selectedDate) ?? selectedDate
-                            let end = cal.date(byAdding: .hour, value: 2, to: start) ?? start.addingTimeInterval(7200)
-                            presetEventStartDate = start
-                            presetEventEndDate = end
-                            showingAddEventSheet = true
+                            eventSlot = EventSlot(start: start)
                         }
                     }) {
                         Image(systemName: "plus.circle.fill")
@@ -166,16 +166,14 @@ struct TodoSidebarView: View {
             )
             .id(showingAddReminderSheet)
         }
-        .sheet(isPresented: $showingAddEventSheet) {
+        .sheet(item: $eventSlot) { slot in
             AddEventSheetView(
                 state: state,
                 defaultTitle: !currentDocTitle.isEmpty ? L.format("Reading Paper", state.appLanguage, currentDocTitle) : "",
                 defaultNotes: currentContextCitation,
-                initialStartDate: presetEventStartDate,
-                initialEndDate: presetEventEndDate,
+                initialStartDate: slot.start,
                 eventManager: eventManager
             )
-            .id("\(presetEventStartDate?.timeIntervalSince1970 ?? 0)_\(showingAddEventSheet)")
         }
     }
     
@@ -366,10 +364,8 @@ struct TodoSidebarView: View {
                     onDoubleTapHour: { hour in
                         let cal = Calendar.current
                         if let start = cal.date(bySettingHour: hour, minute: 0, second: 0, of: selectedDate) {
-                            presetEventStartDate = start
-                            presetEventEndDate = cal.date(byAdding: .hour, value: 2, to: start) ?? start.addingTimeInterval(7200)
+                            eventSlot = EventSlot(start: start)
                         }
-                        showingAddEventSheet = true
                     },
                     onDeleteEvent: { ev in
                         Task {

@@ -19,8 +19,6 @@ struct AddEventSheetView: View {
     @State private var alert: EventAlertOption = .none
 
     let eventManager: EventManager
-    let initialStartDate: Date?
-    let initialEndDate: Date?
 
     init(
         state: AppState,
@@ -34,11 +32,9 @@ struct AddEventSheetView: View {
         self._title = State(initialValue: defaultTitle)
         self._notes = State(initialValue: defaultNotes)
         self.eventManager = eventManager
-        self.initialStartDate = initialStartDate
-        self.initialEndDate = initialEndDate
 
         let start = initialStartDate ?? Date()
-        // 核心优化 2：默认日程跨度为 2 小时
+        // 默认两小时；23:00 的槽位自然跨到次日。
         let end = initialEndDate ?? (Calendar.current.date(byAdding: .hour, value: 2, to: start) ?? start.addingTimeInterval(7200))
         self._startDate = State(initialValue: start)
         self._endDate = State(initialValue: end)
@@ -204,10 +200,6 @@ struct AddEventSheetView: View {
         }
         .padding(20)
         .frame(width: 380)
-        .onAppear {
-            if let s = initialStartDate { startDate = s }
-            if let e = initialEndDate { endDate = e }
-        }
         .onChange(of: startDate) { _, newStart in
             if endDate <= newStart {
                 endDate = Calendar.current.date(byAdding: .hour, value: 2, to: newStart) ?? newStart.addingTimeInterval(7200)

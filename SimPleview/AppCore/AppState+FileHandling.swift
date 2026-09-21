@@ -90,9 +90,23 @@ extension AppState {
             // startAccessing，不能按 URL 相等去释放另一个同 URL 新任务的权限。
             let accessing = targetURL.startAccessingSecurityScopedResource()
             defer { if accessing { targetURL.stopAccessingSecurityScopedResource() } }
-            let doc = ImageDocumentManager.isImageFile(url: targetURL)
-                ? ImageDocumentManager.createPDFDocument(fromImageURL: targetURL)
-                : PDFDocument(url: targetURL)
+            var renderData: Data?
+            var doc: PDFDocument?
+            if ImageDocumentManager.isImageFile(url: targetURL) {
+                doc = ImageDocumentManager.createPDFDocument(fromImageURL: targetURL)
+            } else {
+                // 在同一次协调读取内取得原始数据与文档，保留 documentURL（用于 SyncTeX）。
+                // 数据不采用可变文件映射，后续原子保存/云端替换不会改变在途渲染的输入。
+                var readError: NSError?
+                NSFileCoordinator().coordinate(readingItemAt: targetURL, options: [], error: &readError) { url in
+                    // 限制原始字节快照预算；超大文件保留现有逐页路径，不整本复制进内存。
+                    if let size = try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize,
+                       size <= 64 * 1024 * 1024 {
+                        renderData = try? Data(contentsOf: url)
+                    }
+                    doc = PDFDocument(url: url)
+                }
+            }
             if let doc, doc.isEncrypted { doc.unlock(withPassword: "") }
             await MainActor.run {
                 guard let self, !self.isClosed, !Task.isCancelled,
@@ -120,16 +134,18 @@ extension AppState {
                 self.selectedAnnotation = nil
                 self.searchManager.clear()
                 _ = self.documentManager.handleDocumentAccess(url: targetURL)
-                self.setupDocument(doc, url: targetURL, isHotReloading: isHotReloading)
+                self.setupDocument(doc, url: targetURL, isHotReloading: isHotReloading, renderData: renderData)
             }
         }
     }
 
     // [教程注释：文件加载完毕后的基建配置]
-    func setupDocument(_ doc: PDFDocument, url: URL, isHotReloading: Bool = false) {
+    func setupDocument(_ doc: PDFDocument, url: URL, isHotReloading: Bool = false, renderData: Data? = nil) {
         let migratedInk = StandardInk.migrate(in: doc)
         // 必须先关掉原生手绘层，再交给 PDFView，避免先创建模糊位图缓存。
         StandardInk.prepareForScreen(in: doc)
+        let renderSource = doc.isEncrypted ? nil : renderData.map { PDFRenderSource(document: doc, data: $0) }
+        self.pdfView.scanCache.source = renderSource
         self.fileURL = url
         self.pdfView.preparePageBackground(for: doc)
         self.pdfView.document = doc
@@ -251,6 +267,7 @@ extension AppState {
             self.documentVersion = UUID() 
             self.objectWillChange.send()
         }
+        self.thumbnailManager.renderSource = renderSource
     }
     
     /// 只有当前活动窗口可以拥有全局秒表；后台加载/热重载只准备记录，不抢计时。

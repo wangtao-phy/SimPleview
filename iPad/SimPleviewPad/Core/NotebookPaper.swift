@@ -3,8 +3,9 @@ import CoreGraphics
 import PDFKit
 
 enum NotebookPaper: String, CaseIterable, Identifiable {
-    case blank = "空白", ruled = "横线", grid = "方格", dots = "点阵"
+    case blank = "空白", ruled = "横线", grid = "方格", dots = "点阵", cream = "护眼米黄"
     var id: String { rawValue }
+    var keyword: String { "SimPleviewPaper:" + rawValue }
 
     /// 用 PDF 绘图指令生成纸张，背景不占用整页位图。
     func page(size: CGSize = CGSize(width: 595, height: 842)) throws -> PDFPage {
@@ -14,7 +15,11 @@ enum NotebookPaper: String, CaseIterable, Identifiable {
             throw PadError.message("无法创建笔记纸张。")
         }
         context.beginPDFPage(nil)
-        context.setFillColor(CGColor(gray: 1, alpha: 1)); context.fill(box)
+        // 底色是 PDF 页面内容，跨设备打开或导出后仍保留；不额外存储背景位图。
+        let background = self == .cream
+            ? CGColor(red: 247/255, green: 240/255, blue: 216/255, alpha: 1)
+            : CGColor(gray: 1, alpha: 1)
+        context.setFillColor(background); context.fill(box)
         context.setStrokeColor(CGColor(gray: 0.82, alpha: 1)); context.setLineWidth(0.4)
         context.setFillColor(CGColor(gray: 0.72, alpha: 1))
         let step: CGFloat = 20

@@ -44,9 +44,10 @@ nonisolated struct ScanPage: @unchecked Sendable {
 }
 
 /// 正文优先：瓦片线程只查已完成图像，未命中立即回退 PDFKit，绝不等待整页解码。
-/// 主线程每轮至多准备一份单页数据，后台用自己的 CGPDFDocument 生成屏幕图像。
+/// 未编辑页面直接引用打开时的字节，后台用自己的 CGPDFDocument 生成屏幕图像。
 /// 各窗口共用一个预备队列；缓存每窗口 48 MiB、单页 24 MiB，关闭/内存压力可取消。
 final class ScanPageCache {
+    var source: PDFRenderSource?
     nonisolated private struct Key: Hashable, Sendable {
         let page: ObjectIdentifier
         let geometry: [CGFloat]
@@ -163,17 +164,17 @@ final class ScanPageCache {
             guard !self.pending.isEmpty else { return }
             let request = self.pending.removeFirst()
             guard let page = request.page, page.document != nil, page.annotations.isEmpty,
-                  let data = page.dataRepresentation else { self.scheduleNext(); return }
-            self.enqueue(data: data, request: request)
+                  let input = PDFPageRenderInput.capture(page, source: self.source) else { self.scheduleNext(); return }
+            self.enqueue(input: input, request: request)
         }
     }
 
-    private func enqueue(data: Data, request: Request) {
+    private func enqueue(input: PDFPageRenderInput, request: Request) {
         let version = generation, key = request.key, scan = request.scan
         let work = BlockOperation()
         work.addExecutionBlock { [weak self, weak work] in
             guard let work, !work.isCancelled else { return }
-            let image = autoreleasepool { Self.render(data: data, scan: scan, key: key) }
+            let image = autoreleasepool { Self.render(input: input, scan: scan, key: key) }
             DispatchQueue.main.async { [weak self] in
                 guard let self, self.operation === work else { return }
                 if !work.isCancelled, self.generation == version, let image {
@@ -205,11 +206,11 @@ final class ScanPageCache {
         Self.queue.addOperation(work)
     }
 
-    nonisolated private static func render(data: Data, scan: ScanPage, key: Key) -> CGImage? {
+    nonisolated private static func render(input: PDFPageRenderInput, scan: ScanPage, key: Key) -> CGImage? {
         // CGPDFDocument 也有内部可变缓存，不能把主视图的 pageRef 拿来同时解码。
         // 这里的文档只在本工作项中使用，完成后只交出不可变 CGImage。
-        guard let provider = CGDataProvider(data: data as CFData), let document = CGPDFDocument(provider),
-              let page = document.page(at: 1),
+        guard let provider = CGDataProvider(data: input.data as CFData), let document = CGPDFDocument(provider),
+              let page = document.page(at: input.index + 1),
               let context = CGContext(data: nil, width: key.width, height: key.height, bitsPerComponent: 8,
                 bytesPerRow: key.width * 4, space: CGColorSpaceCreateDeviceRGB(),
                 bitmapInfo: CGImageAlphaInfo.noneSkipLast.rawValue) else { return nil }

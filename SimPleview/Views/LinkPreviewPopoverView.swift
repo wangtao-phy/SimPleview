@@ -6,9 +6,13 @@ import AppKit
 
 struct LinkPreviewPopoverView: View {
     let annotation: PDFAnnotation
+    var renderSource: PDFRenderSource?
+    var onOpenDestination: (() -> Void)?
     var onHoverStateChanged: ((Bool) -> Void)?
     
+    @AppStorage("appLanguage") private var language: AppLanguage = .zh
     @State private var previewImage: NSImage?
+    @State private var previewFailed = false
     @Environment(\.displayScale) private var displayScale
     private static let renderQueue: OperationQueue = {
         let queue = OperationQueue()
@@ -25,7 +29,8 @@ struct LinkPreviewPopoverView: View {
     }
     
     var a: CGFloat {
-        resolvedDestination?.page?.bounds(for: .cropBox).width ?? 800.0
+        let width = resolvedDestination?.page?.bounds(for: .cropBox).width ?? 800
+        return width.isFinite && width > 0 ? min(width, 1200) : 800
     }
     
     var innerWidth: CGFloat { a * 1.5 }
@@ -42,6 +47,15 @@ struct LinkPreviewPopoverView: View {
                 if let img = previewImage {
                     SelectableImageView(image: img)
                         .frame(width: innerWidth, height: innerHeight)
+                } else if previewFailed {
+                    VStack(spacing: 12) {
+                        Text(L.s("Link Preview Unavailable", language))
+                            .foregroundStyle(.secondary)
+                        if let onOpenDestination {
+                            Button(L.s("Go to Link Destination", language), action: onOpenDestination)
+                        }
+                    }
+                    .frame(width: innerWidth, height: innerHeight)
                 } else {
                     VStack {
                         ProgressView()
@@ -50,7 +64,7 @@ struct LinkPreviewPopoverView: View {
                     .frame(width: innerWidth, height: innerHeight) 
                 }
             } else {
-                Text("Unknown Link")
+                Text(L.s("Unknown Link", language))
                     .foregroundColor(.secondary)
                     .padding()
             }
@@ -65,16 +79,32 @@ struct LinkPreviewPopoverView: View {
     }
     
     private func generateThumbnail() async {
-        guard !Task.isCancelled, let dest = resolvedDestination, let page = dest.page,
-              let data = StandardInk.exportData(of: page) else { return }
+        previewImage = nil
+        previewFailed = false
+        guard !Task.isCancelled else { return }
+        guard let dest = resolvedDestination, let page = dest.page,
+              let input = PDFPageRenderInput.capture(page, source: renderSource) else {
+            previewFailed = true
+            return
+        }
         let point = dest.point, scale = 1.5 * displayScale
         let work = BlockOperation()
         let result = OSAllocatedUnfairLock<CGImage?>(initialState: nil)
         work.addExecutionBlock { [weak work] in
             guard work?.isCancelled == false else { return }
-            let image = autoreleasepool { Self.render(data: data, point: point, scale: scale) }
+            let image = autoreleasepool { Self.render(input: input, point: point, scale: scale) }
             result.withLock { $0 = image }
         }
+        // 系统解码异常缓慢时结束转圈并提供直接跳转；不重复提交渲染。
+        // Operation.cancel 只能取消排队任务，不能强行终止已进入系统的绘制。
+        // 迟到的有效结果仍可替换提示，关闭浮窗则由 .task 取消阻止回填。
+        let timeout = Task {
+            do { try await Task.sleep(for: .seconds(8)) } catch { return }
+            guard !Task.isCancelled else { return }
+            previewFailed = true
+            work.cancel()
+        }
+        defer { timeout.cancel() }
         // 关闭弹窗会取消 .task；未开始的预览不再绘制，已开始的图像不回填。
         // 共用串行队列，快速扫过多个链接时不并发解码多份 PDF。
         let image = await withTaskCancellationHandler {
@@ -82,19 +112,33 @@ struct LinkPreviewPopoverView: View {
                 work.completionBlock = { continuation.resume(returning: result.withLock { $0 }) }
                 Self.renderQueue.addOperation(work)
             }
-        } onCancel: { work.cancel() }
-        guard !Task.isCancelled, let image else { return }
+        } onCancel: {
+            timeout.cancel()
+            work.cancel()
+        }
+        guard !Task.isCancelled else { return }
+        guard let image else {
+            previewFailed = true
+            return
+        }
         previewImage = NSImage(cgImage: image, size: NSSize(width: innerWidth, height: innerHeight))
     }
 
-    nonisolated private static func render(data: Data, point: CGPoint, scale: CGFloat) -> CGImage? {
-        guard let document = PDFDocument(data: data), let page = document.page(at: 0) else { return nil }
+    nonisolated static func render(input: PDFPageRenderInput, point: CGPoint, scale: CGFloat) -> CGImage? {
+        guard let document = PDFDocument(data: input.data), let page = document.page(at: input.index) else { return nil }
         defer { withExtendedLifetime(document) {} }
         let bounds = page.bounds(for: .cropBox)
-        let crop = CGRect(x: bounds.minX, y: max(bounds.minY, point.y - bounds.width / 3 + 40),
-                          width: bounds.width, height: bounds.width / 3)
-        guard crop.width.isFinite, crop.height.isFinite, crop.width > 0, crop.height > 0,
+        guard bounds.minX.isFinite, bounds.minY.isFinite, bounds.maxY.isFinite,
+              bounds.width.isFinite, bounds.width > 0, bounds.height > 0,
               scale.isFinite, scale > 0 else { return nil }
+        // PDF 目的地可以不指定纵坐标（Fit/FitH/XYZ 的空参数）。
+        // 此时 PDFKit 可能返回无穷大/极大哨兵值，应预览页顶，不能将其当裁剪坐标。
+        let y = point.y.isFinite && point.y >= bounds.minY && point.y <= bounds.maxY
+            ? point.y : bounds.maxY
+        let cropHeight = min(bounds.height, bounds.width / 3)
+        let crop = CGRect(x: bounds.minX,
+                          y: min(bounds.maxY - cropHeight, max(bounds.minY, y - cropHeight + 40)),
+                          width: bounds.width, height: cropHeight)
         let scale = min(scale, 4096 / max(crop.width, crop.height))
         let width = Int(ceil(crop.width * scale)), height = Int(ceil(crop.height * scale))
         // 后台只使用独立 PDF 和显式像素缓冲，避免 lockFocus 隐式分配
