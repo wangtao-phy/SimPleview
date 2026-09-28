@@ -4,20 +4,26 @@ import UniformTypeIdentifiers
 struct LibraryView: View {
     @StateObject private var library = NotebookLibrary()
     @State private var chooseFolder = false
+    @StateObject private var recentPDFs = RecentPDFStore()
     var body: some View {
-        NavigationStack {
-            LibraryFolderView(library: library, directory: library.root)
-                .id(library.root)
-                .toolbar {
-                    ToolbarItem(placement: .topBarLeading) {
-                        Button("选择笔记目录", systemImage: "folder.badge.gearshape") { chooseFolder = true }
-                    }
-                    ToolbarItem(placement: .topBarLeading) {
-                        NavigationLink("恢复的笔记") {
-                            LibraryFolderView(library:library,directory:URL.documentsDirectory.appendingPathComponent("恢复的笔记",isDirectory:true))
+        TabView {
+            NavigationStack {
+                LibraryFolderView(library: library, directory: library.root)
+                    .id(library.root)
+                    .toolbar {
+                        ToolbarItem(placement: .topBarLeading) {
+                            Button("选择笔记目录", systemImage: "folder.badge.gearshape") { chooseFolder = true }
+                        }
+                        ToolbarItem(placement: .topBarLeading) {
+                            NavigationLink("恢复的笔记") {
+                                LibraryFolderView(library: library, directory: URL.documentsDirectory.appendingPathComponent("恢复的笔记", isDirectory: true))
+                            }
                         }
                     }
-                }
+            }
+            .tabItem { Label("笔记本", systemImage: "books.vertical") }
+            NavigationStack { RecentPDFView(store: recentPDFs) }
+                .tabItem { Label("PDF", systemImage: "doc.richtext") }
         }
         .fileImporter(isPresented: $chooseFolder, allowedContentTypes: [.folder]) { result in
             switch result {
@@ -45,38 +51,37 @@ struct LibraryFolderView: View {
     @State private var moving: LibraryEntry?
     @State private var deleting: LibraryEntry?
     var body: some View {
-        List {
+        ScrollView {
             if entries.isEmpty {
-                ContentUnavailableView("还没有笔记", systemImage: "book.closed", description: Text("创建笔记本、打开原 PDF，或导入 PDF 副本。"))
+                ContentUnavailableView("还没有笔记", systemImage: "book.closed", description: Text("创建笔记本，或导入 PDF 副本作为笔记。"))
             }
-            ForEach(entries) { entry in
-                Group {
-                    if entry.folder {
-                        NavigationLink {
-                            LibraryFolderView(library: library, directory: entry.url)
-                        } label: { Label(entry.title, systemImage: "folder") }
-                    } else {
-                        Button { fileOpening.opened = entry } label: {
-                            HStack(spacing: 16) {
-                                Image(systemName: "book.closed.fill").font(.title).foregroundStyle(.tint)
-                                Text(entry.title).foregroundStyle(.primary).padding(.vertical, 12)
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: 140, maximum: 200), spacing: 20)], spacing: 20) {
+                ForEach(entries) { entry in
+                    Group {
+                        if entry.folder {
+                            NavigationLink {
+                                LibraryFolderView(library: library, directory: entry.url)
+                            } label: {
+                                DocumentCoverView(url: entry.url, title: entry.title, folder: true)
+                            }
+                        } else {
+                            Button { fileOpening.opened = entry } label: {
+                                DocumentCoverView(url: entry.url, title: entry.title, revision: library.revision)
                             }
                         }
                     }
-                }
-                .contextMenu {
-                    Button("重命名", systemImage: "pencil") { name = entry.title; renaming = entry }
-                    Button("移动", systemImage: "folder") { moving = entry }
-                    Button("删除", systemImage: "trash", role: .destructive) { deleting = entry }
+                    .buttonStyle(.plain)
+                    .contextMenu {
+                        Button("重命名", systemImage: "pencil") { name = entry.title; renaming = entry }
+                        Button("移动", systemImage: "folder") { moving = entry }
+                        Button("删除", systemImage: "trash", role: .destructive) { deleting = entry }
+                    }
                 }
             }
+            .padding(20)
         }
         .navigationTitle(directory.lastPathComponent)
         .toolbar {
-            ToolbarItem(placement: .topBarTrailing) {
-                Button("打开文件", systemImage: "doc") { fileOpening.begin() }
-                    .help("直接编辑所选 PDF，修改保存到原文件。")
-            }
             ToolbarItem(placement: .topBarTrailing) {
                 Menu {
                     Button("新建笔记本", systemImage: "book.badge.plus") { name = ""; folder = false; create = true }
@@ -113,10 +118,7 @@ struct LibraryFolderView: View {
             catch { library.error = error.localizedDescription }
             refresh()
         }
-        .sheet(isPresented: $fileOpening.pickerPresented, onDismiss: fileOpening.didDismiss) {
-            OriginalPDFPicker { fileOpening.didSelect($0) }
-        }
-        .fullScreenCover(item: $fileOpening.opened, onDismiss: { refresh() }) { entry in
+        .fullScreenCover(item: $fileOpening.opened, onDismiss: { library.revision += 1; refresh() }) { entry in
             NotebookReaderView(url: entry.url)
         }
         .alert("重命名", isPresented: Binding(get: { renaming != nil }, set: { if !$0 { renaming = nil } })) {
@@ -146,6 +148,47 @@ struct LibraryFolderView: View {
     }
     private func perform(_ action: () throws -> Void) {
         do { try action() } catch { library.error = error.localizedDescription }
+    }
+}
+
+struct RecentPDFView: View {
+    @ObservedObject var store: RecentPDFStore
+    @StateObject private var opening = OriginalFileOpening()
+    @State private var coverRevision = 0
+    var body: some View {
+        ScrollView {
+            if store.entries.isEmpty {
+                ContentUnavailableView("还没有打开过 PDF", systemImage: "doc", description: Text("选择“打开文件”，在原文件上阅读和标注。"))
+            }
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: 140, maximum: 200), spacing: 20)], spacing: 20) {
+                ForEach(store.entries) { entry in
+                    Button {
+                        do { opening.opened = LibraryEntry(url: try store.url(for: entry), folder: false) }
+                        catch { store.error = "此文件暂时无法访问，请通过“打开文件”重新选择。" }
+                    } label: {
+                        if let url = try? store.url(for: entry) {
+                            DocumentCoverView(url: url, title: entry.title, revision: coverRevision)
+                        } else {
+                            Label(entry.title, systemImage: "doc.badge.ellipsis").frame(height: 230)
+                        }
+                    }
+                    .buttonStyle(.plain)
+                    .contextMenu { Button("移除记录", systemImage: "clock.badge.xmark") { store.remove(entry) } }
+                }
+            }
+            .padding(20)
+        }
+        .navigationTitle("最近打开的 PDF")
+        .toolbar { Button("打开文件", systemImage: "doc.badge.plus") { opening.begin() } }
+        .sheet(isPresented: $opening.pickerPresented, onDismiss: opening.didDismiss) {
+            OriginalPDFPicker { opening.didSelect($0) }
+        }
+        .fullScreenCover(item: $opening.opened, onDismiss: { coverRevision += 1 }) { entry in
+            NotebookReaderView(url: entry.url, onOpened: { store.record(entry.url) })
+        }
+        .alert("文件记录", isPresented: Binding(get: { store.error != nil }, set: { if !$0 { store.error = nil } })) {
+            Button("好") { store.error = nil }
+        } message: { Text(store.error ?? "") }
     }
 }
 

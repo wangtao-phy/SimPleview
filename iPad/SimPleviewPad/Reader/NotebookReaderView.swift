@@ -17,85 +17,59 @@ struct NotebookReaderView: View {
     @State private var pages = false
     @State private var jumping = false
     @State private var pageNumber = ""
-    @State private var addNote = false
-    @State private var note = ""
     @State private var deletePage = false
     @State private var export: PDFExportFile?
     @State private var exporting = false
     @State private var preparing = false
     @State private var searching = false
     @State private var chat = false
-    init(url: URL) { _session = StateObject(wrappedValue: NotebookSession(url: url)) }
+    var onOpened: (() -> Void)?
+    init(url: URL, onOpened: (() -> Void)? = nil) {
+        _session = StateObject(wrappedValue: NotebookSession(url: url))
+        self.onOpened = onOpened
+    }
     var body: some View {
-        NavigationStack {
-            Group {
-                if session.document != nil { PadPDFView(session: session) }
-                else if session.error == nil { ProgressView("正在打开 PDF…") }
-                else { ContentUnavailableView("无法打开", systemImage: "doc.badge.ellipsis") }
+        Group {
+            if let renderer = session.softwareRenderer, session.document != nil {
+                SoftwarePDFView(session: session, renderer: renderer).ignoresSafeArea(.container)
             }
-            .navigationTitle(session.url.deletingPathExtension().lastPathComponent)
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .topBarLeading) {
-                    Button("书架", systemImage: "chevron.backward") {
-                        Task { if await session.close() { dismiss() } }
-                    }.disabled(session.isSaving)
-                }
-                ToolbarItemGroup(placement: .topBarTrailing) {
-                    Button("页面", systemImage: "square.grid.2x2") { pages = true }
-                    Button("搜索", systemImage: "magnifyingglass") { searching = true }
-                    Button("AI", systemImage: "bubble.left.and.text.bubble.right") { chat = true }
-                    Menu {
-                        Picker("新页纸张", selection: $session.paper) { ForEach(NotebookPaper.allCases) { Text($0.rawValue).tag($0) } }
-                        Button("添加页面", systemImage: "doc.badge.plus") { session.insertPage() }
-                        Button("复制当前页", systemImage: "plus.square.on.square") { session.duplicatePage() }
-                        Button("删除当前页", systemImage: "trash", role: .destructive) { deletePage = true }.disabled((session.document?.pageCount ?? 0) < 2)
-                        Divider()
-                        Button("导出可编辑 PDF") { prepareExport(flattened: false) }
-                        Button("导出通用矢量 PDF") { prepareExport(flattened: true) }
-                        Toggle("允许手指书写", isOn: $session.fingerDrawing)
-                    } label: { Label("更多", systemImage: "ellipsis.circle") }.disabled(preparing)
-                }
-                ToolbarItemGroup(placement: .bottomBar) {
-                    Button(session.writing ? "阅读" : "书写", systemImage: session.writing ? "hand.draw" : "pencil.tip") {
-                        session.writing.toggle()
-                        if session.writing { session.annotationsVisible = true }
+            else if session.document != nil { PadPDFView(session: session).ignoresSafeArea(.container) }
+            else if session.openingFailure == nil { ProgressView("正在打开 PDF…") }
+            else {
+                ContentUnavailableView {
+                    Label("暂时无法打开", systemImage: "doc.badge.ellipsis")
+                } description: {
+                    Text(session.openingFailure ?? "请重试或返回书架。")
+                } actions: {
+                    Button("重试") {
+                        session.error = nil
+                        Task { await session.open() }
                     }
-                    Button("撤销", systemImage: "arrow.uturn.backward") { session.canvas?.undoManager?.undo() }
-                    Button("重做", systemImage: "arrow.uturn.forward") { session.canvas?.undoManager?.redo() }
-                    Menu {
-                        Button("高亮选中文字") { session.markSelection(.highlight) }
-                        Button("下划线") { session.markSelection(.underline) }
-                        Button("删除线") { session.markSelection(.strikeOut) }
-                        Button("添加文字笔记") { note = ""; addNote = true }
-                    } label: { Label("标注", systemImage: "highlighter") }
-                    Button("标注显隐", systemImage: session.annotationsVisible ? "eye" : "eye.slash") {
-                        session.annotationsVisible.toggle()
-                        if !session.annotationsVisible { session.writing = false }
-                    }
-                    Spacer()
-                    Button("\(session.pageIndex+1) / \(session.document?.pageCount ?? 0)") {
-                        pageNumber = String(session.pageIndex+1)
-                        jumping = true
-                    }
-                    .monospacedDigit()
-                    .disabled(session.document == nil)
-                    .accessibilityLabel("跳转页面")
-                    Button(session.isSaving ? "保存中…" : session.dirty ? "待保存" : "已保存") { Task { await session.save() } }
-                        .disabled(session.isSaving).help("表示已写入文件，不代表云端已同步。")
                 }
             }
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        // 仅正文延伸到屏幕边缘；悬浮控件保留安全区，不占用 PDF 的布局高度。
+        // 不给正文添加点击手势，避免与 PencilKit、选字及文内链接争夺触摸。
+        .overlay(alignment: .top) { navigationControls.padding(8) }
+        .overlay(alignment: .leading) {
+            if session.isReadOnly {
+                Button("兼容阅读 · 只读") {
+                    session.error = "系统原生图形服务暂不可用，已用兼容模式打开。可以滚动、双指缩放、跳页和搜索；手写与标注编辑暂不可用。原 PDF 及其矢量标注没有改动。"
+                }
+                .font(.caption).modifier(ReaderFloatingControls()).padding(8)
+            } else { annotationControls.padding(8) }
+        }
+        .overlay(alignment: .bottomTrailing) { pageControls.padding(8) }
+        .ignoresSafeArea(.keyboard)
         .interactiveDismissDisabled()
-        .task { await session.open() }
+        .task { await session.open(); if session.document != nil { onOpened?() } }
         .onChange(of: scenePhase) { _, phase in if phase != .active { Task { await session.save() } } }
         .alert("操作未完成", isPresented: Binding(get: { session.error != nil }, set: { if !$0 { session.error = nil } })) {
             Button("好") { session.error = nil }
         } message: { Text(session.error ?? "") }
-        .alert("添加文字笔记", isPresented: $addNote) {
-            TextField("笔记内容", text: $note)
-            Button("取消", role: .cancel) {}
-            Button("添加") { session.addNote(note) }
+        .sheet(item: $session.textRequest) { request in
+            AnnotationTextEditor(request: request) { text in session.saveAnnotationText(text, for: request) }
         }
         .alert("跳转页面", isPresented: $jumping) {
             TextField("页码", text: $pageNumber).keyboardType(.numberPad)
@@ -116,6 +90,81 @@ struct NotebookReaderView: View {
             export = nil
         }
     }
+    private var navigationControls: some View {
+        HStack(alignment: .top) {
+            Button("书架", systemImage: "chevron.backward") {
+                Task { if await session.close() { dismiss() } }
+            }
+            .disabled(session.isSaving)
+            .help(session.url.deletingPathExtension().lastPathComponent)
+            .modifier(ReaderFloatingControls())
+            Spacer(minLength: 8)
+            HStack(spacing: 0) {
+                Button("页面", systemImage: "square.grid.2x2") { pages = true }
+                Button("搜索", systemImage: "magnifyingglass") { searching = true }
+                Button("AI", systemImage: "bubble.left.and.text.bubble.right") { chat = true }
+                Menu {
+                    Text(session.url.deletingPathExtension().lastPathComponent)
+                    Picker("翻页效果", selection: $session.pageTurning) {
+                        ForEach(PageTurning.allCases) { Text($0.title).tag($0) }
+                    }.disabled(session.isUsingTool || session.isReadOnly)
+                    Picker("新页纸张", selection: $session.paper) { ForEach(NotebookPaper.allCases) { Text($0.rawValue).tag($0) } }.disabled(session.isReadOnly)
+                    Button("添加页面", systemImage: "doc.badge.plus") { session.insertPage() }.disabled(session.isReadOnly)
+                    Button("复制当前页", systemImage: "plus.square.on.square") { session.duplicatePage() }.disabled(session.isReadOnly)
+                    Button("删除当前页", systemImage: "trash", role: .destructive) { deletePage = true }.disabled(session.isReadOnly || (session.document?.pageCount ?? 0) < 2)
+                    Divider()
+                    Button {
+                        Task { await session.save() }
+                    } label: {
+                        Label(session.isSaving ? "保存中…" : session.dirty ? "待保存" : "已保存",
+                              systemImage: session.isSaving ? "arrow.trianglehead.2.clockwise" : session.dirty ? "square.and.arrow.down" : "checkmark.circle")
+                    }
+                    .disabled(session.isSaving)
+                    .help("表示已写入文件，不代表云端已同步。")
+                    Button("导出可编辑 PDF") { prepareExport(flattened: false) }
+                    Button("导出通用矢量 PDF") { prepareExport(flattened: true) }
+                    Toggle("允许手指书写", isOn: $session.fingerDrawing).disabled(session.isReadOnly)
+                } label: { Label("更多", systemImage: "ellipsis.circle") }.disabled(preparing)
+            }
+            .modifier(ReaderFloatingControls())
+        }
+    }
+
+    private var annotationControls: some View {
+        VStack(spacing: 0) {
+            Button(session.writing ? "阅读" : "书写", systemImage: session.writing ? "hand.draw" : "pencil.tip") {
+                session.adjustingInk = false
+                session.writing.toggle()
+                if session.writing { session.annotationsVisible = true }
+            }
+            Button("撤销", systemImage: "arrow.uturn.backward") { session.undo() }
+                .disabled(!session.canUndo || session.isUsingTool)
+                .keyboardShortcut("z", modifiers: .command)
+            Button("重做", systemImage: "arrow.uturn.forward") { session.redo() }
+                .disabled(!session.canRedo || session.isUsingTool)
+                .keyboardShortcut("z", modifiers: [.command, .shift])
+            Button("标注显隐", systemImage: session.annotationsVisible ? "eye" : "eye.slash") {
+                session.annotationsVisible.toggle()
+                if !session.annotationsVisible { session.writing = false; session.adjustingInk = false }
+            }
+        }
+        .modifier(ReaderFloatingControls())
+    }
+
+    private var pageControls: some View {
+        HStack(spacing: 0) {
+            Button("\(session.pageIndex+1) / \(session.document?.pageCount ?? 0)") {
+                pageNumber = String(session.pageIndex+1)
+                jumping = true
+            }
+            .monospacedDigit()
+            .disabled(session.document == nil)
+            .accessibilityLabel("跳转页面")
+
+        }
+        .modifier(ReaderFloatingControls())
+    }
+
     private func prepareExport(flattened: Bool) {
         preparing = true
         Task {
@@ -123,6 +172,30 @@ struct NotebookReaderView: View {
             do { export = PDFExportFile(data: try await session.storage.render(session.snapshot(), flattened: flattened)); exporting = true }
             catch { session.error = error.localizedDescription }
         }
+    }
+}
+
+/// 按钮保持至少 44 点触摸区域，背景只包围按钮组，组外触摸直接交给 PDF。
+private struct ReaderFloatingControls: ViewModifier {
+    func body(content: Content) -> some View {
+        content
+            .labelStyle(.iconOnly)
+            .buttonStyle(ReaderFloatingButtonStyle())
+            .fixedSize()
+            .padding(4)
+            .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 18))
+            .shadow(color: .black.opacity(0.12), radius: 5, y: 2)
+    }
+}
+
+private struct ReaderFloatingButtonStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .font(.body)
+            .padding(.horizontal, 8)
+            .frame(minWidth: 44, minHeight: 44)
+            .contentShape(Rectangle())
+            .opacity(configuration.isPressed ? 0.5 : 1)
     }
 }
 
@@ -158,7 +231,7 @@ struct PageListView: View {
                 }
             }.navigationTitle(contents ? "PDF 目录" : "页面排序").toolbar {
                 Button(contents ? "页面" : "目录") { contents.toggle() }
-                if !contents { EditButton() }
+                if !contents && !session.isReadOnly { EditButton() }
             }
             .task(id: session.revision) {
                 do { snapshot = try session.snapshot() } catch { session.error = error.localizedDescription }
