@@ -19,6 +19,8 @@ struct InkShape: @unchecked Sendable {
 enum VectorInk {
     static let drawingKey = PDFAnnotationKey(rawValue: "/SPVPadDrawingV1")
     static let groupKey = PDFAnnotationKey(rawValue: "/SPVPadInkGroup")
+    static let transformKey = PDFAnnotationKey(rawValue: "/SPVInkTransform")
+    static let indexKey = PDFAnnotationKey(rawValue: "/SPVPadInkIndex")
     static let brushKey = PDFAnnotationKey(rawValue: "/SPVPadBrush")
     static let opacityKey = PDFAnnotationKey(rawValue: "/SimPleInkOpacity")
 
@@ -53,6 +55,23 @@ enum VectorInk {
                 throw PadError.message("笔迹包含尚不支持的非等比变形，已保留原文件。")
             }
             let path = CGMutablePath()
+            // 已知为折线的原生笔迹直接导出原顶点，不重新采样，避免保存一轮
+            // 就增加一批近共线点，也无需保存可以从这些顶点重建的编辑附件。
+            if let points = linearPoints(of: stroke), let first = points.first {
+                let width = stroke.path[0].size.width
+                guard width.isFinite, width > 0, width < 10_000,
+                      points.allSatisfy({ $0.x.isFinite && $0.y.isFinite && abs($0.x) < 1_000_000 && abs($0.y) < 1_000_000 }) else {
+                    throw PadError.message("笔迹包含无效坐标，已停止保存。")
+                }
+                total += points.count
+                guard total <= 2_000_000 else { throw PadError.message("本页笔迹过于复杂，请分到更多页面。") }
+                try Task.checkCancellation()
+                path.move(to: first)
+                for point in points.dropFirst() { path.addLine(to: point) }
+                if points.count == 1 { path.addLine(to: CGPoint(x: first.x + 0.001, y: first.y)) }
+                result.append(InkShape(path: path.copy()!, transform: t, color: stroke.ink.color.cgColor, width: width))
+                continue
+            }
             var width: CGFloat?
             // 原生整笔橡皮通常直接删除笔划；有遮罩时仅导出未被擦除的中心线区间。
             let ranges: [ClosedRange<CGFloat>?] = stroke.mask == nil ? [nil] : stroke.maskedPathRanges.map { $0.lowerBound...$0.upperBound }
@@ -123,7 +142,12 @@ enum VectorInk {
     /// 自动使用已经验证过的高清矢量绘制，无需改动任何 macOS 代码。
     static func annotations(drawing: PKDrawing, bounds: CGRect) throws -> [PDFAnnotation] {
         let shapes = try shapes(from:drawing), group = UUID().uuidString
-        var annotations: [PDFAnnotation] = []
+        let linear = shapes.count == drawing.strokes.count
+            ? drawing.strokes.map { linearPoints(of: $0) != nil } : Array(repeating: false, count: shapes.count)
+        let native = shapes.count == drawing.strokes.count
+            ? drawing.strokes.enumerated().filter { !linear[$0.offset] }.map(\.element) : drawing.strokes
+        var annotations: [PDFAnnotation] = [], metadata: PDFAnnotation?
+        var nativeIndex = 0
         for (index,shape) in shapes.enumerated() {
             let flip = CGAffineTransform(a:1,b:0,c:0,d:-1,tx:0,ty:bounds.height)
             var transform = shape.transform.concatenating(flip)
@@ -151,37 +175,75 @@ enum VectorInk {
             annotation.userName = "B-PAD-\(group)-\(index)"
             annotation.setValue("",forAnnotationKey:PDFAnnotationKey(rawValue:"/SimPlePath"))
             annotation.setValue(shape.color.alpha,forAnnotationKey:opacityKey)
-            annotation.setValue(group,forAnnotationKey:groupKey)
+            if linear[index], !shape.transform.isIdentity {
+                // 六个仿射参数足以保留 PencilKit 的缩放绘制方式，避免将变换
+                // 展平后重开时笔刷边缘稍变；无需给折线再附一份完整 PKDrawing。
+                let t = shape.transform
+                annotation.setValue([t.a, t.b, t.c, t.d, t.tx, t.ty].map { String(Double($0)) }.joined(separator: ","),
+                                    forAnnotationKey: transformKey)
+            }
+            if !linear[index] {
+                annotation.setValue(group, forAnnotationKey: groupKey)
+                annotation.setValue(nativeIndex, forAnnotationKey: indexKey)
+                nativeIndex += 1
+                if metadata == nil { metadata = annotation }
+            }
             annotation.shouldPrint = true
             annotations.append(annotation)
         }
-        // AnnotationKit 会丢弃未知 Data 属性，故用 ASCII 编码保存一份原生数据。
-        // 只附在第一笔，不随每一条笔划重复整页编辑数据。
-        annotations.first?.setValue(drawing.dataRepresentation().base64EncodedString(),forAnnotationKey:drawingKey)
-        annotations.first?.setValue("monoline",forAnnotationKey:brushKey)
+        // 只有无法从折线完整重建的笔迹才保存原生附件，每组只附一次。
+        // AnnotationKit 会丢弃未知 Data 属性，故使用 ASCII 编码。
+        if let metadata {
+            metadata.setValue(PKDrawing(strokes: native).dataRepresentation().base64EncodedString(), forAnnotationKey: drawingKey)
+            metadata.setValue("monoline", forAnnotationKey: brushKey)
+        }
         return annotations
     }
 
 
-    /// 其他软件可能修改或删除标准笔迹。只有外观几何仍与原生数据一致时，
-    /// 才恢复原生编辑；否则保留外部修改后的 PDF 标注，绝不复活旧笔迹。
-    static func takeEditableDrawing(from page:PDFPage) throws -> PKDrawing {
-        var strokes: [PKStroke] = []
-        for metadata in page.annotations {
-            // 编辑附件损坏或未来版本不兼容时，仍可阅读标准 PDF 笔迹。
-            guard let drawing = try? drawing(in:metadata), let group = metadata.value(forAnnotationKey:groupKey) as? String else {continue}
-            let actual = page.annotations.filter { $0.value(forAnnotationKey:groupKey) as? String == group }
-            let expected = try annotations(drawing:drawing,bounds:page.bounds(for:.cropBox))
-            if actual.count == expected.count && zip(actual,expected).allSatisfy({ matches($0,$1) }) {
-                strokes += drawing.strokes
-                for annotation in actual { page.removeAnnotation(annotation) }
-            } else {
-                metadata.removeValue(forAnnotationKey:drawingKey)
-            }
+    /// 标准 InkList 是当前外观的依据，原生附件只用于恢复仍匹配的笔画。
+    /// 单笔删除、改色或重排不能让整组退回 PDFKit 的位图标注层，更不能复活旧笔迹。
+    static func takeEditableDrawing(from page: PDFPage) throws -> PKDrawing {
+        let annotations = page.annotations, bounds = page.bounds(for: .cropBox)
+        var originals: [String: (PKDrawing, [PDFAnnotation])] = [:]
+        for metadata in annotations {
+            guard let group = metadata.value(forAnnotationKey: groupKey) as? String,
+                  let drawing = try? drawing(in: metadata),
+                  let expected = try? self.annotations(drawing: drawing, bounds: bounds),
+                  expected.count == drawing.strokes.count else { continue }
+            originals[group] = (drawing, expected)
         }
-        return PKDrawing(strokes:strokes)
+        var strokes: [PKStroke] = []
+        for annotation in annotations where annotation.type == "Ink" && annotation.shouldDisplay {
+            try Task.checkCancellation()
+            var recovered: [PKStroke]?
+            if let group = annotation.value(forAnnotationKey: groupKey) as? String,
+               let (drawing, expected) = originals[group] {
+                // 旧文件用原有用户名后缀，新文件用独立索引；不依赖标注在页内的顺序。
+                let prefix = "B-PAD-\(group)-"
+                let name = annotation.userName ?? ""
+                let index = (annotation.value(forAnnotationKey: indexKey) as? NSNumber)?.intValue
+                    ?? (name.hasPrefix(prefix) ? Int(name.dropFirst(prefix.count)) : nil)
+                if let index, expected.indices.contains(index), matches(annotation, expected[index]) {
+                    recovered = [drawing.strokes[index]]
+                }
+            }
+            if recovered == nil { recovered = standardDrawing(in: annotation, pageBounds: bounds)?.strokes }
+            guard let recovered, !recovered.isEmpty else { continue }
+            strokes += recovered
+            // Mac 上附在手绘上的文字评论单独保留为便签，不因切换到原生画布丢失。
+            if let text = annotation.contents, !text.isEmpty {
+                let note = PDFAnnotation(bounds: CGRect(x: annotation.bounds.minX, y: annotation.bounds.maxY - 24,
+                    width: 24, height: 24), forType: .text, withProperties: nil)
+                note.contents = text; note.color = annotation.color
+                note.modificationDate = annotation.modificationDate
+                page.addAnnotation(note)
+            }
+            page.removeAnnotation(annotation)
+        }
+        return PKDrawing(strokes: strokes)
     }
-    private static func matches(_ a:PDFAnnotation,_ b:PDFAnnotation) -> Bool {
+    static func matches(_ a:PDFAnnotation,_ b:PDFAnnotation) -> Bool {
         guard abs((a.border?.lineWidth ?? 0)-(b.border?.lineWidth ?? 0)) < 0.01,
               let ac=a.color.cgColor.converted(to:CGColorSpaceCreateDeviceRGB(),intent:.defaultIntent,options:nil)?.components,
               let bc=b.color.cgColor.converted(to:CGColorSpaceCreateDeviceRGB(),intent:.defaultIntent,options:nil)?.components,

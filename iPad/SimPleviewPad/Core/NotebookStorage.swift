@@ -86,28 +86,39 @@ actor NotebookStorage {
             throw PadError.message("PDF 无法读取或尚未解锁。")
         }
         if flattened { return try flattenedData(snapshot, document: document) }
-        var encodedDrawings: [Int: String] = [:]
+        var expectedInk: [Int: [PDFAnnotation]] = [:]
         for (index, drawing) in snapshot.drawings where !drawing.strokes.isEmpty {
             guard let page = document.page(at: index) else { throw PadError.message("笔迹对应的页面不存在。") }
             let annotations = try VectorInk.annotations(drawing: drawing, bounds: page.bounds(for: .cropBox))
-            encodedDrawings[index] = annotations.first?.value(forAnnotationKey: VectorInk.drawingKey) as? String
+            expectedInk[index] = annotations
             for annotation in annotations { page.addAnnotation(annotation) }
         }
         guard let data = document.dataRepresentation(), let reopened = PDFDocument(data: data),
               reopened.pageCount == document.pageCount else { throw PadError.message("PDF 保存后校验失败。") }
-        for (index, drawing) in snapshot.drawings where !drawing.strokes.isEmpty {
-            guard let page = reopened.page(at:index),
-                  let encoded = encodedDrawings[index],
-                  let annotation = page.annotations.first(where: {
-                      $0.value(forAnnotationKey: VectorInk.drawingKey) as? String == encoded
-                  }), let restored = try VectorInk.drawing(in:annotation),
-                  restored.strokes.count == drawing.strokes.count else {
-                throw PadError.message("笔迹编辑数据未完整保留，原文件未替换。")
-            }
-            // 附件完整不代表标准 PDF 笔迹完整。必须通过实际重开时的几何比对，
-            // 才能替换原文件，防止框架静默丢弃 InkList 而留下空白标注。
-            guard try VectorInk.takeEditableDrawing(from:page).strokes.count == drawing.strokes.count else {
-                throw PadError.message("标准 PDF 笔迹校验失败，原文件未替换。")
+        for (index, expected) in expectedInk {
+            guard let page = reopened.page(at: index) else { throw PadError.message("笔迹对应的页面不存在。") }
+            let byName = Dictionary(grouping: page.annotations, by: { $0.userName ?? "" })
+            for source in expected {
+                guard let name = source.userName, let matches = byName[name], matches.count == 1,
+                      let restored = matches.first, VectorInk.matches(source, restored) else {
+                    throw PadError.message("标准 PDF 笔迹校验失败，原文件未替换。")
+                }
+                // 读取可兼容外部编辑，写入必须逐项严格匹配；不能用恢复分支掩盖丢笔。
+                for key in [VectorInk.drawingKey, VectorInk.groupKey, VectorInk.brushKey, VectorInk.transformKey] {
+                    if let value = source.value(forAnnotationKey: key) as? String,
+                       restored.value(forAnnotationKey: key) as? String != value {
+                        throw PadError.message("笔迹编辑数据未完整保留，原文件未替换。")
+                    }
+                }
+                if source.value(forAnnotationKey: VectorInk.drawingKey) != nil {
+                    guard let native = try VectorInk.drawing(in: restored), !native.strokes.isEmpty else {
+                        throw PadError.message("笔迹编辑数据无法重开，原文件未替换。")
+                    }
+                }
+                if let index = source.value(forAnnotationKey: VectorInk.indexKey) as? NSNumber,
+                   restored.value(forAnnotationKey: VectorInk.indexKey) as? NSNumber != index {
+                    throw PadError.message("笔迹编辑索引未完整保留，原文件未替换。")
+                }
             }
         }
         return data

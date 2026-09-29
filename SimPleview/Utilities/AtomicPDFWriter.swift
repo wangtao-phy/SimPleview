@@ -79,6 +79,20 @@ enum AtomicPDFWriter {
                     guard let value = annotation.value(forAnnotationKey: key) as? String else { break }
                     guard restored.value(forAnnotationKey: key) as? String == value else { throw validationError("矢量路径未完整保留") }
                 }
+                // Mac 不改写 iPad 的原生编辑附件；保存后逐项确认，避免一次
+                // Mac 自动保存静默丢掉整组的可编辑数据，只剩 PDF 标注外观。
+                for name in ["/SPVPadDrawingV1", "/SPVPadInkGroup", "/SPVPadBrush", "/SPVInkTransform"] {
+                    let key = PDFAnnotationKey(rawValue: name)
+                    if let value = annotation.value(forAnnotationKey: key) as? String,
+                       restored.value(forAnnotationKey: key) as? String != value {
+                        throw validationError("跨端笔迹编辑数据未完整保留")
+                    }
+                }
+                let indexKey = PDFAnnotationKey(rawValue: "/SPVPadInkIndex")
+                if let index = annotation.value(forAnnotationKey: indexKey) as? NSNumber,
+                   restored.value(forAnnotationKey: indexKey) as? NSNumber != index {
+                    throw validationError("跨端笔迹编辑索引未完整保留")
+                }
                 if annotation.type == "Ink", annotation.paths?.isEmpty == false,
                    restored.paths?.count != annotation.paths?.count { throw validationError("标准手绘笔划数量发生变化") }
             }
