@@ -19,11 +19,7 @@ extension CustomPDFView {
         currentPopover?.close()
         currentPopover = nil
         
-        hoverTask?.cancel()
-        hoverTask = nil
-        hoverPopover?.close()
-        hoverPopover = nil
-        isHoveringLinkPreview = false
+        resetLinkPreview()
     }
     
     override func viewWillMove(toSuperview newSuperview: NSView?) {
@@ -38,6 +34,7 @@ extension CustomPDFView {
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
         if window == nil {
+            resetLinkPreview()
             scanCache.removeAll()
             removeRenderObservers()
         } else {
@@ -63,10 +60,15 @@ extension CustomPDFView {
         removeRenderObservers()
         observedRenderClipView = clip
         let center = NotificationCenter.default
+        renderObservers.append(center.addObserver(forName: NSApplication.didResignActiveNotification,
+            object: NSApplication.shared, queue: .main) { [weak self] _ in
+                MainActor.assumeIsolated { self?.resetLinkPreview() }
+            })
         for name: Notification.Name in [.PDFViewDocumentChanged, .PDFViewPageChanged, .PDFViewVisiblePagesChanged, .PDFViewScaleChanged] {
             renderObservers.append(center.addObserver(forName: name, object: self, queue: .main) { [weak self] _ in
                 MainActor.assumeIsolated {
                     if name == .PDFViewDocumentChanged { self?.scanCache.removeAll() }
+                    self?.resetLinkPreview()
                     self?.scheduleRenderSnapshot()
                 }
             })
@@ -74,7 +76,7 @@ extension CustomPDFView {
         if let clip {
             clip.postsBoundsChangedNotifications = true
             renderObservers.append(center.addObserver(forName: NSView.boundsDidChangeNotification, object: clip, queue: .main) { [weak self] _ in
-                MainActor.assumeIsolated { self?.scheduleRenderSnapshot() }
+                MainActor.assumeIsolated { self?.resetLinkPreview(); self?.scheduleRenderSnapshot() }
             })
         }
     }
@@ -223,7 +225,12 @@ extension CustomPDFView {
     
     // [劫持原生右键菜单]
     func popoverDidClose(_ notification: Notification) {
-        // 不需要做任何额外清理，回归纯粹的原生管理
+        guard let popover = notification.object as? NSPopover, popover === hoverPopover else { return }
+        hoverPopover = nil
+        hoverTask?.cancel(); hoverTask = nil
+        isHoveringLinkPreview = false
+        updateHoveredLink(nil)
+        popover.contentViewController = nil
     }
     
     // [修复 macOS 14+ 侧边栏伸缩导致触控板缩放失效的 Bug]

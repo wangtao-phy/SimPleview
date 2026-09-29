@@ -5,9 +5,8 @@ import Combine
 import AppKit
 
 /// [教程注释：App 入口点]
-/// `@main` 标签告诉编译器：这是整个应用程序的绝对入口！
+/// 常规启动由 AppEntry 转入这里；预览工作进程不初始化阅读窗口。
 /// 它替代了以前的老古董 `AppDelegate`（尽管我们在下面为了接管特定的 macOS 事件，又手动桥接了它）。
-@main
 struct SimpleViewApp: App {
     
     // [核心概念：桥接原生生命周期代理]

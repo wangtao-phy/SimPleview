@@ -119,6 +119,10 @@ extension CustomPDFView {
             return
         }
 
+        if let link = internalLink(at: pagePoint, on: page), trackInternalLink(link, on: page) { return }
+        resetLinkPreview()
+        if trackInkTransform(with: event, page: page, point: pagePoint) { return }
+
         // --- 签名缩放与拖拽拦截 ---
         var hitSignatureForMove: PDFAnnotation? = nil
         
@@ -256,7 +260,7 @@ extension CustomPDFView {
         }
         
         let pagePoint = convert(viewPoint, to: page)
-        let annotation = page.annotation(at: pagePoint)
+        let annotation = internalLink(at: pagePoint, on: page)
         
         // Link type check
         if let linkAnnot = annotation, (linkAnnot.type ?? "").lowercased() == "link" {
@@ -268,8 +272,8 @@ extension CustomPDFView {
             }
             
             // 同一链接内移动不重复创建任务；命中范围严格使用当前页面的链接区域。
-            guard currentHoveredLink?.page !== linkAnnot.page ||
-                  currentHoveredLink?.bounds != linkAnnot.bounds else { return }
+            guard currentHoveredLink !== linkAnnot ||
+                  (hoverTask == nil && hoverPopover?.isShown != true) else { return }
             hoverTask?.cancel()
             updateHoveredLink(linkAnnot)
             hoverTask = Task { @MainActor [weak self] in
@@ -315,24 +319,26 @@ extension CustomPDFView {
             let popover = self.hoverPopover
             self.hoverPopover = nil
             popover?.close()
+            popover?.contentViewController = nil
         }
     }
 
     private func showLinkPreviewPopover(for linkAnnot: PDFAnnotation, in view: NSView) {
-        guard let page = linkAnnot.page else { return }
+        guard let page = linkAnnot.page, page.document === document, window != nil else { return }
         let previous = hoverPopover
         hoverPopover = nil
         previous?.close()
+        previous?.contentViewController = nil
         isHoveringLinkPreview = false
         let popover = NSPopover()
         let popoverView = LinkPreviewPopoverView(
-            annotation: linkAnnot,
+            destination: linkDestination(for: linkAnnot),
             renderSource: scanCache.source,
             onOpenDestination: { [weak self, weak popover] in
                 guard let self,
-                      let destination = linkAnnot.destination ?? (linkAnnot.action as? PDFActionGoTo)?.destination,
-                      destination.page?.document === self.document else { return }
+                      let destination = self.linkDestination(for: linkAnnot) else { return }
                 popover?.close()
+                self.resetLinkPreview()
                 self.go(to: destination)
             }
         ) { [weak self, weak popover] isHovering in
@@ -350,8 +356,10 @@ extension CustomPDFView {
             }
         }
 
-        popover.behavior = .transient
-        popover.animates = false // Prevent animation delays from causing tracking issues
+        // 悬浮窗由悬停状态管理，不用 transient 吞掉用于点击原文链接的那次鼠标事件。
+        popover.behavior = .applicationDefined
+        popover.delegate = self
+        popover.animates = false
         
         let host = NSHostingController(rootView: popoverView)
         popover.contentViewController = host
@@ -398,6 +406,16 @@ extension CustomPDFView {
         // 1. 优先检测是否点中了“当前选中批注”的【边框】或【右下角图标】
         // 图标的位置会向下凸出 bounds，全局惰性扫描保证图标不会被漏掉
         if let selectedBatchID = self.currentSelectedBatchID, !selectedBatchID.hasPrefix("S-") {
+            let ink = annotations.filter { $0.userName == selectedBatchID && InkEditSession.canEdit($0) }
+            if let first = ink.first {
+                let box = ink.reduce(CGRect.null) { $0.union($1.bounds) }.insetBy(dx: -8/max(scaleFactor, 0.1), dy: -8/max(scaleFactor, 0.1))
+                let icon = CGRect(x: box.maxX-20, y: box.minY-20, width: 20, height: 20)
+                if icon.contains(pagePoint) {
+                    showAnnotationPopover(for: first, at: viewPoint, in: self)
+                    onMouseUp?()
+                    return
+                }
+            }
             if let borderHit = annotations.first(where: { 
                 supportedTypes.contains(($0.type ?? "").lowercased()) && 
                 $0.userName == selectedBatchID && 
@@ -460,29 +478,22 @@ extension CustomPDFView {
     // MARK: - 墨迹多笔划成组结账逻辑
     /// 自动保存和正式提交共享同一份矢量构建逻辑。只创建新批注，不修改
     /// 草稿、撤销栈或当前页面；自动保存不会把用户正在连写的笔划提前结账。
-    func makeDraftInkAnnotation() -> PDFAnnotation? {
-        guard !draftInkPaths.isEmpty, let batchID = currentDrawingBatchID else { return nil }
-        var combinedBounds = self.draftInkPaths[0].bounds
-        for p in self.draftInkPaths.dropFirst() {
-            combinedBounds = combinedBounds.union(p.bounds)
-        }
-        
-        let expandedBounds = combinedBounds.insetBy(dx: -2, dy: -2)
-        let annot = PDFAnnotation(bounds: expandedBounds, forType: .ink, withProperties: nil)
-        annot.color = self.manager?.pendingColorOverride ?? self.inkColor
-        annot.userName = batchID
-        
-        let border = PDFBorder()
-        border.lineWidth = self._threadSafeLineWidth
-        annot.border = border
-        
-        // 实际坐标只写一份标准 InkList，不再重复保存长文本坐标。
-        // 保留空字符串作为本应用手绘标记，兼容已有的矢量渲染识别逻辑；
-        // 旧 PDF 中的完整 /SimPlePath 仍由 StandardInk 的读取迁移逻辑支持。
-        annot.setValue("", forAnnotationKey: PDFAnnotationKey(rawValue: "/SimPlePath"))
-        StandardInk.setColor(annot.color, to: annot)
-        StandardInk.add(pagePaths: draftInkPaths, to: annot)
-        return annot
+    func makeDraftInkAnnotations() -> [PDFAnnotation]? {
+        guard !draftInkPaths.isEmpty, let batchID = currentDrawingBatchID, let page = draftInkPage else { return nil }
+        let bounds = draftInkPaths.reduce(CGRect.null) { $0.union($1.bounds) }.insetBy(dx: -2, dy: -2)
+        let source = PDFAnnotation(bounds: bounds, forType: .ink, withProperties: nil)
+        source.color = manager?.pendingColorOverride ?? inkColor
+        let border = PDFBorder(); border.lineWidth = _threadSafeLineWidth
+        source.border = border
+        source.setValue("", forAnnotationKey: PDFAnnotationKey(rawValue: "/SimPlePath"))
+        StandardInk.setColor(source.color, to: source)
+        StandardInk.add(pagePaths: draftInkPaths, to: source)
+        guard let drawing = VectorInk.standardDrawing(in: source, pageBounds: page.bounds(for: .cropBox)),
+              let annotations = try? VectorInk.annotations(drawing: drawing, bounds: page.bounds(for: .cropBox)),
+              !annotations.isEmpty else { return nil }
+        // 和 iPad 共用逐笔编解码；连续书写仍共用侧栏批次，保持原来的选择/撤销习惯。
+        for annotation in annotations { annotation.userName = batchID; annotation.modificationDate = Date() }
+        return annotations
     }
 
     /// 带草稿的自动保存使用独立文档副本，磁盘含最新笔迹，屏幕仍可逐笔撤销。
@@ -491,10 +502,10 @@ extension CustomPDFView {
         guard let document else { return nil }
         guard !draftInkPaths.isEmpty else { return document }
         guard let page = draftInkPage, page.document === document,
-              let annotation = makeDraftInkAnnotation(),
+              let annotations = makeDraftInkAnnotations(),
               let data = StandardInk.exportData(of: document), let copy = PDFDocument(data: data),
               let target = copy.page(at: document.index(for: page)) else { return nil }
-        target.addAnnotation(annotation)
+        for annotation in annotations { target.addAnnotation(annotation) }
         return copy
     }
 
@@ -503,15 +514,15 @@ extension CustomPDFView {
             return
         }
 
-        guard let annot = makeDraftInkAnnotation() else { return }
-        StandardInk.prepareForScreen(annot)
+        guard let annotations = makeDraftInkAnnotations(), let annot = annotations.first else { return }
+        for annotation in annotations { StandardInk.prepareForScreen(annotation) }
 
         // 先结束草稿状态再挂入正式标注。addAnnotation 可能同步请求快照；
         // 此时同一笔迹只能来自正式标注，避免草稿与新标注短暂叠加而变深。
         self.draftInkPaths = []
         self.draftInkPage = nil
         self.currentDrawingBatchID = nil
-        page.addAnnotation(annot)
+        for annotation in annotations { page.addAnnotation(annotation) }
         
         if let doc = page.document {
             let index = doc.index(for: page)
@@ -526,7 +537,7 @@ extension CustomPDFView {
         
         // 保留其余区域的画面；缩放倍率决定实际描边宽度，留足抗锯齿边缘。
         let padding = max(10, self._threadSafeLineWidth * self.scaleFactor)
-        self.setNeedsDisplay(self.convert(annot.bounds, from: page).insetBy(dx: -padding, dy: -padding))
+        self.setNeedsDisplay(self.convert(annotations.reduce(CGRect.null) { $0.union($1.bounds) }, from: page).insetBy(dx: -padding, dy: -padding))
     }
     
     override func keyDown(with event: NSEvent) {

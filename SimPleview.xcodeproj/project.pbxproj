@@ -16,6 +16,11 @@
 			path = SimPleview;
 			sourceTree = "<group>";
 		};
+		C00000000000000000000001 /* Shared */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = Shared;
+			sourceTree = "<group>";
+		};
 /* End PBXFileSystemSynchronizedRootGroup section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -30,6 +35,7 @@
 		9370FD032F94529D00305213 = {
 			isa = PBXGroup;
 			children = (
+				C00000000000000000000001 /* Shared */,
 				93396B662FD8E43E00CF018D /* SimPleview */,
 				9370FD0D2F94529D00305213 /* Products */,
 			);
@@ -58,6 +64,7 @@
 			);
 			fileSystemSynchronizedGroups = (
 				93396B662FD8E43E00CF018D /* SimPleview */,
+				C00000000000000000000001 /* Shared */,
 			);
 			name = SimPleview;
 			productName = SimPleview;

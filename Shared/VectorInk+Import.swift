@@ -1,11 +1,11 @@
 import PDFKit
 import PencilKit
 
-extension VectorInk {
+nonisolated extension VectorInk {
     /// Mac 的 InkList 本来就是矢量。将其提升为与 iPad 相同的原生笔迹，
     /// 不截图，也不按像素密度插点；只接收本应用可验证的等宽折线笔。
     static func standardDrawing(in annotation: PDFAnnotation, pageBounds: CGRect) -> PKDrawing? {
-        guard annotation.type == "Ink", annotation.shouldDisplay,
+        guard annotation.type == "Ink",
               !(annotation.userName ?? "").hasPrefix("S-"),
               annotation.value(forAnnotationKey: PDFAnnotationKey(rawValue: "/SimPlePath")) is String,
               let width = annotation.border?.lineWidth, width.isFinite, width > 0, width < 10_000 else { return nil }

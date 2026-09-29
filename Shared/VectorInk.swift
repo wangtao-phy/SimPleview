@@ -9,14 +9,19 @@ import AppKit
 #endif
 
 /// 不可变的矢量快照，后台导出不读取活动画布。
-struct InkShape: @unchecked Sendable {
+nonisolated struct InkShape: @unchecked Sendable {
     let path: CGPath
     let transform: CGAffineTransform
     let color: CGColor
     let width: CGFloat
 }
 
-enum VectorInk {
+nonisolated enum VectorInk {
+    enum Failure: LocalizedError {
+        case message(String)
+        var errorDescription: String? { if case .message(let text) = self { return text }; return nil }
+    }
+    static let idKey = PDFAnnotationKey(rawValue: "/SPVInkID")
     static let drawingKey = PDFAnnotationKey(rawValue: "/SPVPadDrawingV1")
     static let groupKey = PDFAnnotationKey(rawValue: "/SPVPadInkGroup")
     static let transformKey = PDFAnnotationKey(rawValue: "/SPVInkTransform")
@@ -27,11 +32,11 @@ enum VectorInk {
     static func drawing(in annotation: PDFAnnotation) throws -> PKDrawing? {
         guard let text = annotation.value(forAnnotationKey: drawingKey) as? String else { return nil }
         guard text.utf8.count <= 32*1024*1024, let data = Data(base64Encoded: text) else {
-            throw PadError.message("笔迹编辑数据损坏或过大，已保留原 PDF。")
+            throw Failure.message("笔迹编辑数据损坏或过大，已保留原 PDF。")
         }
         let drawing = try PKDrawing(data: data)
         guard annotation.value(forAnnotationKey: brushKey) as? String == "monoline" else {
-            throw PadError.message("此笔迹来自尚不支持的编辑格式，保留 PDF 外观。")
+            throw Failure.message("此笔迹来自尚不支持的编辑格式，保留 PDF 外观。")
         }
         // PencilKit 的序列化回读可能把 monoline 标成 pen。文件明确记录了
         // 经过导出校验的笔刷种类，只恢复这一种；不能把任意外部钢笔强制转成等宽笔。
@@ -47,12 +52,12 @@ enum VectorInk {
     static func shapes(from drawing: PKDrawing) throws -> [InkShape] {
         var result: [InkShape] = [], total = 0
         for stroke in drawing.strokes {
-            guard stroke.ink.inkType == .monoline else { throw PadError.message("此笔刷尚未通过跨端验证，请使用实线笔。") }
+            guard stroke.ink.inkType == .monoline else { throw Failure.message("此笔刷尚未通过跨端验证，请使用实线笔。") }
             let t = stroke.transform
             let sx = hypot(t.a,t.b), sy = hypot(t.c,t.d)
             guard [t.a,t.b,t.c,t.d,t.tx,t.ty].allSatisfy(\.isFinite), sx > 0,
                   abs(sx-sy) < 0.001, abs(t.a*t.c+t.b*t.d) < 0.001 else {
-                throw PadError.message("笔迹包含尚不支持的非等比变形，已保留原文件。")
+                throw Failure.message("笔迹包含尚不支持的非等比变形，已保留原文件。")
             }
             let path = CGMutablePath()
             // 已知为折线的原生笔迹直接导出原顶点，不重新采样，避免保存一轮
@@ -61,10 +66,10 @@ enum VectorInk {
                 let width = stroke.path[0].size.width
                 guard width.isFinite, width > 0, width < 10_000,
                       points.allSatisfy({ $0.x.isFinite && $0.y.isFinite && abs($0.x) < 1_000_000 && abs($0.y) < 1_000_000 }) else {
-                    throw PadError.message("笔迹包含无效坐标，已停止保存。")
+                    throw Failure.message("笔迹包含无效坐标，已停止保存。")
                 }
                 total += points.count
-                guard total <= 2_000_000 else { throw PadError.message("本页笔迹过于复杂，请分到更多页面。") }
+                guard total <= 2_000_000 else { throw Failure.message("本页笔迹过于复杂，请分到更多页面。") }
                 try Task.checkCancellation()
                 path.move(to: first)
                 for point in points.dropFirst() { path.addLine(to: point) }
@@ -80,10 +85,10 @@ enum VectorInk {
                 for point in stroke.path.interpolatedPoints(in: range, by: .distance(0.35)) {
                     total += 1
                     if total.isMultiple(of: 1024) { try Task.checkCancellation() }
-                    guard total <= 2_000_000 else { throw PadError.message("本页笔迹过于复杂，请分到更多页面。") }
+                    guard total <= 2_000_000 else { throw Failure.message("本页笔迹过于复杂，请分到更多页面。") }
                     let p = point.location, w = max(point.size.width,point.size.height)
                     guard p.x.isFinite, p.y.isFinite, w.isFinite, w > 0, w < 10000,
-                          abs(p.x) < 1_000_000, abs(p.y) < 1_000_000 else { throw PadError.message("笔迹包含无效坐标，已停止保存。") }
+                          abs(p.x) < 1_000_000, abs(p.y) < 1_000_000 else { throw Failure.message("笔迹包含无效坐标，已停止保存。") }
                     if width == nil { width = w }
                     points.append(p)
                 }
@@ -138,8 +143,8 @@ enum VectorInk {
         context.restoreGState()
     }
 
-    /// 标准 InkList 供所有 PDF 阅读器显示；空 SimPlePath 标记让现有 Mac 版
-    /// 自动使用已经验证过的高清矢量绘制，无需改动任何 macOS 代码。
+    /// 两端共用标准 InkList 和原生编辑附件。空 SimPlePath 标记让 Mac
+    /// 使用高清矢量覆盖层，其他 PDF 阅读器仍可直接显示标准笔迹。
     static func annotations(drawing: PKDrawing, bounds: CGRect) throws -> [PDFAnnotation] {
         let shapes = try shapes(from:drawing), group = UUID().uuidString
         let linear = shapes.count == drawing.strokes.count
@@ -172,6 +177,7 @@ enum VectorInk {
             #endif
             let border = PDFBorder(); border.lineWidth = strokeWidth
             annotation.border = border
+            annotation.setValue(UUID().uuidString, forAnnotationKey: idKey)
             annotation.userName = "B-PAD-\(group)-\(index)"
             annotation.setValue("",forAnnotationKey:PDFAnnotationKey(rawValue:"/SimPlePath"))
             annotation.setValue(shape.color.alpha,forAnnotationKey:opacityKey)
@@ -205,30 +211,11 @@ enum VectorInk {
     /// 单笔删除、改色或重排不能让整组退回 PDFKit 的位图标注层，更不能复活旧笔迹。
     static func takeEditableDrawing(from page: PDFPage) throws -> PKDrawing {
         let annotations = page.annotations, bounds = page.bounds(for: .cropBox)
-        var originals: [String: (PKDrawing, [PDFAnnotation])] = [:]
-        for metadata in annotations {
-            guard let group = metadata.value(forAnnotationKey: groupKey) as? String,
-                  let drawing = try? drawing(in: metadata),
-                  let expected = try? self.annotations(drawing: drawing, bounds: bounds),
-                  expected.count == drawing.strokes.count else { continue }
-            originals[group] = (drawing, expected)
-        }
+        let originals = nativeOriginals(in: annotations, bounds: bounds)
         var strokes: [PKStroke] = []
         for annotation in annotations where annotation.type == "Ink" && annotation.shouldDisplay {
             try Task.checkCancellation()
-            var recovered: [PKStroke]?
-            if let group = annotation.value(forAnnotationKey: groupKey) as? String,
-               let (drawing, expected) = originals[group] {
-                // 旧文件用原有用户名后缀，新文件用独立索引；不依赖标注在页内的顺序。
-                let prefix = "B-PAD-\(group)-"
-                let name = annotation.userName ?? ""
-                let index = (annotation.value(forAnnotationKey: indexKey) as? NSNumber)?.intValue
-                    ?? (name.hasPrefix(prefix) ? Int(name.dropFirst(prefix.count)) : nil)
-                if let index, expected.indices.contains(index), matches(annotation, expected[index]) {
-                    recovered = [drawing.strokes[index]]
-                }
-            }
-            if recovered == nil { recovered = standardDrawing(in: annotation, pageBounds: bounds)?.strokes }
+            let recovered = editableDrawing(for: annotation, originals: originals, bounds: bounds)?.strokes
             guard let recovered, !recovered.isEmpty else { continue }
             strokes += recovered
             // Mac 上附在手绘上的文字评论单独保留为便签，不因切换到原生画布丢失。
@@ -267,7 +254,42 @@ enum VectorInk {
 }
 
 
-enum PadError: LocalizedError {
-    case message(String)
-    var errorDescription: String? { if case .message(let text) = self { return text }; return nil }
+nonisolated extension VectorInk {
+    /// 按单笔身份恢复原生控制点；旧组内其他笔画被删除或重排不影响这一笔。
+    /// 调用方负责可见性判断，Mac 的高清覆盖层会暂时隐藏 PDFKit 原生标注层。
+    typealias NativeOriginals = [String: (drawing: PKDrawing, expected: [PDFAnnotation])]
+
+    /// 每组只解码一次；页内数百笔不重复解码整页附件。
+    static func nativeOriginals(in annotations: [PDFAnnotation], bounds: CGRect) -> NativeOriginals {
+        var result: NativeOriginals = [:]
+        for metadata in annotations {
+            guard let group = metadata.value(forAnnotationKey: groupKey) as? String,
+                  result[group] == nil, let drawing = try? drawing(in: metadata),
+                  let expected = try? self.annotations(drawing: drawing, bounds: bounds),
+                  expected.count == drawing.strokes.count else { continue }
+            result[group] = (drawing, expected)
+        }
+        return result
+    }
+
+    static func editableDrawing(for annotation: PDFAnnotation, originals: NativeOriginals, bounds: CGRect) -> PKDrawing? {
+        if let group = annotation.value(forAnnotationKey: groupKey) as? String,
+           let (original, expected) = originals[group] {
+            let prefix = "B-PAD-\(group)-", name = annotation.userName ?? ""
+            let index = (annotation.value(forAnnotationKey: indexKey) as? NSNumber)?.intValue
+                ?? (name.hasPrefix(prefix) ? Int(name.dropFirst(prefix.count)) : nil)
+            if let index, original.strokes.indices.contains(index), matches(annotation, expected[index]) {
+                return PKDrawing(strokes: [original.strokes[index]])
+            }
+        }
+        return standardDrawing(in: annotation, pageBounds: bounds)
+    }
+
+    /// 两端使用相同的原生变换，不改变控制点，不把笔迹转成图片。
+    static func transformed(_ drawing: PKDrawing, by transform: CGAffineTransform) -> PKDrawing {
+        PKDrawing(strokes: drawing.strokes.map { stroke in
+            PKStroke(ink: stroke.ink, path: stroke.path, transform: stroke.transform.concatenating(transform),
+                     mask: stroke.mask, randomSeed: stroke.randomSeed)
+        })
+    }
 }

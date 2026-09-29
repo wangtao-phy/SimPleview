@@ -123,6 +123,8 @@ class CustomPDFView: PDFView {
     var currentDrawingPage: PDFPage?
     var currentDrawingBatchID: String?
     
+    var inkEditSession: InkEditSession?
+
     // 签名缩放交互状态
     var resizingAnnotation: PDFAnnotation?
     var resizeHandleCorner: Int? // 0: TL, 1: TR, 2: BL, 3: BR

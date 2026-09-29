@@ -94,6 +94,9 @@ extension CustomPDFView {
             }
             let annotations = page.displaysAnnotations ? page.annotations : []
             let selected = annotations.filter { currentSelectedBatchID != nil && $0.userName == currentSelectedBatchID }
+            let selectedInk = selected.filter(InkEditSession.canEdit)
+            let edit = inkEditSession?.page === page ? inkEditSession : nil
+            let inkBounds = selectedInk.reduce(CGRect.null) { $0.union($1.bounds) }.applying(edit?.transform ?? .identity)
             let lowestSelected = selected.min { $0.bounds.minY < $1.bounds.minY }
             let accent = NSColor.controlAccentColor.withAlphaComponent(0.8)
             for annotation in annotations {
@@ -104,16 +107,26 @@ extension CustomPDFView {
                     let paths = StandardInk.pagePaths(of: annotation)
                     if !paths.isEmpty { vectorInkIDs.insert(ObjectIdentifier(annotation)) }
                     for path in paths {
-                        add(path, color: StandardInk.displayColor(of: annotation), width: annotation.border?.lineWidth ?? 3)
+                        var width = annotation.border?.lineWidth ?? 3
+                        if let edit, edit.selected.contains(annotation) {
+                            let t = edit.transform
+                            path.transform(using: AffineTransform(m11: t.a, m12: t.b, m21: t.c, m22: t.d, tX: t.tx, tY: t.ty))
+                            width *= hypot(t.a, t.b)
+                        }
+                        add(path, color: StandardInk.displayColor(of: annotation), width: width)
                     }
                 }
                 if let id = currentSelectedBatchID, annotation.userName == id {
+                    let isInk = selectedInk.contains(annotation)
+                    // 同一手绘批次只画一个总框，预览矩阵同时作用于笔迹和手柄。
+                    if isInk && annotation !== selectedInk.first { continue }
                     let scale = max(scaleFactor, 0.1)
-                    let inset: CGFloat = id.hasPrefix("S-") ? 8 / scale : 4
-                    let rect = annotation.bounds.insetBy(dx: -inset, dy: -inset)
+                    let hasHandles = id.hasPrefix("S-") || isInk
+                    let inset: CGFloat = hasHandles ? 8 / scale : 4
+                    let rect = (isInk ? inkBounds : annotation.bounds).insetBy(dx: -inset, dy: -inset)
                     add(NSBezierPath(roundedRect: rect, xRadius: 4, yRadius: 4), color: accent,
-                        width: id.hasPrefix("S-") ? 1.5 / scale : 1.5)
-                    if id.hasPrefix("S-") {
+                        width: hasHandles ? 1.5 / scale : 1.5)
+                    if hasHandles {
                         let size = 8 / scale
                         for p in [rect.origin, CGPoint(x: rect.maxX, y: rect.minY),
                                   CGPoint(x: rect.minX, y: rect.maxY), CGPoint(x: rect.maxX, y: rect.maxY)] {
@@ -121,7 +134,8 @@ extension CustomPDFView {
                             add(circle, color: .white, fill: true)
                             add(circle, color: accent, width: 1 / scale)
                         }
-                    } else if annotation === lowestSelected, let image = selectionNoteImage() {
+                    }
+                    if (isInk || annotation === lowestSelected) && !id.hasPrefix("S-"), let image = selectionNoteImage() {
                         // 恢复原来的半透明 note.text 图标；多段选区只在最下面
                         // 一段显示一个。此位置与鼠标命中区域完全一致。
                         noteIcons.append(.init(image: image,

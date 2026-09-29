@@ -73,14 +73,22 @@ enum AtomicPDFWriter {
             let before = original.annotations, after = copy.annotations
             guard before.map({ $0.type ?? "" }).sorted() == after.map({ $0.type ?? "" }).sorted() else { throw validationError("标注数量或类型发生变化") }
             for annotation in before where annotation.type == "Ink" && StandardInk.isAppInk(annotation) {
-                guard let restored = after.first(where: { $0.userName == annotation.userName && $0.type == annotation.type }) else { throw validationError("缺少原始标注标识") }
+                let strokeID = annotation.value(forAnnotationKey: VectorInk.idKey) as? String
+                guard let restored = after.first(where: {
+                    guard $0.userName == annotation.userName && $0.type == annotation.type else { return false }
+                    if let strokeID { return $0.value(forAnnotationKey: VectorInk.idKey) as? String == strokeID }
+                    return annotation.paths?.isEmpty != false || VectorInk.matches(annotation, $0)
+                }) else { throw validationError("缺少原始标注标识或笔迹几何发生变化") }
+                if annotation.paths?.isEmpty == false, !VectorInk.matches(annotation, restored) {
+                    throw validationError("标准矢量笔迹未完整保留")
+                }
                 for chunk in 0..<1024 {
                     let key = PDFAnnotationKey(rawValue: chunk == 0 ? "/SimPlePath" : "/SimPlePath\(chunk)")
                     guard let value = annotation.value(forAnnotationKey: key) as? String else { break }
                     guard restored.value(forAnnotationKey: key) as? String == value else { throw validationError("矢量路径未完整保留") }
                 }
-                // Mac 不改写 iPad 的原生编辑附件；保存后逐项确认，避免一次
-                // Mac 自动保存静默丢掉整组的可编辑数据，只剩 PDF 标注外观。
+                // 两端共用编辑格式。保存后逐项确认附件及变换未丢失；逐笔 ID
+                // 与侧栏批次分离，避免多笔同名时误拿第一笔做校验。
                 for name in ["/SPVPadDrawingV1", "/SPVPadInkGroup", "/SPVPadBrush", "/SPVInkTransform"] {
                     let key = PDFAnnotationKey(rawValue: name)
                     if let value = annotation.value(forAnnotationKey: key) as? String,

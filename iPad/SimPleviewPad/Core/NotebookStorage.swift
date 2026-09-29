@@ -104,7 +104,7 @@ actor NotebookStorage {
                     throw PadError.message("标准 PDF 笔迹校验失败，原文件未替换。")
                 }
                 // 读取可兼容外部编辑，写入必须逐项严格匹配；不能用恢复分支掩盖丢笔。
-                for key in [VectorInk.drawingKey, VectorInk.groupKey, VectorInk.brushKey, VectorInk.transformKey] {
+                for key in [VectorInk.idKey, VectorInk.drawingKey, VectorInk.groupKey, VectorInk.brushKey, VectorInk.transformKey] {
                     if let value = source.value(forAnnotationKey: key) as? String,
                        restored.value(forAnnotationKey: key) as? String != value {
                         throw PadError.message("笔迹编辑数据未完整保留，原文件未替换。")
