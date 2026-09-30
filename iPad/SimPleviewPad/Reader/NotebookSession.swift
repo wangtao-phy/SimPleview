@@ -131,7 +131,12 @@ final class NotebookSession: ObservableObject {
         guard !isReadOnly, page.document === document, self.drawing(for: page) != drawing else { return }
         let previous = self.drawing(for: page)
         applyDrawing(drawing, on: page)
-        record(undo: { $0.applyDrawing(previous, on: page) }, redo: { $0.applyDrawing(drawing, on: page) })
+        // 历史快照含有 PencilKit 的旧编辑状态。直接赋回画布虽然会暂时清除
+        // 笔迹，但切换模式后继续书写可能把已撤销的笔迹重新带回。
+        // 恢复时按目标笔画列表创建新的绘图状态；保留原始曲线、变换和遮罩，
+        // 不复用旧绘图的编辑状态，也不在正常落笔时重建画布内容。
+        record(undo: { $0.applyDrawing(PKDrawing(strokes: previous.strokes), on: page) },
+               redo: { $0.applyDrawing(PKDrawing(strokes: drawing.strokes), on: page) })
     }
     private func applyDrawing(_ drawing: PKDrawing, on page: PDFPage) {
         guard page.document === document else { return }
