@@ -44,8 +44,17 @@ extension AppState {
     
     // 处理左侧缩略图被点击时的复杂逻辑（比如按住 Shift 连选）
     func handleThumbnailClick(index: Int, isCommandPressed: Bool, isShiftPressed: Bool) {
+        thumbnailJumpTask?.cancel()
+        suppressPageUpdates(for: .milliseconds(150))
         navigationManager.handleThumbnailClick(index: index, pdfView: pdfView, isCommandPressed: isCommandPressed, isShiftPressed: isShiftPressed)
         self.liveState.currentPageIndex = navigationManager.currentPageIndex
+    }
+
+    func selectAllPages() {
+        guard let document = pdfView.document else { return }
+        thumbnailJumpTask?.cancel()
+        shiftSelectionAnchor = liveState.currentPageIndex
+        selectedIndices = Set(0..<document.pageCount)
     }
     
     func goBack() {
@@ -123,6 +132,7 @@ extension AppState {
             return
         }
         
+        let action = batchStack.last
         recordHistoryAction() 
         // 向管理器发送撤销请求。它会返回是否成功。
         if annotationManager.undo(in: pdfView.document, pdfView: pdfView, onThumbnailUpdate: { [weak self] index in
@@ -136,11 +146,13 @@ extension AppState {
         }, onPageChange: { [weak self] index in
             self?.goToPage(index)
         }) {
+            if case .rotatePages(let indices, _) = action, let doc = pdfView.document { refreshPageGeometry(in: doc, at: indices) }
             isDirty = true
         }
     }
     
     func redo() {
+        let action = redoStack.last
         if annotationManager.redo(in: pdfView.document, pdfView: pdfView, onThumbnailUpdate: { [weak self] index in
             if index == -1 {
                 if let self, let document = self.pdfView.document { self.pageStructureDidChange(in: document) }
@@ -150,6 +162,7 @@ extension AppState {
         }, onPageChange: { [weak self] index in
             self?.goToPage(index)
         }) {
+            if case .rotatePages(let indices, _) = action, let doc = pdfView.document { refreshPageGeometry(in: doc, at: indices) }
             isDirty = true
         }
     }

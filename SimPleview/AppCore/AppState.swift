@@ -172,8 +172,11 @@ final class AppState: NSObject, ObservableObject, PDFViewDelegate {
         get { navigationManager.selectedIndices }
         set { navigationManager.selectedIndices = newValue }
     }
-    /// Shift+方向键连选的锚点：记录按下 Shift 时的起始页码，松开 Shift 后清除
-    var shiftSelectionAnchor: Int?
+    /// 鼠标和键盘共用范围选择的起点，不能每次 Shift 点击后重新设定。
+    var shiftSelectionAnchor: Int? {
+        get { navigationManager.selectionAnchor }
+        set { navigationManager.selectionAnchor = newValue }
+    }
     
     var allAnnotations: [PDFAnnotation] { annotationManager.allAnnotations }
     var batchStack: [UndoAction] { annotationManager.batchStack }

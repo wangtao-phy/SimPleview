@@ -34,7 +34,6 @@ final class AppLiveState {
     
     // 拖放交互：极高频变动
     var dropTargetIndex: Int? = nil
-    var draggedIndices: Set<Int>? = nil
     
 
     // 选中的目录节点

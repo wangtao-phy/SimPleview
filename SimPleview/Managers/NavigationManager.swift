@@ -18,6 +18,7 @@ final class NavigationManager: ObservableObject {
     
     // 多选状态下选中的所有页码（主要用于左侧大纲的拖拽和删除多页）
     @Published var selectedIndices: Set<Int> = []
+    var selectionAnchor: Int?
     
     // [逻辑流程：记录历史]
     func recordHistoryAction(currentPageIndex: Int) {
@@ -55,7 +56,9 @@ final class NavigationManager: ObservableObject {
     // [复杂交互逻辑：处理缩略图栏的点击]
     // 缩略图栏的点击非常复杂，因为在 Mac 上你可以按住 Command 多选，或者按住 Shift 连选！
     func handleThumbnailClick(index: Int, pdfView: PDFView?, isCommandPressed: Bool, isShiftPressed: Bool) {
+        guard let document = pdfView?.document, (0..<document.pageCount).contains(index) else { return }
         if isCommandPressed {
+            selectionAnchor = index
             // [Command 键：点选]
             if selectedIndices.contains(index) {
                 selectedIndices.remove(index) // 再点一次就取消选中
@@ -64,12 +67,14 @@ final class NavigationManager: ObservableObject {
             }
         } else if isShiftPressed {
             // [Shift 键：范围连选]
-            let lastIndex = currentPageIndex
+            let lastIndex = selectionAnchor ?? currentPageIndex
+            selectionAnchor = lastIndex
             let range = lastIndex < index ? lastIndex...index : index...lastIndex
-            selectedIndices.formUnion(Set(range)) // 求并集，全选上
+            selectedIndices = Set(range) // 固定起点，允许反向收缩范围。
         } else {
             // [普通点击：单选]
             selectedIndices = [index]
+            selectionAnchor = index
         }
         
         // 如果是普通点击，我们需要记录一次历史轨迹，因为这是明确的导航意图
@@ -100,5 +105,6 @@ final class NavigationManager: ObservableObject {
     // 清空历史（比如换了新的 PDF 文档时）
     func clearHistory() {
         navigationHistory.removeAll()
+        selectionAnchor = nil
     }
 }

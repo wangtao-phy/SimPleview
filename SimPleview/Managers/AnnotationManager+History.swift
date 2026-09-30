@@ -91,6 +91,16 @@ extension AnnotationManager {
         case .removePages(let indices):
             return removePages(at: indices, in: document)
 
+        case .rotatePages(let indices, let rotations):
+            guard !indices.isEmpty, indices.count == rotations.count,
+                  Set(indices).count == indices.count,
+                  indices.allSatisfy({ (0..<document.pageCount).contains($0) }) else { return nil }
+            let pages = indices.compactMap { document.page(at: $0) }
+            guard pages.count == indices.count else { return nil }
+            let previous = pages.map(\.rotation)
+            for (page, rotation) in zip(pages, rotations) { page.rotation = rotation }
+            return HistoryChange(inverse: .rotatePages(indices: indices, rotations: previous), affectedPages: Set(indices))
+
         case .movePages(let sources, let destinations):
             let count = sources.count
             guard count > 0, count == destinations.count,

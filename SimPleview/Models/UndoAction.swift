@@ -10,6 +10,7 @@ enum UndoAction: Equatable {
     case deletePages(pages: [PDFPage], indices: [Int])                      // 携带多页删除的数据，用于支持重做插入操作
     case insertPages(count: Int, startIndex: Int)
     case removePages(indices: [Int]) // 恢复非连续页面后的逆操作，保留精确位置
+    case rotatePages(indices: [Int], rotations: [Int])
     case movePages(from: [Int], to: [Int])
 
     // [逻辑流程]
@@ -23,6 +24,7 @@ enum UndoAction: Equatable {
         case (.deletePages(_, let i1), .deletePages(_, let i2)): return i1 == i2
         case (.insertPages(let c1, let s1), .insertPages(let c2, let s2)): return c1 == c2 && s1 == s2
         case (.removePages(let i1), .removePages(let i2)): return i1 == i2
+        case (.rotatePages(let i, let r), .rotatePages(let j, let s)): return i == j && r == s
         case (.movePages(let o1, let i1), .movePages(let o2, let i2)): return o1 == o2 && i1 == i2
         default: return false
         }

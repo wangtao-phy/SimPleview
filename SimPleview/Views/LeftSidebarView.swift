@@ -83,11 +83,13 @@ struct ThumbnailListView: View {
     ///
     /// 两条分支：
     /// 1. Shift+方向键 → 范围连选：以 `shiftSelectionAnchor` 为锚点，把锚点与目标页之间的区间全部纳入 `selectedIndices`。
-    ///    （锚点在第一次按 Shift 时记下，普通点击/松 Shift 时清空）
+    ///    （鼠标和键盘共用锚点，普通选择时更新）
     /// 2. 普通方向键 → 翻页：
     ///    - 性能模式（`delaysNavigationJumps == false`）：立即 `goToPage`，所见即所得。
     ///    - 节约模式：先更新页码/选中态，200ms 防抖后再 `goToPage`，避免按住方向键时高频跨页触发大量内存分配。
     private func navigateThumbnail(to newIndex: Int, isShift: Bool) {
+        guard (0..<state.liveState.totalPageCount).contains(newIndex) else { return }
+        state.thumbnailJumpTask?.cancel()
         if isShift {
             if state.shiftSelectionAnchor == nil {
                 state.shiftSelectionAnchor = state.liveState.currentPageIndex
@@ -97,7 +99,8 @@ struct ThumbnailListView: View {
             let range = min(anchor, newIndex)...max(anchor, newIndex)
             state.selectedIndices = Set(range)
         } else {
-            state.shiftSelectionAnchor = nil
+            state.shiftSelectionAnchor = newIndex
+            state.selectedIndices = [newIndex]
             if !MemoryMode.current.policy.delaysNavigationJumps {
                 state.goToPage(newIndex)
             } else {
@@ -134,7 +137,6 @@ struct ThumbnailListView: View {
                                     let isCommand = NSEvent.modifierFlags.contains(.command)
                                     let isShift = NSEvent.modifierFlags.contains(.shift)
                                     state.handleThumbnailClick(index: index, isCommandPressed: isCommand, isShiftPressed: isShift)
-                                    state.shiftSelectionAnchor = nil // 鼠标点击后重置键盘连选锚点
                                     isThumbnailFocused = true // 把键盘焦点抢过来
                                 }
                         }
@@ -166,18 +168,18 @@ struct ThumbnailListView: View {
             .background(
                 ThumbnailKeyMonitorView(
                     isFocused: isThumbnailFocused,
-                    onUp: { isShift in
-                        let newIndex = state.liveState.currentPageIndex - 1
-                        guard newIndex >= 0 else { return }
-                        navigateThumbnail(to: newIndex, isShift: isShift)
-                    },
-                    onDown: { isShift in
-                        let newIndex = state.liveState.currentPageIndex + 1
-                        guard newIndex < state.liveState.totalPageCount else { return }
-                        navigateThumbnail(to: newIndex, isShift: isShift)
-                    },
-                    onDelete: {
-                        state.deletePage(at: state.liveState.currentPageIndex)
+                    onAction: { action in
+                        switch action {
+                        case .move(let offset, let extend):
+                            navigateThumbnail(to: state.liveState.currentPageIndex + offset, isShift: extend)
+                        case .boundary(let last, let extend):
+                            navigateThumbnail(to: last ? state.liveState.totalPageCount - 1 : 0, isShift: extend)
+                        case .selectAll: state.selectAllPages()
+                        case .copy: state.copyPages(at: state.selectedIndices)
+                        case .paste: state.pastePages(after: state.selectedIndices.max() ?? state.liveState.currentPageIndex)
+                        case .delete:
+                            if let index = state.selectedIndices.min() { state.deletePage(at: index) }
+                        }
                     }
                 )
             )
@@ -225,17 +227,9 @@ struct DropInsertLine: View {
                 .cornerRadius(2)
                 .padding(.horizontal, 4)
         }
-        // 注册拖放目标点，允许纯文本或 PDF 文件掉落到上面
-        .onDrop(of: [.plainText, .pdf], isTargeted: $isOver) { _ in
-            if let sourceIndices = state.liveState.draggedIndices {
-                DispatchQueue.main.async {
-                    // 当松开鼠标时，触发真实的重排逻辑
-                    state.movePages(from: sourceIndices, to: index)
-                    state.liveState.draggedIndices = nil // 拖拽结束
-                }
-                return true
-            }
-            return false
+        // 文档内重排、跨窗口拖页和 Finder 的 PDF 文件共用插入位置。
+        .onDrop(of: [ThumbnailPageDrag.type, .pdf, .fileURL], isTargeted: $isOver) { providers in
+            state.acceptPageDrop(providers, at: index)
         }
     }
 }
@@ -316,6 +310,15 @@ struct ThumbnailItem: View, Equatable {
             thumbnail = nil
         }
         .contextMenu {
+            let targets = state.selectedIndices.contains(index) ? state.selectedIndices : [index]
+            Button(state.L("Select All Pages")) { state.selectAllPages() }
+            Button(state.L("Copy Pages")) { state.copyPages(at: targets) }
+            Button(state.L("Paste Pages After")) { state.pastePages(after: targets.max() ?? index) }
+                .disabled(NSPasteboard.general.availableType(from: [.pdf]) == nil)
+            Divider()
+            Button(state.L("Rotate Left")) { state.rotatePages(at: targets, clockwise: false) }
+            Button(state.L("Rotate Right")) { state.rotatePages(at: targets, clockwise: true) }
+            Divider()
             Button(action: { state.insertBlankPage(at: index + 1) }) {
                 Label(state.L("Insert Blank Page After"), systemImage: "plus.rectangle.on.rectangle")
             }
@@ -326,24 +329,27 @@ struct ThumbnailItem: View, Equatable {
             Divider()
             #endif
             Button(state.selectedIndices.count > 1 && state.selectedIndices.contains(index) ? state.L("Delete Selected Pages") : state.L("Delete Page"), role: .destructive) { state.deletePage(at: index) }
+                .disabled(targets.count >= state.liveState.totalPageCount)
         }
         // [极客级拖拽：向外部暴露该文件]
         .onDrag {
             // 先确定这一拖拉起了哪些页面
             let targetIndices = state.selectedIndices.contains(index) ? state.selectedIndices : [index]
-            state.liveState.draggedIndices = targetIndices
             
-            let indicesStr = targetIndices.sorted().map { String($0) }.joined(separator: ",")
+            let selection = ThumbnailPageDrag(document: state.documentVersion, indices: targetIndices.sorted())
             let provider = NSItemProvider() // 系统底层的拖拽物提供者
             
-            // 1. 如果你在软件内部拖动重排，传个字符串记录位置就行了，不用真生成文件
-            provider.registerObject(indicesStr as NSString, visibility: .all)
+            // 1. 同文档重排只传修订身份和页码，不生成 PDF。
+            provider.registerDataRepresentation(forTypeIdentifier: ThumbnailPageDrag.type.identifier, visibility: .all) { completion in
+                completion(try? JSONEncoder().encode(selection), nil)
+                return nil
+            }
             
             // 2. 如果用户真的是想拖到桌面上当做一个独立的新 PDF (关键性能优化：异步生成！)
             provider.registerFileRepresentation(forTypeIdentifier: UTType.pdf.identifier, fileOptions: [], visibility: .all) { completion in
                 Task {
                     let url = await MainActor.run {
-                        state.exportPagesAsPDF(at: targetIndices)
+                        state.documentVersion == selection.document ? state.exportPagesAsPDF(at: targetIndices) : nil
                     }
                     completion(url, false, nil)
                 }
@@ -388,88 +394,81 @@ struct SidebarIconButtonStyle: ButtonStyle {
 //
 // [生命周期]
 // `viewDidMoveToWindow` 在视图挂载到窗口时注册监听、移出窗口时注销，避免监听器泄漏。
+enum ThumbnailKeyAction: Equatable {
+    case move(Int, extend: Bool), boundary(last: Bool, extend: Bool)
+    case selectAll, copy, paste, delete
+
+    init?(event: NSEvent) {
+        let modifiers = event.modifierFlags.intersection([.command, .shift, .option, .control])
+        if modifiers == .command {
+            switch event.charactersIgnoringModifiers?.lowercased() {
+            case "a": self = .selectAll
+            case "c": self = .copy
+            case "v": self = .paste
+            default: return nil
+            }
+            return
+        }
+        // 不把 Cmd/Option/Control+方向键或删除键误当成普通页面操作。
+        guard modifiers.isEmpty || modifiers == .shift else { return nil }
+        let extend = modifiers.contains(.shift)
+        switch event.keyCode {
+        case 126: self = .move(-1, extend: extend)
+        case 125: self = .move(1, extend: extend)
+        case 115: self = .boundary(last: false, extend: extend)
+        case 119: self = .boundary(last: true, extend: extend)
+        case 51 where !extend, 117 where !extend: self = .delete
+        default: return nil
+        }
+    }
+}
+
 struct ThumbnailKeyMonitorView: NSViewRepresentable {
-    /// 缩略图列表当前是否拥有焦点（决定是否拦截方向键）
     var isFocused: Bool
-    /// 按下 Up 键的回调，参数为是否同时按下了 Shift
-    var onUp: (Bool) -> Void
-    /// 按下 Down 键的回调，参数为是否同时按下了 Shift
-    var onDown: (Bool) -> Void
-    /// 按下退格/删除键的回调（删除当前页）
-    var onDelete: () -> Void
-    
+    var onAction: (ThumbnailKeyAction) -> Void
+
     func makeNSView(context: Context) -> ThumbnailKeyMonitorNSView {
         let view = ThumbnailKeyMonitorNSView()
         view.isFocused = isFocused
-        view.onUp = onUp
-        view.onDown = onDown
-        view.onDelete = onDelete
+        view.onAction = onAction
         return view
     }
-    
-    func updateNSView(_ nsView: ThumbnailKeyMonitorNSView, context: Context) {
-        // SwiftUI 每次重渲染（如焦点变化）都会同步最新的回调与焦点状态到 NSView
-        nsView.isFocused = isFocused
-        nsView.onUp = onUp
-        nsView.onDown = onDown
-        nsView.onDelete = onDelete
+    func updateNSView(_ view: ThumbnailKeyMonitorNSView, context: Context) {
+        view.isFocused = isFocused
+        view.onAction = onAction
     }
 }
 
 final class ThumbnailKeyMonitorNSView: NSView {
     var isFocused = false
-    var onUp: ((Bool) -> Void)?
-    var onDown: ((Bool) -> Void)?
-    var onDelete: (() -> Void)?
+    var onAction: ((ThumbnailKeyAction) -> Void)?
     private var monitor: Any?
-    
+
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
-        if window != nil {
-            installMonitorIfNeeded()
-        } else {
-            removeMonitor()
-        }
-    }
-    
-    private func installMonitorIfNeeded() {
-        guard monitor == nil else { return }
-        monitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
-            // 本地监听覆盖整个应用；后台标签页可能保留 FocusState，不能仅凭它吞键。
-            // 只处理当前活动窗口发给本侧栏的事件，切换标签或独立窗口时都适用。
-            guard let self, self.isFocused, let window = self.window,
-                  event.window === window, window.isKeyWindow,
-                  !self.isHiddenOrHasHiddenAncestor else { return event }
-            // [焦点精确门控] SwiftUI 的 FocusState 在焦点转移到 AppKit 控件时不会自动复位：
-            // 用户先点缩略图再点进搜索框/页数输入框/PDF 视图后，isFocused 仍是 true，
-            // 若不检查真实的第一响应者，这些控件里的退格键/方向键会被这里误吞。
-            // 因此：只要真正的键盘焦点在文本编辑或 PDF 视图上，就放行事件，交给它们自己处理。
-            if let responder = event.window?.firstResponder,
-               responder is NSTextView || responder is NSTextField || responder is PDFView {
-                return event
+        if window != nil, monitor == nil {
+            monitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
+                guard let self else { return event }; return self.handle(event)
             }
-            let isShift = event.modifierFlags.contains(.shift)
-            switch event.keyCode {
-            case 126: // Up
-                self.onUp?(isShift)
-                return nil // 返回 nil = 消费该事件，不再派发给任何视图
-            case 125: // Down
-                self.onDown?(isShift)
-                return nil
-            case 51, 117: // Backspace / Forward Delete
-                self.onDelete?()
-                return nil
-            default:
-                return event // 其它键放行
-            }
-        }
+        } else if window == nil { removeMonitor() }
     }
-    
+
+    func handle(_ event: NSEvent) -> NSEvent? {
+        // 后台标签可能保留 FocusState；同时检查真实窗口、可见性和第一响应者。
+        guard isFocused, let window, event.window === window, window.isKeyWindow,
+              !isHiddenOrHasHiddenAncestor else { return event }
+        var responder = window.firstResponder as? NSView
+        while let view = responder {
+            if view is NSTextView || view is NSTextField || view is PDFView { return event }
+            responder = view.superview
+        }
+        guard let action = ThumbnailKeyAction(event: event), let onAction else { return event }
+        onAction(action)
+        return nil
+    }
+
     func removeMonitor() {
-        if let m = monitor {
-            NSEvent.removeMonitor(m)
-            monitor = nil
-        }
+        if let monitor { NSEvent.removeMonitor(monitor); self.monitor = nil }
     }
 }
 #endif

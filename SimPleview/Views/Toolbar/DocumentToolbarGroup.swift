@@ -7,7 +7,7 @@ struct DocumentToolbarGroup: CustomizableToolbarContent {
     
     var body: some CustomizableToolbarContent {
         ToolbarItem(id: "RotateLeft", placement: .primaryAction) {
-            Button(action: { state.rotateCurrentPageLeft() }) { 
+            Button(action: { state.rotateSelectedPagesLeft() }) {
                 Label(state.L("Rotate Left"), systemImage: "rotate.left") 
             }
             .disabled(state.fileURL == nil)
