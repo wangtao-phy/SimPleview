@@ -1,178 +1,35 @@
 import SwiftUI
-import UniformTypeIdentifiers
 import Combine
 
 import AppKit
 
-/// [教程注释：App 入口点]
-/// 常规启动由 AppEntry 转入这里；预览工作进程不初始化阅读窗口。
-/// 它替代了以前的老古董 `AppDelegate`（尽管我们在下面为了接管特定的 macOS 事件，又手动桥接了它）。
+/// 主应用生命周期与设置场景；阅读窗口由 AppDelegate 管理，预览子进程不经过这里。
 struct SimpleViewApp: App {
     
-    // [核心概念：桥接原生生命周期代理]
-    // SwiftUI 原生提供的 App 生命周期还比较弱。如果我们需要在 macOS 上拦截窗口关闭、App 退出等底层事件，
-    // 就必须通过 `@NSApplicationDelegateAdaptor` 注入我们自己写的 AppDelegate。
     #if os(macOS)
     @NSApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
     #endif
     
-    // [逻辑流程：环境与依赖注入]
-    // `@Environment` 是一种从系统环境变量中读取依赖的方式。
-    // [核心概念：焦点值绑定]
-    // `@FocusedValue` 用于多窗口程序。如果你打开了三个 PDF 窗口，全局菜单栏的按钮怎么知道应该操作哪一个？
-    // 答案就是看哪个窗口当前处于“激活(Focused)”状态，它就会动态读取那个窗口的 state。
-    @FocusedValue(\.appState) private var focusedState
-    @FocusedValue(\.uiState) private var focusedUIState
-    
-    // 从持久化存储读取当前语言偏好
-    @AppStorage("appLanguage") var appLanguage: AppLanguage = .zh
-    
-    @State private var isImporting = false
-    
-    // 简易多语言翻译函数包
-    private func LS(_ key: String) -> String {
-        return SimPleview.L.s(key, appLanguage)
-    }
-    
-    /// [逻辑流程：App 初始化阶段]
     init() {
         #if os(macOS)
-        // 禁用 macOS 原生的“退出时保持窗口恢复”机制。
-        // 因为我们自己写了一套极度健壮的状态恢复系统（支持文档持久化定位），
-        // 必须把苹果默认的粗暴恢复机制关掉，防止它们打架。
+        // 文档窗口由自己的恢复记录管理，避免与系统窗口恢复重复。
         UserDefaults.standard.set(false, forKey: "NSQuitAlwaysKeepsWindows")
-        let useTab = UserDefaults.standard.bool(forKey: "openInTab")
-        if useTab {
-            UserDefaults.standard.set(true, forKey: "AppleWindowTabbingMode")
-        }
+        // 普通文件默认作为标签页打开，独立分组由窗口管理功能负责。
+        NSWindow.allowsAutomaticWindowTabbing = true
         
-        UpdateManager.shared.startMonitoring()
-        
-        // 启动全局内存压力监听
         _ = MemoryManager.shared
         #endif
     }
     
-    // 统一管理快捷键
-    @ObservedObject var shortcutManager = ShortcutManager.shared
-    
-    // [教程注释：全局菜单栏定制]
-    // `@CommandsBuilder` 用于重写 Mac 顶部那排原生的系统菜单（文件、编辑、视图等）。
-    @CommandsBuilder
-    var appCommands: some Commands {
-        CommandGroup(after: .appSettings) {
-            Button(LS("Check for Updates...")) {
-                UpdateManager.shared.checkForUpdates(manual: true)
-            }
-        }
-        
-        CommandGroup(replacing: .newItem) {
-            #if os(macOS)
-            Button(LS("New Blank File...")) { NotificationCenter.default.post(name: NSNotification.Name("GlobalNewDocument"), object: nil) }
-                .keyboardShortcut(shortcutManager.newDocument.keyEquivalent, modifiers: shortcutManager.newDocument.modifiers)
-            #endif
-            
-            Button(LS("Open...")) {
-                _ = appDelegate.applicationShouldOpenUntitledFile(NSApp)
-            }.keyboardShortcut(shortcutManager.open.keyEquivalent, modifiers: shortcutManager.open.modifiers)
-            
-            Button(LS("Find...")) { focusedUIState?.triggerSearchFocus(state: focusedState) }
-                .keyboardShortcut(shortcutManager.search.keyEquivalent, modifiers: shortcutManager.search.modifiers)
-        }
-        
-        // 替换“视图 -> 边栏”相关的系统命令
-        CommandGroup(replacing: .sidebar) {
-            Button(LS("Toggle Left Sidebar")) { focusedUIState?.toggleLeftSidebar(state: focusedState) }
-                .keyboardShortcut(shortcutManager.toggleLeftSidebar.keyEquivalent, modifiers: shortcutManager.toggleLeftSidebar.modifiers)
-            Button(LS("Toggle Right Sidebar")) { focusedUIState?.toggleRightSidebar(state: focusedState) }
-                .keyboardShortcut(shortcutManager.toggleRightSidebar.keyEquivalent, modifiers: shortcutManager.toggleRightSidebar.modifiers)
-            
-            Divider()
-            
-            Button(LS("Compare View")) { NotificationCenter.default.post(name: NSNotification.Name("GlobalCompareView"), object: nil) }
-                .keyboardShortcut(shortcutManager.compareView.keyEquivalent, modifiers: shortcutManager.compareView.modifiers)
-            
-            Button(LS("History")) { 
-                HistoryWindowManager.shared.open()
-            }
-                .keyboardShortcut(shortcutManager.history.keyEquivalent, modifiers: shortcutManager.history.modifiers)
-            
-            Button(LS("Global Authors Library")) {
-                #if os(macOS)
-                AuthorsWindowManager.shared.open()
-                #endif
-            }
-            
-            Button(LS("Slideshow")) { NotificationCenter.default.post(name: NSNotification.Name("GlobalPresentation"), object: nil) }
-                .keyboardShortcut(shortcutManager.slideshow.keyEquivalent, modifiers: shortcutManager.slideshow.modifiers)
-            
-            Divider()
-            
-            Picker(LS("Switch Language"), selection: $appLanguage) {
-                ForEach(AppLanguage.allCases, id: \.self) { lang in
-                    Text(lang.displayName).tag(lang)
-                }
-            }
-        }
-
-        // 替换“编辑 -> 撤销”组，这里我们放标注工具快捷键
-        CommandGroup(replacing: .undoRedo) {
-            Button(LS("Undo")) { NotificationCenter.default.post(name: NSNotification.Name("GlobalUndo"), object: nil) }
-                .keyboardShortcut(shortcutManager.undo.keyEquivalent, modifiers: shortcutManager.undo.modifiers)
-            Button(LS("Redo")) { NotificationCenter.default.post(name: NSNotification.Name("GlobalRedo"), object: nil) }
-                .keyboardShortcut(shortcutManager.redo.keyEquivalent, modifiers: shortcutManager.redo.modifiers)
-            
-            Divider()
-            
-            Button(LS("highlight")) { NotificationCenter.default.post(name: NSNotification.Name("GlobalHighlight"), object: nil) }
-                .keyboardShortcut(shortcutManager.highlight.keyEquivalent, modifiers: shortcutManager.highlight.modifiers)
-            Button(LS("underline")) { NotificationCenter.default.post(name: NSNotification.Name("GlobalUnderline"), object: nil) }
-                .keyboardShortcut(shortcutManager.underline.keyEquivalent, modifiers: shortcutManager.underline.modifiers)
-            Button(LS("strikeout")) { NotificationCenter.default.post(name: NSNotification.Name("GlobalStrikeout"), object: nil) }
-                .keyboardShortcut(shortcutManager.strikeout.keyEquivalent, modifiers: shortcutManager.strikeout.modifiers)
-            Button(LS("none")) { NotificationCenter.default.post(name: NSNotification.Name("GlobalNone"), object: nil) }
-                .keyboardShortcut(shortcutManager.none.keyEquivalent, modifiers: shortcutManager.none.modifiers)
-            Button(LS("Draw")) { NotificationCenter.default.post(name: NSNotification.Name("GlobalInk"), object: nil) }
-                .keyboardShortcut(shortcutManager.ink.keyEquivalent, modifiers: shortcutManager.ink.modifiers)
-        }
-        
-        // 替换“文件 -> 保存”逻辑
-        CommandGroup(replacing: .saveItem) {
-            Button(LS("Save")) { NotificationCenter.default.post(name: NSNotification.Name("GlobalSave"), object: nil) }
-                .keyboardShortcut(shortcutManager.save.keyEquivalent, modifiers: shortcutManager.save.modifiers)
-            #if os(macOS)
-            Button(LS("Reveal in Finder")) { NotificationCenter.default.post(name: NSNotification.Name("GlobalRevealInFinder"), object: nil) }
-                .keyboardShortcut(shortcutManager.revealInFinder.keyEquivalent, modifiers: shortcutManager.revealInFinder.modifiers)
-            
-            Button(LS("Burn-in Annotations...")) { NotificationCenter.default.post(name: NSNotification.Name("TriggerBurnIn"), object: nil) }
-                .keyboardShortcut(shortcutManager.burnIn.keyEquivalent, modifiers: shortcutManager.burnIn.modifiers)
-            
-            Button(LS("Close Window")) { NSApp.keyWindow?.performClose(nil) }
-                .keyboardShortcut(shortcutManager.closeWindow.keyEquivalent, modifiers: shortcutManager.closeWindow.modifiers)
-            #endif
-        }
-        
-        // 增加系统的打印功能
-        CommandGroup(replacing: .printItem) {
-            #if os(macOS)
-            Button(LS("Print...")) { NotificationCenter.default.post(name: NSNotification.Name("GlobalPrint"), object: nil) }
-                .keyboardShortcut("p", modifiers: .command)
-            #endif
-        }
-    }
-    
-    /// [教程注释：主场景渲染区]
     var body: some Scene {
-        // 在 macOS 上，如果你只提供 `Settings` 场景而不提供 `WindowGroup`，
-        // App 启动时将不会自动弹出任何多余的空白主界面！这是极简主义 PDF 阅读器的基石。
         Settings {
             SettingsView()
         }
         .defaultSize(width: 720, height: 780)
         .windowResizability(.contentMinSize)
-        .commands { appCommands }
     }
 }
+
 
 @MainActor
 class UpdateManager: ObservableObject {
@@ -181,6 +38,8 @@ class UpdateManager: ObservableObject {
     @AppStorage("autoCheckUpdates") var autoCheckUpdates: Bool = true
     
     private var midnightTimer: Timer?
+    private var isCheckingUpdates = false
+    private var manualUpdateRequested = false
     
     private init() {
     }
@@ -217,13 +76,26 @@ class UpdateManager: ObservableObject {
     }
     
     func checkForUpdates(manual: Bool) {
+        guard NSApp.modalWindow == nil, NSApp.keyWindow?.sheetParent == nil,
+              NSApp.keyWindow?.attachedSheet == nil,
+              !(NSApp.keyWindow is NSSavePanel) else { return }
+        manualUpdateRequested = manualUpdateRequested || manual
+        // 手动检查与定时检查合并为同一次请求，不能叠加更新弹窗。
+        guard !isCheckingUpdates else { return }
         guard let url = URL(string: "https://api.github.com/repos/wangtao-phy/SimPleview/releases/latest") else { return }
+        isCheckingUpdates = true
         
         var request = URLRequest(url: url)
         request.cachePolicy = .reloadIgnoringLocalCacheData
         
         let task = URLSession.shared.dataTask(with: request) { data, response, error in
             DispatchQueue.main.async {
+                let manual = self.manualUpdateRequested
+                defer { self.isCheckingUpdates = false; self.manualUpdateRequested = false }
+                // 网络返回时，用户可能已在另一个保存或打印对话框里。
+                guard NSApp.isActive, NSApp.modalWindow == nil, NSApp.keyWindow?.sheetParent == nil,
+                      NSApp.keyWindow?.attachedSheet == nil,
+                      !(NSApp.keyWindow is NSSavePanel) else { return }
                 guard let data = data, error == nil else {
                     if manual {
                         self.showNetworkError()
@@ -243,6 +115,9 @@ class UpdateManager: ObservableObject {
                         let cleanCurrent = currentVersion.replacingOccurrences(of: "v", with: "")
                         
                         if cleanTag.compare(cleanCurrent, options: .numeric) == .orderedDescending {
+                            // 自动提示每个版本只出现一次，手动检查仍可主动查看。
+                            guard manual || UserDefaults.standard.string(forKey: "lastNotifiedUpdateVersion") != tagName else { return }
+                            UserDefaults.standard.set(tagName, forKey: "lastNotifiedUpdateVersion")
                             self.showUpdateAvailableAlert(newVersion: tagName, url: htmlUrl)
                         } else {
                             if manual {

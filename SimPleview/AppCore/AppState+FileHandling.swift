@@ -4,6 +4,16 @@ import Combine
 
 /// [教程注释：文件加载与多标签支持]
 extension AppState {
+    /// 异步读取/插入错误只展示在所属文档中；用户已经离开时保留状态栏提示，
+    /// 不唤醒后台窗口，也不覆盖正在进行的保存或打印面板。
+    func presentDocumentError(_ alert: NSAlert) {
+        guard !isClosed else { return }
+        documentManager.saveIssue = alert.informativeText.isEmpty ? alert.messageText : alert.informativeText
+        if let window = hostingWindow ?? pdfView.window, window.isKeyWindow,
+           NSApp.isActive, NSApp.modalWindow == nil, window.attachedSheet == nil {
+            alert.beginSheetModal(for: window)
+        }
+    }
     
     // [逻辑流程：存盘操作接口]
     // 转发给内部的 documentManager。
@@ -43,16 +53,24 @@ extension AppState {
 
     // [原生打印功能]
     func printDocument() {
-        // 使用 PDFView 自带的原生打印接口，完美包含一切手写和矢量批注
-        let printInfo = NSPrintInfo.shared
-        printInfo.horizontalPagination = .fit
-        printInfo.verticalPagination = .fit
+        guard !isClosed, NSApp.modalWindow == nil, hostingWindow?.attachedSheet == nil else { return }
+        // 打印独立副本，恢复屏幕上被隐藏的标准矢量笔迹；不改动正在阅读的文档。
+        // PDFDocument 创建真正的 NSPrintOperation，不依赖临时 PDFView 的窗口与布局。
         pdfView.commitDraftInk()
         guard let document = pdfView.document,
-              let data = StandardInk.exportData(of: document), let copy = PDFDocument(data: data) else { return }
-        let printableView = PDFView()
-        printableView.document = copy
-        printableView.print(with: printInfo, autoRotate: true)
+              let data = StandardInk.exportData(of: document), let copy = PDFDocument(data: data),
+              let printInfo = NSPrintInfo.shared.copy() as? NSPrintInfo,
+              let operation = copy.printOperation(for: printInfo,
+                                                  scalingMode: .pageScaleToFit, autoRotate: true) else {
+            let alert = NSAlert()
+            alert.messageText = L("Unable to Prepare Printing")
+            presentDocumentError(alert)
+            return
+        }
+        operation.showsPrintPanel = true
+        operation.showsProgressPanel = true
+        // run 保持副本存活直到打印结束或取消；系统面板支持打印机、页码和保存为 PDF。
+        withExtendedLifetime(copy) { _ = operation.run() }
     }
     
     /// [核心概念：加载 PDF]
@@ -126,7 +144,7 @@ extension AppState {
                     let alert = NSAlert()
                     alert.messageText = "无法打开文档"
                     alert.informativeText = "文件可能损坏、为空或需要密码。当前窗口中的文档已保留。"
-                    alert.runModal()
+                    self.presentDocumentError(alert)
                     return
                 }
                 self.pdfView.prepareForDocumentReplacement()

@@ -23,6 +23,7 @@ final class AIChatViewModel: ObservableObject {
     let conversations: ConversationManager
     let keyLoader: (String) throws -> String
     private var documentID: String?
+    private var featureSubscription: AnyCancellable?
     var generationTask: Task<Void, Never>?
     var requestID = UUID()
     var taskToken: UUID?
@@ -38,6 +39,10 @@ final class AIChatViewModel: ObservableObject {
          keyLoader: @escaping (String) throws -> String = { try APIKeyStore.load(account: $0) }) {
         self.configuration = configuration; self.transport = transport
         self.conversations = conversations; self.gate = gate; self.keyLoader = keyLoader
+        // 所有窗口立即暂停网络任务并保存已收到的内容，关闭模块不删除历史与配置。
+        featureSubscription = FeaturePreferences.shared.$ai.removeDuplicates().sink { [weak self] enabled in
+            if !enabled { self?.cancelPendingWork() }
+        }
     }
     deinit { generationTask?.cancel() }
 
@@ -107,7 +112,7 @@ final class AIChatViewModel: ObservableObject {
     }
 
     func sendMessage(appState: AppState?) {
-        guard !gate.isBusy, !isGenerating, currentSessionID != nil,
+        guard FeaturePreferences.shared.ai, !gate.isBusy, !isGenerating, currentSessionID != nil,
               !inputText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
         do {
             let route = try configuration.requireRoute()
@@ -125,7 +130,7 @@ final class AIChatViewModel: ObservableObject {
     }
 
     func resumeAnswer() {
-        guard canResume, !gate.isBusy, let message = messages.last, let routeID = message.routeID else { return }
+        guard FeaturePreferences.shared.ai, canResume, !gate.isBusy, let message = messages.last, let routeID = message.routeID else { return }
         if message.pdfProgress != nil { resumePDFReading(); return }
         do {
             let route = try configuration.requireRoute(id: routeID)
@@ -162,6 +167,10 @@ final class AIChatViewModel: ObservableObject {
     }
 
     func begin(route: AIRoute, assistantID: UUID, prefix: String = "") throws -> (UUID, UUID, String) {
+        guard FeaturePreferences.shared.ai else {
+            let language = UserDefaults.standard.string(forKey: "appLanguage").flatMap(AppLanguage.init(rawValue:)) ?? .zh
+            throw AIConfigurationError.message(L.s("AI Disabled Help", language))
+        }
         guard let session = currentSessionID else { throw AIConfigurationError.message("请先选择对话。") }
         let token = try gate.acquire(label: route.label)
         do {

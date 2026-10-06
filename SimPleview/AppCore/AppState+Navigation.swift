@@ -118,7 +118,8 @@ extension AppState {
     // MARK: - Search
     // 所有的搜索功能全部转发给专门的 SearchManager
     func performSearch() {
-        searchManager.performSearch(in: pdfView.document, pdfView: pdfView)
+        searchManager.performSearch(in: pdfView.document, pdfView: pdfView,
+                                    revision: editRevision, source: pdfView.scanCache.source)
     }
     
     func goToNextSearchResult() { searchManager.goToNextSearchResult(pdfView: pdfView) }

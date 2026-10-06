@@ -11,7 +11,8 @@ class AuthorsWindowManager {
     
     func open() {
         // 如果窗口已经打开了，那么就让它激活并置于前台
-        if let wc = windowController, let window = wc.window, window.isVisible {
+        if let wc = windowController, let window = wc.window {
+            if window.isMiniaturized { window.deminiaturize(nil) }
             window.makeKeyAndOrderFront(nil)
             return
         }
@@ -35,6 +36,7 @@ class AuthorsWindowManager {
         )
         
         window.titleVisibility = .visible
+        window.tabbingMode = .disallowed // 作者库是独立工具窗口，不加入 PDF 标签组。
         window.titlebarAppearsTransparent = false
         window.title = title
         
@@ -43,7 +45,7 @@ class AuthorsWindowManager {
         window.center()
         
         // 关闭时释放窗口资源（避免常驻内存）；下次 open 会重新创建
-        window.isReleasedWhenClosed = true
+        window.isReleasedWhenClosed = false
         // 彻底禁用 macOS 烦人的窗口位置记忆
         window.isRestorable = false
         

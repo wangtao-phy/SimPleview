@@ -14,9 +14,7 @@ struct TabGroupsPopoverView: View {
         return SimPleview.L.s(key, appLanguage)
     }
     
-    // 我们需要将分散的 controllers 按它们的 tabbedWindows 分组
-    // 由于 tabbedWindows 返回的数组对于同一个 tab 组内的所有窗口都是相同的（包含它们自己），
-    // 我们可以使用 tab 组中第一个窗口的 object identifier 作为组的唯一标识。
+    // 原生分组成员与标签栏是否可见无关，管理列表与关闭判断使用同一入口。
     var windowGroups: [[NSWindow]] {
         var groups: [[NSWindow]] = []
         var processedWindowIDs = Set<ObjectIdentifier>()
@@ -28,17 +26,9 @@ struct TabGroupsPopoverView: View {
             let winID = ObjectIdentifier(window)
             if processedWindowIDs.contains(winID) { continue }
             
-            // 获取这个窗口所在的整个 tab 组
-            if let tabbed = window.tabbedWindows {
-                groups.append(tabbed)
-                for w in tabbed {
-                    processedWindowIDs.insert(ObjectIdentifier(w))
-                }
-            } else {
-                // 如果系统出于某种原因没有返回 tabbedWindows，将它自己作为一组
-                groups.append([window])
-                processedWindowIDs.insert(winID)
-            }
+            let tabs = registry.tabs(in: window)
+            groups.append(tabs)
+            for tab in tabs { processedWindowIDs.insert(ObjectIdentifier(tab)) }
         }
         
         return groups
@@ -227,7 +217,7 @@ struct WindowGroupSection: View {
     
     private func moveTab(from draggedWindow: NSWindow, toGroupOf targetWindow: NSWindow) {
         DispatchQueue.main.async {
-            if let tabs = targetWindow.tabbedWindows, tabs.contains(draggedWindow) { return }
+            if WindowRegistry.shared.tabs(in: targetWindow).contains(draggedWindow) { return }
             targetWindow.addTabbedWindow(draggedWindow, ordered: .above)
             WindowRegistry.shared.objectWillChange.send()
         }
@@ -318,7 +308,7 @@ struct TabItemView: View {
     
     private func moveTab(from draggedWindow: NSWindow, toGroupOf targetWindow: NSWindow) {
         DispatchQueue.main.async {
-            if let tabs = targetWindow.tabbedWindows, tabs.contains(draggedWindow) { return }
+            if WindowRegistry.shared.tabs(in: targetWindow).contains(draggedWindow) { return }
             targetWindow.addTabbedWindow(draggedWindow, ordered: .above)
             WindowRegistry.shared.objectWillChange.send()
         }
@@ -474,7 +464,7 @@ struct EmptyGroupSection: View {
 // 简单的单例用来暂存拖拽过程中的引用
 class DragDropManager {
     static let shared = DragDropManager()
-    var draggingWindow: NSWindow?
+    weak var draggingWindow: NSWindow?
 }
 
 struct ViewHeightKey: PreferenceKey {

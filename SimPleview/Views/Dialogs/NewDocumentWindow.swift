@@ -6,48 +6,36 @@ import AppKit
 struct NewDocumentWindow: View {
     @State private var selectedType: DocumentGenerator.DocumentType = .pdf
     
-    enum PaperSize: String, CaseIterable, Identifiable {
-        case custom = "Custom"
-        case a4 = "A4"
-        case a3 = "A3"
-        case b5 = "B5"
-        case usLetter = "US Letter"
-        
-        var id: String { self.rawValue }
-        
-        var dimensions: CGSize? {
-            switch self {
-            case .a4: return CGSize(width: 595.28, height: 841.89) // at 72 PPI
-            case .a3: return CGSize(width: 841.89, height: 1190.55)
-            case .b5: return CGSize(width: 498.90, height: 708.66)
-            case .usLetter: return CGSize(width: 612, height: 792)
-            case .custom: return nil
-            }
-        }
-    }
-    
-    @State private var selectedPaperSize: PaperSize = .custom
-    @State private var customWidth: String = "1600"
-    @State private var customHeight: String = "800"
-    
+    typealias PaperSize = FilePreferences.Paper
+    @State private var selectedPaperSize: PaperSize
+    @State private var customWidth: String
+    @State private var customHeight: String
+
     @AppStorage("appLanguage") private var appLangStr: String = "zh"
     private var lang: AppLanguage {
         AppLanguage(rawValue: appLangStr) ?? .zh
     }
     
     @State private var fileName: String = ""
+    @State private var isCreating = false
     @State private var saveDirectory: URL = FileManager.default.urls(for: .downloadsDirectory, in: .userDomainMask).first ?? URL(fileURLWithPath: NSHomeDirectory())
     
     var onClose: () -> Void
     
     init(onClose: @escaping () -> Void) {
         self.onClose = onClose
+        let defaults = UserDefaults.standard
+        _selectedType = State(initialValue: defaults.string(forKey: "newFileType").flatMap(DocumentGenerator.DocumentType.init(rawValue:)) ?? .pdf)
+        _selectedPaperSize = State(initialValue: defaults.string(forKey: "newFilePaper").flatMap(PaperSize.init(rawValue:)) ?? .custom)
+        let size = FilePreferences.newSize()
+        _customWidth = State(initialValue: String(format: "%.2f", size.width))
+        _customHeight = State(initialValue: String(format: "%.2f", size.height))
     }
     
     private func updateDimensions(for size: PaperSize) {
-        if let dim = size.dimensions {
-            customWidth = String(format: "%.0f", dim.width)
-            customHeight = String(format: "%.0f", dim.height)
+        if let dim = size.size {
+            customWidth = String(format: "%.2f", dim.width)
+            customHeight = String(format: "%.2f", dim.height)
         }
     }
     
@@ -81,7 +69,7 @@ struct NewDocumentWindow: View {
                                 .gridColumnAlignment(.trailing)
                             Picker("", selection: $selectedPaperSize) {
                                 ForEach(PaperSize.allCases) { size in
-                                    Text(size.rawValue).tag(size)
+                                    Text(SimPleview.L.s(size.rawValue, lang)).tag(size)
                                 }
                             }
                             .labelsHidden()
@@ -195,10 +183,32 @@ struct NewDocumentWindow: View {
     }
     
     private func createDocument() {
-        let w = CGFloat(Double(customWidth) ?? 1600)
-        let h = CGFloat(Double(customHeight) ?? 800)
-        
-        let targetURL = saveDirectory.appendingPathComponent("\(fileName).\(selectedType.ext)")
+        guard !isCreating, NSApp.modalWindow == nil else { return }
+        isCreating = true
+        defer { isCreating = false }
+        let name = fileName.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !name.isEmpty, !name.contains("/"), !name.contains("\0") else {
+            let alert = NSAlert()
+            alert.messageText = L.s("Invalid File Name", lang)
+            alert.runModal()
+            return
+        }
+        guard let w = Double(customWidth), let h = Double(customHeight),
+              FilePreferences.validSize(CGSize(width: w, height: h)) else {
+            let alert = NSAlert()
+            alert.messageText = SimPleview.L.s("Invalid Page Size", lang)
+            alert.runModal()
+            return
+        }
+        let targetURL = saveDirectory.appendingPathComponent("\(name).\(selectedType.ext)")
+        // 直接写指定目录不会获得 NSSavePanel 的覆盖保护，必须在已有文件时明确确认。
+        if FileManager.default.fileExists(atPath: targetURL.path) {
+            let alert = NSAlert()
+            alert.messageText = L.format("Replace Existing File?", lang, targetURL.lastPathComponent)
+            alert.addButton(withTitle: L.s("Cancel", lang))
+            alert.addButton(withTitle: L.s("Replace", lang))
+            guard alert.runModal() == .alertSecondButtonReturn else { return }
+        }
         
         do {
             try DocumentGenerator.generateBlankDocument(

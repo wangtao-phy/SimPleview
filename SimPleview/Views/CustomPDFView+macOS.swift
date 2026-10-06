@@ -49,6 +49,24 @@ extension CustomPDFView {
         observedRenderClipView = nil
     }
 
+    /// 只标记已有页面视图的绘图区域，不重排 PDF，不重置缩放和滚动位置。
+    /// 主题切换刷新全部已有瓦片；整页缓存就绪时只替换对应可见页。
+    func invalidatePageContent(_ page: PDFPage? = nil) {
+        guard let root = documentView else { return }
+        let rect: NSRect
+        if let page {
+            guard page.document === document else { return }
+            rect = root.convert(convert(page.bounds(for: displayBox), from: page), from: self)
+        } else { rect = root.bounds }
+        func invalidate(_ view: NSView) {
+            let region = view.convert(rect, from: root).intersection(view.bounds)
+            guard !region.isEmpty else { return }
+            view.setNeedsDisplay(region)
+            for child in view.subviews { invalidate(child) }
+        }
+        invalidate(root)
+    }
+
     /// PDFKit 可只更新内部滚动视图而不调用外层 layout/needsDisplay。直接观察
     /// 原生视口，加上页码/缩放通知，避免实际页面已变而绘制快照还停在旧页。
     /// 注册在窗口挂接之后；文档替换造成内部视口变化时重新绑定，关闭时移除。
@@ -59,6 +77,14 @@ extension CustomPDFView {
         guard renderObservers.isEmpty || observedRenderClipView !== clip else { return }
         removeRenderObservers()
         observedRenderClipView = clip
+        scanCache.onImageReady = { [weak self] scan in
+            guard let self, self.window != nil,
+                  let page = self.visiblePages.first(where: {
+                      $0.pageRef === scan.reference && $0.bounds(for: .cropBox) == scan.bounds
+                          && $0.transform(for: .cropBox) == scan.transform
+                  }) else { return }
+            self.invalidatePageContent(page)
+        }
         let center = NotificationCenter.default
         renderObservers.append(center.addObserver(forName: NSApplication.didResignActiveNotification,
             object: NSApplication.shared, queue: .main) { [weak self] _ in

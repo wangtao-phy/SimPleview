@@ -11,7 +11,8 @@ class HistoryWindowManager {
     
     func open() {
         // 如果窗口已经打开了，那么就让它激活并置于前台
-        if let wc = windowController, let window = wc.window, window.isVisible {
+        if let wc = windowController, let window = wc.window {
+            if window.isMiniaturized { window.deminiaturize(nil) }
             window.makeKeyAndOrderFront(nil)
             return
         }
@@ -26,6 +27,7 @@ class HistoryWindowManager {
         )
         
         window.titleVisibility = .visible
+        window.tabbingMode = .disallowed // 辅助窗口不参与文档标签组。
         window.titlebarAppearsTransparent = false
         window.title = SimPleview.L.s("History", UserDefaults.standard.string(forKey: "appLanguage") == "en" ? .en : .zh)
         
@@ -34,7 +36,7 @@ class HistoryWindowManager {
         window.center()
         
         // 关闭时释放窗口资源（避免常驻内存）；下次 open 会重新创建
-        window.isReleasedWhenClosed = true
+        window.isReleasedWhenClosed = false // 由 controller 与关闭观察者管理 ARC 生命周期。
         // 彻底禁用 macOS 烦人的窗口位置记忆
         window.isRestorable = false
         

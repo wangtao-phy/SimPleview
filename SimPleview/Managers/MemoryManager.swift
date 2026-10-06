@@ -46,7 +46,9 @@ final class MemoryManager {
         // 缩略图预算逐级收缩，大幅正文缓存暂停预热，避免清理后立即再次生成。
         let limit = level == "Critical" ? 32 : 96
         ThumbnailStore.shared.trim(to: limit * 1024 * 1024)
+        ReadingTracker.shared.trimRecordsCache(limit: 8)
         for weakState in AppState.allInstances {
+            weakState.value?.searchManager.releaseSnapshot()
             weakState.value?.pdfView.scanCache.removeAll(pauseFor: 30)
         }
     }

@@ -76,6 +76,18 @@ struct AIChatView: View {
             .padding(.bottom, 4)
             
             Divider()
+
+            // 存储错误属于共享写入队列，不在每个聊天窗口同时弹出模态警告。
+            // 保留可见提示与重试入口；关闭/退出时仍由保存门槛阻止丢失数据。
+            if let error = conversations.lastError {
+                HStack {
+                    Text(error).font(.caption).foregroundStyle(.red).textSelection(.enabled)
+                    Spacer()
+                    Button(state.L("Retry Saving")) {
+                        if conversations.flush() { conversations.lastError = nil }
+                    }
+                }.padding(.horizontal)
+            }
             
             // 只显示本对话实际收到的用量。多页读取时这是最近一批请求，而非整轮总计。
             if let usage = viewModel.lastUsage {
@@ -173,9 +185,9 @@ struct AIChatView: View {
                 viewModel.cancelPendingWork()
             }
         }
-        .alert("对话存储", isPresented: Binding(get: { conversations.lastError != nil || viewModel.errorMessage != nil }, set: { if !$0 { conversations.lastError = nil; viewModel.errorMessage = nil } })) {
-            Button("确定") { conversations.lastError = nil; viewModel.errorMessage = nil }
-        } message: { Text(viewModel.errorMessage ?? conversations.lastError ?? "") }
+        .alert(state.L("AI Request Failed"), isPresented: Binding(get: { viewModel.errorMessage != nil }, set: { if !$0 { viewModel.errorMessage = nil } })) {
+            Button(state.L("OK")) { viewModel.errorMessage = nil }
+        } message: { Text(viewModel.errorMessage ?? "") }
         .onDisappear { viewModel.cancelPendingWork() }
         .onAppear {
             if let id = state.documentID { viewModel.configure(with: id, legacyName: state.fileName) }

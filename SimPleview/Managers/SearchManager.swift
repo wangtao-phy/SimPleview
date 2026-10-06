@@ -19,8 +19,10 @@ final class SearchManager: ObservableObject {
     /// 标记底层是否仍在搜索（用于在 UI 上显示转圈圈的 loading）
     @Published var isSearching: Bool = false
     
-    private var cancellables = Set<AnyCancellable>()
     private var searchGeneration: UInt = 0
+    private weak var snapshotDocument: PDFDocument?
+    private var snapshotRevision: UInt?
+    private var snapshotData: Data?
 
     deinit { searchQueue.cancelAllOperations() }
     
@@ -46,7 +48,7 @@ final class SearchManager: ObservableObject {
     /// - Parameters:
     ///   - document: 当前打开的 PDFDocument
     ///   - pdfView: 当前渲染的 PDFView，用于在重置搜索时清除高亮等状态
-    func performSearch(in document: PDFDocument?, pdfView: PDFView?) {
+    func performSearch(in document: PDFDocument?, pdfView: PDFView?, revision: UInt = 0, source: PDFRenderSource? = nil) {
         // 第一步：立刻废弃掉之前正在进行的旧搜索（因为用户的 query 可能已经变了）
         searchQueue.cancelAllOperations()
         // 已完成的 Operation 可能还有主队列回调，cancelAllOperations 不会
@@ -61,6 +63,7 @@ final class SearchManager: ObservableObject {
             self.searchResults = []
             self.currentSearchIndex = nil
             self.isSearching = false
+            releaseSnapshot()
             return
         }
         
@@ -70,9 +73,20 @@ final class SearchManager: ObservableObject {
 
         let startIndex = pdfView?.currentPage.map { document.index(for: $0) } ?? 0
         
-        // 快照创建与编辑同属主执行器。后台序列化“只读”也可能遍历可变对象，
-        // 因此必须先隔离输入，再进入搜索队列，避免与删页/批注/保存交叉访问。
-        guard let documentData = document.dataRepresentation() else { isSearching = false; return }
+        // 同一编辑版本只准备一次输入。优先共用正文/缩略图已加载的原始字节，
+        // Data 的赋值不会复制底层缓冲；不能复用时才在主执行器隔离活动文档。
+        // 后台队列始终只接收不可变数据，不访问正在编辑的 PDFKit 对象。
+        let documentData: Data
+        if snapshotDocument === document, snapshotRevision == revision, let data = snapshotData {
+            documentData = data
+        } else {
+            releaseSnapshot()
+            guard let data = source?.searchData(for: document) ?? document.dataRepresentation() else { isSearching = false; return }
+            snapshotDocument = document
+            snapshotRevision = revision
+            snapshotData = data
+            documentData = data
+        }
         let operation = BlockOperation()
         operation.addExecutionBlock { [weak self, weak operation] in
             // 刚进来就先查一下有没有被取消，不要浪费算力
@@ -88,10 +102,16 @@ final class SearchManager: ObservableObject {
             // [流式渐进搜索引擎 (Iterative Streaming Search)]
             // 获取当前所处页码，以此作为搜索起点
             
-            // 构建一个指向起始页开头的零长度 Selection，作为“光标”起点
+            // PDFKit 的字符选区包含端点，0…0 并非零长度，会跳过页首字符。
+            // 用前一非空页的末字符作为起点；第一页传 nil，从文档开头搜索。
             var currentSelection: PDFSelection? = nil
-            if let startPage = safeDocument.page(at: startIndex) {
-                currentSelection = safeDocument.selection(from: startPage, atCharacterIndex: 0, to: startPage, atCharacterIndex: 0)
+            if startIndex > 0, startIndex < safeDocument.pageCount {
+                for index in stride(from: startIndex - 1, through: 0, by: -1) {
+                    guard let page = safeDocument.page(at: index), page.numberOfCharacters > 0 else { continue }
+                    let last = page.numberOfCharacters - 1
+                    currentSelection = safeDocument.selection(from: page, atCharacterIndex: last, to: page, atCharacterIndex: last)
+                    break
+                }
             }
             
             var matches: [SearchMatch] = []
@@ -112,9 +132,7 @@ final class SearchManager: ObservableObject {
                         if !hasWrapped && startIndex > 0 {
                             // 【折返逻辑】：如果不是从第一页开始找的，那就折返到全书第 0 页重新继续找
                             hasWrapped = true
-                            if let firstPage = safeDocument.page(at: 0) {
-                                currentSelection = safeDocument.selection(from: firstPage, atCharacterIndex: 0, to: firstPage, atCharacterIndex: 0)
-                            }
+                            currentSelection = nil
                             shouldContinue = true
                             return
                         } else {
@@ -230,5 +248,13 @@ final class SearchManager: ObservableObject {
         searchResults = []
         currentSearchIndex = nil
         isSearching = false
+        releaseSnapshot()
+    }
+
+    /// 只释放可重建的输入，已显示结果和选区保持不变。
+    func releaseSnapshot() {
+        snapshotData = nil
+        snapshotDocument = nil
+        snapshotRevision = nil
     }
 }

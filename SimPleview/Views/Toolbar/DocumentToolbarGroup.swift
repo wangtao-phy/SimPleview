@@ -6,6 +6,25 @@ struct DocumentToolbarGroup: CustomizableToolbarContent {
     @ObservedObject var uiState: UIState
     
     var body: some CustomizableToolbarContent {
+        // 独立原生手绘按钮（带滑块下拉）
+        ToolbarItem(id: "Draw", placement: .primaryAction) {
+            DrawButtonView(state: state)
+                .disabled(state.fileURL == nil)
+        }
+
+        // 签名按钮
+        ToolbarItem(id: "Signature", placement: .primaryAction) {
+            Button(action: {
+                uiState.isShowingSignaturePopover.toggle()
+            }) {
+                Label(state.L("Signature"), systemImage: "signature")
+            }
+            .help(state.L("Add Signature"))
+            .disabled(state.fileURL == nil)
+            .popover(isPresented: $uiState.isShowingSignaturePopover, arrowEdge: .bottom) {
+                SignaturePopoverView(state: state, uiState: uiState)
+            }
+        }
         ToolbarItem(id: "RotateLeft", placement: .primaryAction) {
             Button(action: { state.rotateSelectedPagesLeft() }) {
                 Label(state.L("Rotate Left"), systemImage: "rotate.left") 

@@ -116,6 +116,7 @@ struct FocusTimerButton: NSViewRepresentable {
     func makeNSView(context: Context) -> NSButton {
         let button = NSButton(image: NSImage(systemSymbolName: "timer", accessibilityDescription: label)!,
                               target: context.coordinator, action: #selector(Coordinator.clicked(_:)))
+        button.identifier = NSUserInterfaceItemIdentifier("focusTimerButton")
         button.isBordered = false
         return button
     }

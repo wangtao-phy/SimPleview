@@ -10,7 +10,8 @@ struct MainToolbar: ViewModifier {
         content
             .toolbar(id: "MainToolbar") {
                 NavigationToolbarGroup(state: state, uiState: uiState, pageNumberInput: pageNumberInput)
-                AnnotationToolbarGroup(state: state, uiState: uiState)
+                AnnotationToolbarGroup(state: state)
+                ReadingToolbarGroup(state: state)
                 DocumentToolbarGroup(state: state, uiState: uiState)
             }
             .toolbarRole(.editor)

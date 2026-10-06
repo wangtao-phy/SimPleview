@@ -3,7 +3,7 @@ import PDFKit
 
 extension AIChatViewModel {
     func readCurrentPDFPage(appState: AppState) {
-        guard !gate.isBusy, !isGenerating else { return }
+        guard FeaturePreferences.shared.ai, !gate.isBusy, !isGenerating else { return }
         do {
             let source = try AppPDFVisionSource(state: appState)
             guard let document = appState.pdfView.document, let page = appState.pdfView.currentPage else {
@@ -20,7 +20,7 @@ extension AIChatViewModel {
     }
 
     func readEntirePDF(appState: AppState) {
-        guard !gate.isBusy, !isGenerating else { return }
+        guard FeaturePreferences.shared.ai, !gate.isBusy, !isGenerating else { return }
         do { try readEntirePDF(source: AppPDFVisionSource(state: appState)) }
         catch { errorMessage = error.localizedDescription }
     }
@@ -31,7 +31,7 @@ extension AIChatViewModel {
     }
 
     private func readPDF(source: any PDFVisionSource, currentPageIndex: Int?) throws {
-        guard !gate.isBusy, !isGenerating, currentSessionID != nil else { return }
+        guard FeaturePreferences.shared.ai, !gate.isBusy, !isGenerating, currentSessionID != nil else { return }
         let route = try configuration.requireRoute()
         guard route.model.supportsVision else { throw AIConfigurationError.message("请选择支持图片输入的视觉模型，例如 deepseek-v4-flash-vision-exp。") }
         try source.verify()

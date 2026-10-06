@@ -29,6 +29,7 @@ struct DocumentGenerator {
         targetURL: URL,
         backgroundColor: NSColor = .white
     ) throws {
+        guard FilePreferences.validSize(CGSize(width: width, height: height)) else { throw CocoaError(.fileWriteInvalidFileName) }
         switch type {
         case .pdf:
             try generateBlankPDF(width: width, height: height, targetURL: targetURL, backgroundColor: backgroundColor)
@@ -38,41 +39,33 @@ struct DocumentGenerator {
     }
     
     private static func generateBlankPDF(width: CGFloat, height: CGFloat, targetURL: URL, backgroundColor: NSColor) throws {
-        // 创建一个空 PDF
-        let pdfDoc = PDFDocument()
-        
-        // 创建一个指定大小的空白图像
-        let imageSize = NSSize(width: width, height: height)
-        let blankImage = NSImage(size: imageSize)
-        blankImage.lockFocus()
-        backgroundColor.set()
-        NSRect(origin: .zero, size: imageSize).fill()
-        blankImage.unlockFocus()
-        
-        // 用空白图像创建一个页面
-        if let page = PDFPage(image: blankImage) {
-            pdfDoc.insert(page, at: 0)
-        }
-        
-        // 保存到磁盘
-        if !pdfDoc.write(to: targetURL) {
-            throw NSError(domain: "DocumentGenerator", code: 1, userInfo: [NSLocalizedDescriptionKey: "Failed to write PDF to disk."])
-        }
+        // 空白 PDF 直接写矢量填充，尺寸不依赖屏幕倍率，也无需创建整页位图。
+        var bounds = CGRect(x: 0, y: 0, width: width, height: height)
+        let output = NSMutableData()
+        guard let consumer = CGDataConsumer(data: output),
+              let context = CGContext(consumer: consumer, mediaBox: &bounds, nil) else { throw CocoaError(.fileWriteUnknown) }
+        context.beginPDFPage(nil)
+        context.setFillColor(backgroundColor.cgColor)
+        context.fill(bounds)
+        context.endPDFPage()
+        context.closePDF()
+        try (output as Data).write(to: targetURL, options: .atomic)
     }
     
     private static func generateBlankImage(type: DocumentType, width: CGFloat, height: CGFloat, targetURL: URL, backgroundColor: NSColor) throws {
-        let imageSize = NSSize(width: width, height: height)
-        let blankImage = NSImage(size: imageSize)
-        
-        blankImage.lockFocus()
-        backgroundColor.set()
-        NSRect(origin: .zero, size: imageSize).fill()
-        blankImage.unlockFocus()
-        
-        guard let cgImage = blankImage.cgImage(forProposedRect: nil, context: nil, hints: nil) else {
-            throw NSError(domain: "DocumentGenerator", code: 2, userInfo: [NSLocalizedDescriptionKey: "Failed to generate CGImage."])
+        // 按像素创建位图，不使用 lockFocus 的屏幕倍率；同一尺寸在 Retina
+        // 与普通屏幕上输出一致，同时避免隐式放大四倍的像素分配。
+        let pixelWidth = Int(width.rounded(.down)), pixelHeight = Int(height.rounded(.down))
+        guard let context = CGContext(data: nil, width: pixelWidth, height: pixelHeight,
+                                      bitsPerComponent: 8, bytesPerRow: pixelWidth * 4,
+                                      space: CGColorSpaceCreateDeviceRGB(),
+                                      bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else {
+            throw CocoaError(.fileWriteUnknown)
         }
-        
+        context.setFillColor(backgroundColor.cgColor)
+        context.fill(CGRect(x: 0, y: 0, width: pixelWidth, height: pixelHeight))
+        guard let cgImage = context.makeImage() else { throw CocoaError(.fileWriteUnknown) }
+
         let bitmapRep = NSBitmapImageRep(cgImage: cgImage)
         
         let fileType: NSBitmapImageRep.FileType
@@ -82,11 +75,11 @@ struct DocumentGenerator {
         default: fileType = .png
         }
         
-        guard let data = bitmapRep.representation(using: fileType, properties: [:]) else {
+        guard let data = bitmapRep.representation(using: fileType, properties: type == .jpeg ? [.compressionFactor: FilePreferences.jpegQuality()] : [:]) else {
             throw NSError(domain: "DocumentGenerator", code: 3, userInfo: [NSLocalizedDescriptionKey: "Failed to generate image data."])
         }
         
-        try data.write(to: targetURL)
+        try data.write(to: targetURL, options: .atomic)
     }
 }
 #endif

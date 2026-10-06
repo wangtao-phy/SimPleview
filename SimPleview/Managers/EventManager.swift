@@ -24,6 +24,8 @@ final class EventManager: ObservableObject {
     
     @Published var isLoadingReminders: Bool = false
     @Published var isLoadingEvents: Bool = false
+    @Published private(set) var isRequestingReminderAccess = false
+    @Published private(set) var isRequestingCalendarAccess = false
     
     private var cancellables = Set<AnyCancellable>()
     private var remindersNeedRefresh = false
@@ -100,6 +102,10 @@ final class EventManager: ObservableObject {
     @discardableResult
     func requestReminderAccess() async -> Bool {
         updateAuthStatuses()
+        if hasReminderAccess { await fetchReminders(); return true }
+        guard !isRequestingReminderAccess else { return false }
+        isRequestingReminderAccess = true
+        defer { isRequestingReminderAccess = false }
         if isReminderDenied {
             openReminderPrivacySettings()
             return false
@@ -128,6 +134,10 @@ final class EventManager: ObservableObject {
     @discardableResult
     func requestCalendarAccess() async -> Bool {
         updateAuthStatuses()
+        if hasCalendarAccess { await fetchEvents(); return true }
+        guard !isRequestingCalendarAccess else { return false }
+        isRequestingCalendarAccess = true
+        defer { isRequestingCalendarAccess = false }
         if isCalendarDenied {
             openCalendarPrivacySettings()
             return false

@@ -62,7 +62,7 @@ final class ImageDocumentManager {
         guard let page = pdfDocument.page(at: 0) else { return false }
         
         let mediaBox = page.bounds(for: .cropBox)
-        let finalSize = targetSize ?? mediaBox.size
+        let finalSize = targetSize ?? FilePreferences.imageSize(original: mediaBox.size)
         // CGContext/UIGraphics 会立即分配 width * height * 4 字节。先验证用户输入和 PDF
         // 元数据，避免无穷值、负数或超大位图导致整数转换崩溃和 OOM。
         let maxDimension: CGFloat = 16_384
@@ -176,8 +176,8 @@ final class ImageDocumentManager {
         if ext == "png" {
             data = bitmapRep.representation(using: .png, properties: [:])
         } else if ext == "jpg" || ext == "jpeg" {
-            // 降低压缩比，减小体积
-            data = bitmapRep.representation(using: .jpeg, properties: [.compressionFactor: 0.8])
+            // JPEG 质量只影响有损图片导出，不会栅格化 PDF 中的矢量标注。
+            data = bitmapRep.representation(using: .jpeg, properties: [.compressionFactor: FilePreferences.jpegQuality()])
         } else if ext == "tiff" || ext == "tif" {
             data = bitmapRep.representation(using: .tiff, properties: [:])
         } else if ext == "bmp" {
@@ -272,6 +272,7 @@ final class ImageDocumentManager {
         
         let originalSize = pdfDocument.page(at: 0)?.bounds(for: .cropBox).size ?? .zero
         let delegate = SavePanelAccessoryDelegate(panel: panel, types: types, originalSize: originalSize)
+        delegate.targetSize = FilePreferences.imageSize(original: originalSize)
         
         // 创建格式选择和像素大小的 Accessory View
         let accessoryView = NSView(frame: NSRect(x: 0, y: 0, width: 280, height: 60))
@@ -290,7 +291,7 @@ final class ImageDocumentManager {
         sizeLabel.frame = NSRect(x: 10, y: 5, width: 65, height: 20)
         
         let widthField = NSTextField(frame: NSRect(x: 75, y: 5, width: 60, height: 20))
-        widthField.stringValue = String(format: "%.0f", originalSize.width)
+        widthField.stringValue = String(format: "%.0f", delegate.targetSize.width)
         widthField.delegate = delegate
         widthField.wantsLayer = true
         delegate.widthField = widthField
@@ -299,7 +300,7 @@ final class ImageDocumentManager {
         crossLabel.frame = NSRect(x: 140, y: 5, width: 15, height: 20)
         
         let heightField = NSTextField(frame: NSRect(x: 155, y: 5, width: 60, height: 20))
-        heightField.stringValue = String(format: "%.0f", originalSize.height)
+        heightField.stringValue = String(format: "%.0f", delegate.targetSize.height)
         heightField.delegate = delegate
         heightField.wantsLayer = true
         delegate.heightField = heightField

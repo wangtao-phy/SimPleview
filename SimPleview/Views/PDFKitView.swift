@@ -11,7 +11,7 @@ import os
 /// 继承自原生的 `PDFView`。由于原生组件缺乏完善的笔迹交互控制和精细的右键选单拦截能力，
 /// 本类通过桥接原生生命周期和钩子方法，实现了以下核心能力：
 /// - macOS 平台的高性能非阻塞原生路径实时绘制。
-/// - "替身批注法" (Ghost Annotation Method) 实现的 O(1) 性能选区边框。
+/// - 基于不可变绘图快照的选区边框，不把临时框写进 PDF。
 class CustomPDFView: PDFView {
     nonisolated let renderSnapshot = OSAllocatedUnfairLock(initialState: PDFRenderSnapshot())
     nonisolated let scanCache = ScanPageCache()
@@ -266,7 +266,15 @@ class CustomPDFView: PDFView {
     var _threadSafeLineWidth: CGFloat = 3.0
 
     // [护眼背景色状态]
-    var _threadSafePageBackgroundColor: PDFPageBackgroundColor = .default
+    var _threadSafePageBackgroundColor: PDFPageBackgroundColor = .default {
+        didSet {
+            guard oldValue != _threadSafePageBackgroundColor else { return }
+            // 先发布统一颜色快照，再使内部页面瓦片失效。只刷新外层 PDFView
+            // 会留下旧颜色的缓存块；相同颜色不触发重新绘制或扫描页解码。
+            needsDisplay = true
+            invalidatePageContent()
+        }
+    }
 
     
     // [颜色批次同步]

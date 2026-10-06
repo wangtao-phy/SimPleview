@@ -58,6 +58,7 @@ extension AppState {
         }
         
         thumbnailManager.suspend()
+        searchManager.releaseSnapshot()
         if MemoryMode.current.policy.allowsHibernation {
             // 不改变页间距、不强制重排，也不清理其他窗口。保留缩略图以便立即返回。
             pdfView.scanCache.suspend()

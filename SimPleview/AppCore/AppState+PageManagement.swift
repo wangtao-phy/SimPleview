@@ -65,7 +65,7 @@ extension AppState {
         let reference = doc.page(at: max(0, min(index, doc.pageCount - 1)))
         let bounds = reference?.bounds(for: .mediaBox) ?? CGRect(x: 0, y: 0, width: 595, height: 842)
         let page = PDFPage()
-        page.setBounds(bounds, for: .mediaBox)
+        page.setBounds(CGRect(origin: .zero, size: FilePreferences.insertedSize(reference: bounds.size)), for: .mediaBox)
         doc.insert(page, at: index)
         annotationManager.record(.insertPages(count: 1, startIndex: index))
         selectedIndices = [index]
@@ -89,11 +89,44 @@ extension AppState {
         isDirty = true
     }
 
-    func insertPDF(url: URL, at index: Int) {
-        guard pdfView.document != nil else { return }
+    func insertFile(url: URL, at index: Int) {
+        guard let document = pdfView.document, !isClosed else { return }
+        if ImageDocumentManager.isImageFile(url: url) {
+            let revision = documentVersion
+            let size = insertionPageSize(at: index, in: document)
+            Task { @MainActor [weak self] in
+                let data = await Task.detached(priority: .userInitiated) {
+                    ImageDocumentManager.insertionPDF(from: url, pageSize: size)
+                }.value
+                self?.insertImagePDF(data, at: index, revision: revision)
+            }
+            return
+        }
         let accessing = url.startAccessingSecurityScopedResource()
         defer { if accessing { url.stopAccessingSecurityScopedResource() } }
         guard let source = PDFDocument(url: url), !source.isLocked, source.pageCount > 0 else { return }
+        insertPages(from: source, at: index)
+    }
+
+    private func insertionPageSize(at index: Int, in document: PDFDocument) -> CGSize {
+        // 以插入处相邻页的可见尺寸为准，包括旋转；不继承扫描图的异常 DPI 元数据。
+        guard let page = document.page(at: max(0, min(index, document.pageCount - 1))) else {
+            return CGSize(width: 595, height: 842)
+        }
+        let size = page.bounds(for: .cropBox).size
+        return page.rotation % 180 == 0 ? size : CGSize(width: size.height, height: size.width)
+    }
+
+    private func insertImagePDF(_ data: Data?, at index: Int, revision: UUID) {
+        guard !isClosed, documentVersion == revision, pdfView.document != nil else { return }
+        guard let data, let source = PDFDocument(data: data), source.pageCount == 1 else {
+            let alert = NSAlert()
+            alert.messageText = L("Unable to Insert File")
+            alert.informativeText = L("Image Insertion Failed Help")
+            presentDocumentError(alert)
+            return
+        }
+        // 共用原有插页事务，缩略图、页数、多选与撤销不另建一套状态。
         insertPages(from: source, at: index)
     }
 
@@ -183,13 +216,15 @@ extension AppState {
     }
 
     func acceptPageDrop(_ providers: [NSItemProvider], at index: Int) -> Bool {
-        guard pdfView.document != nil,
+        guard !isClosed, let document = pdfView.document,
               let provider = providers.first(where: {
                   $0.hasItemConformingToTypeIdentifier(ThumbnailPageDrag.type.identifier)
                     || $0.hasItemConformingToTypeIdentifier(UTType.pdf.identifier)
+                    || $0.hasItemConformingToTypeIdentifier(UTType.image.identifier)
                     || $0.hasItemConformingToTypeIdentifier(UTType.fileURL.identifier)
               }) else { return false }
         let revision = documentVersion
+        let size = insertionPageSize(at: index, in: document)
         Task { @MainActor [weak self] in
             if provider.hasItemConformingToTypeIdentifier(ThumbnailPageDrag.type.identifier) {
                 let data = await Self.dropData(provider, type: ThumbnailPageDrag.type)
@@ -204,16 +239,24 @@ extension AppState {
             // 等待期间若换文件或增删页面，原插入位置已失效，不再修改文档。
             if provider.hasItemConformingToTypeIdentifier(UTType.pdf.identifier) {
                 let data = await Self.dropData(provider, type: .pdf)
-                guard let self, self.documentVersion == revision,
+                guard let self, !self.isClosed, self.documentVersion == revision,
                       let data, let source = PDFDocument(data: data) else { return }
                 self.insertPages(from: source, at: index)
             } else {
                 let url: URL? = await withCheckedContinuation { continuation in
                     _ = provider.loadObject(ofClass: URL.self) { url, _ in continuation.resume(returning: url) }
                 }
-                guard let self, self.documentVersion == revision,
-                      let url, url.isFileURL, url.pathExtension.lowercased() == "pdf" else { return }
-                self.insertPDF(url: url, at: index)
+                guard self?.isClosed == false, self?.documentVersion == revision else { return }
+                if let url, url.isFileURL {
+                    self?.insertFile(url: url, at: index)
+                } else if let type = provider.registeredTypeIdentifiers.compactMap(UTType.init)
+                    .first(where: { $0.conforms(to: .image) }) {
+                    let data = await Self.dropData(provider, type: type)
+                    let pdf = await Task.detached(priority: .userInitiated) {
+                        data.flatMap { ImageDocumentManager.insertionPDF(from: $0, pageSize: size) }
+                    }.value
+                    self?.insertImagePDF(pdf, at: index, revision: revision)
+                }
             }
         }
         return true
@@ -227,12 +270,23 @@ extension AppState {
         }
     }
 
-    func promptInsertPDF(at index: Int) {
+    func promptInsertFile(at index: Int) {
+        guard !isClosed, pdfView.document != nil, NSApp.modalWindow == nil else { return }
+        if let panel = filePanel { panel.makeKeyAndOrderFront(nil); return }
+        guard hostingWindow?.attachedSheet == nil else { return }
         let panel = NSOpenPanel()
-        panel.allowedContentTypes = [.pdf]
-        panel.begin { [weak self] response in
-            if response == .OK, let url = panel.url { self?.insertPDF(url: url, at: index) }
+        panel.allowedContentTypes = [.pdf, .image]
+        filePanel = panel
+        let revision = documentVersion
+        let completion: (NSApplication.ModalResponse) -> Void = { [weak self] response in
+            self?.filePanel = nil
+            guard response == .OK, let self, !self.isClosed,
+                  self.documentVersion == revision, let url = panel.url else { return }
+            self.insertFile(url: url, at: index)
         }
+        if let window = hostingWindow, window.attachedSheet == nil {
+            panel.beginSheetModal(for: window, completionHandler: completion)
+        } else { panel.begin(completionHandler: completion) }
     }
     
     // [底层逻辑：多页面拖出导出功能]

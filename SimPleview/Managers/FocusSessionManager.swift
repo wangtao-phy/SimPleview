@@ -24,9 +24,13 @@ final class FocusSessionManager: NSObject, ObservableObject, NSPopoverDelegate {
     private var isSessionActive = true
     private var contextUpdateScheduled = false
     private var serviceStarted = false
+    private var featureObserver: AnyCancellable?
+    private let features: FeaturePreferences
+    private var serviceGeneration = 0
 
-    init(recorder: FocusCalendarRecorder = FocusCalendarRecorder()) {
+    init(recorder: FocusCalendarRecorder = FocusCalendarRecorder(), features: FeaturePreferences = .shared) {
         self.recorder = recorder
+        self.features = features
         super.init()
     }
 
@@ -52,6 +56,30 @@ final class FocusSessionManager: NSObject, ObservableObject, NSPopoverDelegate {
     }
 
     func startService() {
+        guard featureObserver == nil else { return }
+        if features.pomodoro { activateService() }
+        featureObserver = features.$pomodoro.dropFirst().removeDuplicates()
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] enabled in
+                if enabled { self?.activateService() } else { self?.deactivateService() }
+            }
+    }
+
+    private func deactivateService() {
+        guard serviceStarted else { return }
+        serviceStarted = false
+        serviceGeneration += 1
+        // 结算已经完成的阅读，取消未完成的专注。保存好的记录仍由 recorder 持有。
+        consume(clock.stop(at: .now))
+        clock = FocusSessionClock()
+        observers.removeAll()
+        timer?.invalidate(); timer = nil
+        popover?.performClose(nil)
+        if let item = statusItem { NSStatusBar.system.removeStatusItem(item); statusItem = nil }
+        remainingSeconds = 0; outcome = .idle; documentTitle = nil; isStarting = false
+    }
+
+    private func activateService() {
         guard !serviceStarted else { return }
         serviceStarted = true
         let center = NotificationCenter.default
@@ -84,14 +112,14 @@ final class FocusSessionManager: NSObject, ObservableObject, NSPopoverDelegate {
 
     /// 页面变化可以补齐初次挂接窗口时尚未出现的文档信息，与“阅读记录”开关无关。
     func updateReadingDocument(title: String) {
-        guard NSApp.isActive, isAwake, isSessionActive else { return }
+        guard serviceStarted, features.pomodoro, NSApp.isActive, isAwake, isSessionActive else { return }
         let now = FocusMoment.now
         consume(clock.update(active: true, document: title, at: now))
         updateDisplay(at: now)
     }
 
     private func scheduleContextUpdate() {
-        guard !contextUpdateScheduled else { return }
+        guard serviceStarted, !contextUpdateScheduled else { return }
         contextUpdateScheduled = true
         DispatchQueue.main.async { [weak self] in
             guard let self else { return }
@@ -101,6 +129,7 @@ final class FocusSessionManager: NSObject, ObservableObject, NSPopoverDelegate {
     }
 
     private func syncContext() {
+        guard serviceStarted, features.pomodoro else { return }
         let active = NSApp.isActive && isAwake && isSessionActive
         // 自己的计时弹出框不打断文档阅读；普通设置窗口等不计入阅读时长。
         let window = NSApp.keyWindow === popover?.contentViewController?.view.window ? popoverHostWindow : NSApp.keyWindow
@@ -117,19 +146,22 @@ final class FocusSessionManager: NSObject, ObservableObject, NSPopoverDelegate {
     }
 
     func start(minutes: Int) async {
-        guard !isRunning, !isStarting, (1...180).contains(minutes) else { return }
+        guard serviceStarted, features.pomodoro, !isRunning, !isStarting, (1...180).contains(minutes) else { return }
+        let generation = serviceGeneration
         isStarting = true
-        defer { isStarting = false }
+        defer { if serviceGeneration == generation { isStarting = false } }
         // 首次开始时请求系统日历权限；拒绝不丢弃专注结果，之后可从面板补写。
         if EKEventStore.authorizationStatus(for: .event) == .notDetermined {
             await recorder.flush(requestAccess: true)
         }
+        // 授权等待期间可能关闭再开启模块，旧的请求不能启动新的计时。
+        guard serviceGeneration == generation else { return }
         beginCountdown(minutes: minutes)
     }
 
     /// 权限流程与计时分开：系统授权弹窗的等待时间不占用本次专注。
     func beginCountdown(minutes: Int) {
-        guard !isRunning, (1...180).contains(minutes) else { return }
+        guard serviceStarted, features.pomodoro, !isRunning, (1...180).contains(minutes) else { return }
         syncContext()
         let now = FocusMoment.now
         consume(clock.start(minutes: minutes, document: documentTitle, at: now))
@@ -157,7 +189,7 @@ final class FocusSessionManager: NSObject, ObservableObject, NSPopoverDelegate {
     }
 
     private func flushRecords() async {
-        let request = NSApp.isActive && isAwake && isSessionActive && recorder.pendingCount > 0 &&
+        let request = serviceStarted && features.pomodoro && NSApp.isActive && isAwake && isSessionActive && recorder.pendingCount > 0 &&
             EKEventStore.authorizationStatus(for: .event) == .notDetermined
         await recorder.flush(requestAccess: request)
     }
@@ -188,8 +220,8 @@ final class FocusSessionManager: NSObject, ObservableObject, NSPopoverDelegate {
     }
 
     /// 工具栏与菜单栏共用一个瞬时弹出框；点击外部自动关闭，不改变倒计时。
-    func togglePopover(relativeTo anchor: NSView, documentTitle: String? = nil) {
-        guard anchor.window != nil else { return }
+    func togglePopover(relativeTo anchor: NSView, documentTitle: String? = nil, anchorRect: NSRect? = nil) {
+        guard serviceStarted, features.pomodoro, anchor.window != nil else { return }
         if let existing = popover {
             let sameAnchor = popoverAnchor === anchor
             existing.performClose(nil)
@@ -208,7 +240,19 @@ final class FocusSessionManager: NSObject, ObservableObject, NSPopoverDelegate {
         popover = popup
         popoverAnchor = anchor
         NSApp.activate()
-        popup.show(relativeTo: anchor.bounds, of: anchor, preferredEdge: .minY)
+        popup.show(relativeTo: anchorRect ?? anchor.bounds, of: anchor, preferredEdge: .minY)
+    }
+
+    /// 快捷键优先锚定工具栏按钮；用户移除了按钮时，使用当前窗口顶部的小锚点。
+    func toggleForCurrentWindow() {
+        guard let window = NSApp.keyWindow, let content = window.contentView else { return }
+        func findButton(in view: NSView) -> NSView? {
+            if view.identifier?.rawValue == "focusTimerButton" { return view }
+            return view.subviews.lazy.compactMap { findButton(in: $0) }.first
+        }
+        let button = window.toolbar?.items.lazy.compactMap { $0.view }.compactMap { findButton(in: $0) }.first
+        let rect = NSRect(x: content.bounds.midX, y: content.isFlipped ? 0 : content.bounds.maxY - 1, width: 1, height: 1)
+        togglePopover(relativeTo: button ?? content, anchorRect: button == nil ? rect : nil)
     }
 
     @objc private func showFromMenuBar() {

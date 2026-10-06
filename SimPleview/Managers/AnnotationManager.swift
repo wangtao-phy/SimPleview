@@ -239,7 +239,7 @@ final class AnnotationManager: ObservableObject {
             annot.userName = batchID // 借用 userName 存我们的内部 ID
             
             let border = PDFBorder()
-            border.lineWidth = UserDefaults.standard.value(forKey: "defaultLineWidth") as? CGFloat ?? 3.0
+            border.lineWidth = AnnotationDefaults.lineWidth()
             annot.border = border
             
             // 真正将批注写入该页面

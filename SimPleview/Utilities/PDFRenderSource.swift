@@ -14,16 +14,34 @@ final class PDFRenderSource {
     private weak var document: PDFDocument?
     private let data: Data
     private var originals: [ObjectIdentifier: Original] = [:]
+    private var originalPages: [Original] = []
 
     init(document: PDFDocument, data: Data) {
         self.document = document
         self.data = data
         guard !document.isEncrypted else { return }
         for index in 0..<document.pageCount {
-            guard let page = document.page(at: index), page.annotations.allSatisfy({ $0.type == "Link" && $0.border?.lineWidth == 0 }) else { continue }
-            originals[ObjectIdentifier(page)] = Original(page: page, index: index,
+            guard let page = document.page(at: index) else { continue }
+            let original = Original(page: page, index: index,
                 bounds: page.bounds(for: .cropBox), rotation: page.rotation)
+            originalPages.append(original)
+            if page.annotations.allSatisfy({ $0.type == "Link" && $0.border?.lineWidth == 0 }) {
+                originals[ObjectIdentifier(page)] = original
+            }
         }
+    }
+
+    /// PDFKit 搜索页面文字，不搜索标注内容。仅增删标注时可共用原始字节；
+    /// 页面身份、顺序、裁剪框或旋转改变时必须使用当前文档快照。
+    /// 弱引用不延长页面寿命，此校验由搜索管理器按编辑版本执行一次。
+    func searchData(for current: PDFDocument) -> Data? {
+        guard current === document, current.pageCount == originalPages.count else { return nil }
+        for original in originalPages {
+            guard let page = original.page, current.page(at: original.index) === page,
+                  page.rotation == original.rotation,
+                  page.bounds(for: .cropBox) == original.bounds else { return nil }
+        }
+        return data
     }
 
     func snapshot(for page: PDFPage) -> PDFPageRenderInput? {

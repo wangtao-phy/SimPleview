@@ -98,19 +98,3 @@ struct SearchMatch: Identifiable, Equatable {
 extension UTType {
     static var pdfPageIndex = UTType(exportedAs: "com.simpleview.pageindex")
 }
-
-/// [教程注释：聚焦状态焦点传递机制]
-/// 下面的代码是 SwiftUI 中高级的焦点值传递系统 (`FocusedValue`)。
-/// 作用：当 App 处于多窗口状态时，系统可以通过 `FocusedValues` 知道用户当前正在与哪个窗口 (UIState) 交互。
-/// 这样全局菜单栏（Menu Bar）的快捷键命令就能准确地下发给当前“拥有焦点”的那个窗口。
-struct FocusedUIStateKey: FocusedValueKey {
-    typealias Value = UIState
-}
-
-extension FocusedValues {
-    // 为环境变量 `@FocusedValue(\.uiState)` 注册便捷访问路径
-    var uiState: UIState? {
-        get { self[FocusedUIStateKey.self] }
-        set { self[FocusedUIStateKey.self] = newValue }
-    }
-}

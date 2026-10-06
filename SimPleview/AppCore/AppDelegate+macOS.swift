@@ -20,17 +20,20 @@ class WindowAccessorView: NSView {
 struct WindowAccessor: NSViewRepresentable {
     @Binding var window: NSWindow?
     @ObservedObject var state: AppState
+    @ObservedObject var uiState: UIState
     
     func makeNSView(context: Context) -> WindowAccessorView {
         let view = WindowAccessorView()
         // 斩断强引用循环：我们不捕获结构体 self，而是捕获轻量级的 Binding 和弱引用的 state
         let windowBinding = $window
-        view.onWindow = { [weak state] newWindow in
+        view.onWindow = { [weak state, weak uiState] newWindow in
             DispatchQueue.main.async {
                 windowBinding.wrappedValue = newWindow
                 state?.hostingWindow = newWindow
                 if let wc = newWindow?.windowController as? AppWindowController, let state = state {
                     wc.appState = state
+                    wc.uiState = uiState
+                    ReaderCommandRouter.shared.refreshMenus()
                 }
                 if newWindow?.isKeyWindow == true { state?.updateReadingTracking() }
                 
@@ -58,13 +61,20 @@ struct WindowAccessor: NSViewRepresentable {
 }
 
 class AppDelegate: NSObject, NSApplicationDelegate {
+    private static var openPanel: NSOpenPanel?
+    static var isOpeningDocument: Bool { openPanel != nil }
+    private var isTerminating = false
+    private var hasCompletedStartup = false
     
     // 新增：保持对新建窗口的强引用，防止闪退或自动销毁异常
     var newDocumentWindowController: NSWindowController?
     
     // App 完全启动后的回调
     func applicationDidFinishLaunching(_ notification: Notification) {
+        // SwiftUI App.init 时 NSApp 可能尚未创建，访问窗口的服务必须在此启动。
+        UpdateManager.shared.startMonitoring()
         FocusSessionManager.shared.startService()
+        ReaderCommandRouter.shared.start()
         // 标准 InkList 交给 PDFKit 渲染，避免全局交换系统方法影响导出与其他文档。
         
         NotificationCenter.default.addObserver(forName: NSNotification.Name("GlobalNewDocument"), object: nil, queue: .main) { _ in
@@ -77,8 +87,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         // 由于我们没有默认窗口，启动后如果发现没有任何可见的文档窗口，就自动弹出一个文件选择器（NSOpenPanel）。
         // 使用 DispatchQueue.main.async 确保是在下一个事件循环弹出，不阻塞系统绘制。
         DispatchQueue.main.async {
-            let hasDocumentWindows = NSApp.windows.contains { $0.titleVisibility == .hidden }
-            
+            // 系统可能先请求打开无标题文档；恢复判断完成之前不能先弹文件选择器。
+            defer { self.hasCompletedStartup = true }
             // [新特性：恢复上次强退或正常退出前打开的窗口组]
             if let savedData = UserDefaults.standard.data(forKey: "SavedWindowGroups"),
                let savedGroups = try? JSONDecoder().decode([SavedGroup].self, from: savedData) {
@@ -89,19 +99,17 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                         // 空分组
                         let emptyGroup = EmptyGroup(name: group.name)
                         WindowRegistry.shared.emptyGroups.append(emptyGroup)
-                        restoredAny = true
                     } else {
                         // 实体分组
                         var firstWindow: NSWindow? = nil
-                        for (index, path) in group.urls.enumerated() {
+                        for path in group.urls {
                             let url = URL(fileURLWithPath: path)
                             if FileManager.default.fileExists(atPath: path) {
-                                // 第一个文件独立打开（创建新分组），后续文件跟随打开（加入该分组）
-                                let isFirst = (index == 0)
-                                let window = NSApp.openSwiftUIWindow(for: url, independent: isFirst)
-                                if isFirst {
-                                    firstWindow = window
-                                }
+                                // 按实际成功打开的首个文件建组。原首文件丢失时，
+                                // 后续文件也不能被自动加入上一个恢复的分组。
+                                let window = NSApp.openSwiftUIWindow(for: url, independent: true)
+                                if let first = firstWindow { first.addTabbedWindow(window, ordered: .above) }
+                                else { firstWindow = window }
                                 restoredAny = true
                             }
                         }
@@ -120,8 +128,13 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 }
             }
             
+            // 到实际展示时再判断，Finder 打开文件可能已在这一轮恢复期间创建窗口。
+            // 空分组没有可操作的阅读窗口，不能因此阻止首次文件选择器出现。
+            let hasDocumentWindows = WindowRegistry.shared.controllers.contains {
+                $0 is AppWindowController && $0.window != nil
+            }
             if !hasDocumentWindows {
-                _ = self.applicationShouldOpenUntitledFile(NSApp)
+                Self.openDocumentDialog()
             }
         }
     }
@@ -129,28 +142,50 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     // 用户点击 Dock 栏图标（应用如果已经在后台运行）
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
         if !flag {
-            _ = applicationShouldOpenUntitledFile(sender)
+            if let window = WindowRegistry.shared.controllers.first(where: { $0 is AppWindowController })?.window {
+                if window.isMiniaturized { window.deminiaturize(nil) }
+                window.makeKeyAndOrderFront(nil)
+            } else {
+                _ = applicationShouldOpenUntitledFile(sender)
+            }
         }
         return true
     }
     
     // 拦截“打开无标题新文件”（Cmd+N）
     func applicationShouldOpenUntitledFile(_ sender: NSApplication) -> Bool {
-        DispatchQueue.main.async {
-            let panel = NSOpenPanel()
-            panel.allowedContentTypes = [UTType.pdf, UTType.image]
-            panel.allowsMultipleSelection = false
-            if panel.runModal() == .OK, let url = panel.url {
-                NSApp.openSwiftUIWindow(for: url)
-            }
-        }
+        // 回调也可能晚于恢复完成；已有阅读窗口时无需再选择文件。⌘O 使用独立入口。
+        guard hasCompletedStartup, !WindowRegistry.shared.controllers.contains(where: {
+            $0 is AppWindowController && $0.window != nil
+        }) else { return false }
+        Self.openDocumentDialog()
         return false // 返回 false 阻止系统自动生成一个傻乎乎的空白窗口
+    }
+
+    /// SwiftUI 会代理 NSApp.delegate，菜单不能通过向下转换寻找此对象。
+    /// 启动、Dock 与快捷键共用此入口；异步面板只保留一个，取消后释放。
+    static func openDocumentDialog() {
+        if let panel = openPanel {
+            panel.makeKeyAndOrderFront(nil)
+            return
+        }
+        guard NSApp.modalWindow == nil else { return }
+        let panel = NSOpenPanel()
+        panel.allowedContentTypes = [.pdf, .image]
+        panel.allowsMultipleSelection = false
+        openPanel = panel
+        panel.begin { response in
+            openPanel = nil
+            if response == .OK, let url = panel.url { NSApp.openSwiftUIWindow(for: url) }
+        }
     }
     
     // 打开“新建文档”弹窗
     func openNewDocumentDialog() {
+        guard NSApp.modalWindow == nil else { return }
         // 防止打开多个
-        if let wc = newDocumentWindowController, let window = wc.window, window.isVisible {
+        if let wc = newDocumentWindowController, let window = wc.window {
+            if window.isMiniaturized { window.deminiaturize(nil) }
             window.makeKeyAndOrderFront(nil)
             return
         }
@@ -169,6 +204,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         )
         
         window.title = SimPleview.L.s("New Blank Document", UserDefaults.standard.string(forKey: "appLanguage") == "en" ? .en : .zh)
+        window.tabbingMode = .disallowed
         window.contentViewController = hostingController
         window.setContentSize(NSSize(width: 480, height: 420)) // 强制锁定内容尺寸，防止被 NSHostingController 初始的 0x0 尺寸给拉瘪
         window.center() // 此时由于尺寸已被强制锁定为真实大小，这句系统级居中代码终于能完美生效了
@@ -188,6 +224,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     
     // 拦截通过 Finder 双击 PDF 文件启动的事件
     func application(_ application: NSApplication, open urls: [URL]) {
+        // Finder 的打开事件可晚于启动回调到达，不能留下一个多余的启动选择器。
+        if !urls.isEmpty { Self.openPanel?.cancel(nil) }
         for url in urls {
             NSApp.openSwiftUIWindow(for: url)
         }
@@ -195,6 +233,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     
     // 拦截 Cmd+Q (彻底退出程序) 的瞬间
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        // 不能在保存/打印确认尚未结束时嵌套第二次退出事务。
+        guard !isTerminating, NSApp.modalWindow == nil else { return .terminateCancel }
+        isTerminating = true
+        defer { isTerminating = false }
         NotificationCenter.default.post(name: Notification.Name("FlushAIConversations"), object: nil)
         guard ConversationManager.shared.flush() else {
             let alert = NSAlert()
@@ -206,7 +248,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         // 通知状态引擎结算阅读进度。
         AppState.isAppExiting = true
         // 清理由于打开 PDF 产生的临时缓存权限签标
-        UserDefaults.standard.removeObject(forKey: "OpenedPDFBookmarks")
         
         // [新特性：Cmd+Q 强制落盘所有未保存文档，并持久化记录当前打开的窗口组]
         var savedGroups: [SavedGroup] = []
@@ -225,7 +266,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             let winID = ObjectIdentifier(window)
             if processedWindowIDs.contains(winID) { continue }
             
-            let tabs = window.tabbedWindows ?? [window]
+            let tabs = WindowRegistry.shared.tabs(in: window)
             var urls: [String] = []
             
             for w in tabs {
@@ -246,9 +287,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             savedGroups.append(SavedGroup(name: emptyGroup.name, urls: []))
         }
         
-        if let data = try? JSONEncoder().encode(savedGroups) {
-            UserDefaults.standard.set(data, forKey: "SavedWindowGroups")
-        }
         // 这些数据此前是纯异步写入，terminateNow 会让尚未开始的任务直接丢失。
         let recordsSaved = ReadingTracker.shared.saveAllRecords(sync: true)
         let authorsSaved = GlobalAuthorManager.shared.saveAuthors(sync: true)
@@ -268,6 +306,11 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             alert.runModal()
             return .terminateCancel
         }
+        // 所有保存门槛通过后才提交退出元数据；取消退出保留现有权限与恢复信息。
+        UserDefaults.standard.removeObject(forKey: "OpenedPDFBookmarks")
+        if let data = try? JSONEncoder().encode(savedGroups) {
+            UserDefaults.standard.set(data, forKey: "SavedWindowGroups")
+        }
         return .terminateNow
     }
     
@@ -279,6 +322,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
 class AppWindowController: NSWindowController {
     var appState: AppState?
+    weak var uiState: UIState?
 }
 
 struct EmptyGroup: Identifiable, Codable {
@@ -299,14 +343,24 @@ class WindowRegistry: NSObject, NSWindowDelegate, ObservableObject {
     static let shared = WindowRegistry()
     @Published var controllers: [NSWindowController] = []
     @Published var emptyGroups: [EmptyGroup] = []
+    private var closingWindows = Set<ObjectIdentifier>()
     
     func add(_ controller: NSWindowController) {
         controllers.append(controller)
         controller.window?.delegate = self
     }
+
+    /// tabbedWindows 在标签栏隐藏时会返回 nil，不能用来判断是否只剩一页。
+    /// 关闭判断、管理面板与退出保存共用原生分组成员，不额外缓存窗口引用。
+    func tabs(in window: NSWindow) -> [NSWindow] {
+        window.tabGroup?.windows ?? [window]
+    }
     
     // [新特性：拦截窗口/标签页关闭，未保存提示]
     func windowShouldClose(_ sender: NSWindow) -> Bool {
+        let identity = ObjectIdentifier(sender)
+        guard sender.attachedSheet == nil, closingWindows.insert(identity).inserted else { return false }
+        defer { closingWindows.remove(identity) }
         if let wc = sender.windowController as? AppWindowController, let state = wc.appState {
             NotificationCenter.default.post(name: Notification.Name("FlushAIConversations"), object: state)
             guard ConversationManager.shared.flush() else {
@@ -333,15 +387,15 @@ class WindowRegistry: NSObject, NSWindowDelegate, ObservableObject {
                 }
             }
             
-            // 只有当这是分组里的最后一个标签页（即关闭它将彻底摧毁整个分组/窗口）时，才弹出“删除分组”警告。
-            // 如果有多个标签页，用户点击关闭，我们认为他只是在关闭单个标签页，直接放行即可。
-            // 只有 AppWindowController 才属于一个“分组”，对比窗口等独立窗口不属于分组
-            if (sender.tabbedWindows?.count ?? 1) == 1 {
+            // 保存弹窗可能运行嵌套事件循环；在最终关闭前读取实际成员。
+            // 关闭普通标签不删除组，禁用窗口管理时也不显示组删除确认。
+            if FeaturePreferences.shared.windowManagement, tabs(in: sender).count == 1 {
+                let language = UserDefaults.standard.string(forKey: "appLanguage").flatMap(AppLanguage.init(rawValue:)) ?? .zh
                 let groupAlert = NSAlert()
-                groupAlert.messageText = "确认要删除这个分组吗？"
-                groupAlert.informativeText = "关闭窗口将彻底移除该分组。"
-                groupAlert.addButton(withTitle: "确认删除")
-                groupAlert.addButton(withTitle: "取消")
+                groupAlert.messageText = L.s("Delete This Group?", language)
+                groupAlert.informativeText = L.s("Closing Window Removes Group", language)
+                groupAlert.addButton(withTitle: L.s("Delete", language))
+                groupAlert.addButton(withTitle: L.s("Cancel", language))
                 
                 let response = groupAlert.runModal()
                 return response == .alertFirstButtonReturn

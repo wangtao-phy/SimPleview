@@ -438,6 +438,7 @@ struct TodoSidebarView: View {
                 }
                 .buttonStyle(.borderedProminent)
                 .controlSize(.regular)
+                .disabled(isCalendar ? eventManager.isRequestingCalendarAccess : eventManager.isRequestingReminderAccess)
                 
                 // 2. 前往系统设置
                 Button(action: {

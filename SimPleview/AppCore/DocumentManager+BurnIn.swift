@@ -9,41 +9,74 @@ import AppKit
 
 extension DocumentManager {
     
-    /// 将所有标注“烧录”进新 PDF 并保存
-    /// 烧录意味着标注被绘制到了 PDF 页面图形上下文中，不再是独立的 Annotations
+    /// 导出副本，按用户默认值选择保留标注或烧录；普通保存不走此流程。
+    /// 烧录把标注绘制为页面内容，保留选项则继续使用标准可编辑矢量标注。
     func burnInAnnotations(pdfView: PDFView?) {
         #if os(macOS)
-        guard let document = pdfView?.document, let originalURL = self.fileURL else { return }
+        guard !isClosed, !isExporting, NSApp.modalWindow == nil,
+              let pdfView, let document = pdfView.document, let originalURL = self.fileURL else { return }
+        if let panel = exportPanel { panel.makeKeyAndOrderFront(nil); return }
+        guard pdfView.window?.attachedSheet == nil else { return }
         
         let panel = NSSavePanel()
         let originalName = originalURL.deletingPathExtension().lastPathComponent
-        panel.nameFieldStringValue = "\(originalName)_burned.pdf"
+        panel.nameFieldStringValue = "\(originalName)_export.pdf"
         panel.allowedContentTypes = [.pdf]
-        panel.prompt = "Burn & Save"
-        panel.message = "Choose location to save the flattened PDF"
+        let language = UserDefaults.standard.string(forKey: "appLanguage").flatMap(AppLanguage.init(rawValue:)) ?? .zh
+        panel.prompt = L.s("Save", language)
+        panel.message = L.s("PDF Export Help", language)
+        let flatten = NSButton(checkboxWithTitle: L.s("Flatten PDF Export", language), target: nil, action: nil)
+        flatten.state = (UserDefaults.standard.object(forKey: "flattenPDFExport") as? Bool ?? true) ? .on : .off
+        panel.accessoryView = flatten
+        exportPanel = panel
         
-        panel.begin { response in
+        let completion: (NSApplication.ModalResponse) -> Void = { [weak self, weak pdfView] response in
+            self?.exportPanel = nil
+            guard let self, !self.isClosed, self.fileURL == originalURL,
+                  pdfView?.document === document else { return }
             if response == .OK, let targetURL = panel.url {
-                self.performBurnIn(document: document, targetURL: targetURL)
+                self.performBurnIn(document: document, targetURL: targetURL, flatten: flatten.state == .on,
+                                   window: pdfView?.window)
             }
         }
+        if let window = pdfView.window { panel.beginSheetModal(for: window, completionHandler: completion) }
+        else { panel.begin(completionHandler: completion) }
         #endif
     }
     
-    private func performBurnIn(document: PDFDocument, targetURL: URL) {
+    private func performBurnIn(document: PDFDocument, targetURL: URL, flatten: Bool, window: NSWindow?) {
         // PDFKit 文档正被 PDFView 使用，不能把它直接交给 detached task。
         // 先在主线程取得快照，后台只操作自己的 PDFDocument 副本。
-        guard let documentData = StandardInk.exportData(of: document) else { return }
-        Task.detached(priority: .userInitiated) {
+        guard let documentData = StandardInk.exportData(of: document) else {
+            saveIssue = L.s("Unable to Prepare Export", UserDefaults.standard.string(forKey: "appLanguage").flatMap(AppLanguage.init(rawValue:)) ?? .zh)
+            return
+        }
+        isExporting = true
+        let sourceURL = fileURL
+        Task.detached(priority: .userInitiated) { [weak self, weak window] in
             let accessing = targetURL.startAccessingSecurityScopedResource()
             defer { if accessing { targetURL.stopAccessingSecurityScopedResource() } }
             do {
-                let data = try Self.burnInData(documentData)
+                let data = flatten ? try Self.burnInData(documentData) : documentData
                 // 原子写入失败保留已有目标文件，不把半成品当作导出成功。
                 try data.write(to: targetURL, options: .atomic)
-                await MainActor.run { NSWorkspace.shared.activateFileViewerSelecting([targetURL]) }
+                await MainActor.run {
+                    self?.isExporting = false
+                    // 大文件导出完成时用户可能已切到别处，不能突然拉起 Finder 抢焦点。
+                    if self?.isClosed == false, self?.fileURL == sourceURL,
+                       NSApp.isActive, window?.isKeyWindow == true {
+                        NSWorkspace.shared.activateFileViewerSelecting([targetURL])
+                    }
+                }
             } catch {
-                await MainActor.run { _ = NSAlert(error: error).runModal() }
+                Logger.view.error("PDF export failed: \(error.localizedDescription)")
+                await MainActor.run {
+                    self?.isExporting = false
+                    // 异步错误留在原窗口状态栏，不从后台叠加新的全应用模态窗口。
+                    if self?.isClosed == false, self?.fileURL == sourceURL {
+                        self?.saveIssue = error.localizedDescription
+                    }
+                }
             }
         }
     }

@@ -19,14 +19,7 @@ struct LeftSidebarView: View {
             // [顶部分段选择器]
             HStack(spacing: 8) {
                 #if os(macOS)
-                Button(action: { uiState.isShowingTabGroupsPopover.toggle() }) {
-                    Image(systemName: "square.grid.2x2")
-                        .foregroundColor(.primary)
-                }
-                .buttonStyle(SidebarIconButtonStyle())
-                .popover(isPresented: $uiState.isShowingTabGroupsPopover, arrowEdge: .bottom) {
-                    TabGroupsPopoverView()
-                }
+                WindowManagementButton(state: state, uiState: uiState)
                 #endif
                 
                 Picker("", selection: $uiState.leftSidebarTab) {
@@ -228,7 +221,7 @@ struct DropInsertLine: View {
                 .padding(.horizontal, 4)
         }
         // 文档内重排、跨窗口拖页和 Finder 的 PDF 文件共用插入位置。
-        .onDrop(of: [ThumbnailPageDrag.type, .pdf, .fileURL], isTargeted: $isOver) { providers in
+        .onDrop(of: [ThumbnailPageDrag.type, .pdf, .image, .fileURL], isTargeted: $isOver) { providers in
             state.acceptPageDrop(providers, at: index)
         }
     }
@@ -324,8 +317,8 @@ struct ThumbnailItem: View, Equatable {
             }
             Divider()
             #if os(macOS)
-            Button(state.L("Insert PDF Before...")) { state.promptInsertPDF(at: index) }
-            Button(state.L("Insert PDF After...")) { state.promptInsertPDF(at: index + 1) }
+            Button(state.L("Insert PDF or Image Before...")) { state.promptInsertFile(at: index) }
+            Button(state.L("Insert PDF or Image After...")) { state.promptInsertFile(at: index + 1) }
             Divider()
             #endif
             Button(state.selectedIndices.count > 1 && state.selectedIndices.contains(index) ? state.L("Delete Selected Pages") : state.L("Delete Page"), role: .destructive) { state.deletePage(at: index) }

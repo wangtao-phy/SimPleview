@@ -113,28 +113,33 @@ struct SignaturePopoverView: View {
     
     // [逻辑：触发原生文件选择器，并将文件拷贝进沙盒]
     private func importNewSignature() {
+        guard !state.isClosed, NSApp.modalWindow == nil else { return }
+        if let panel = state.filePanel { panel.makeKeyAndOrderFront(nil); return }
+        guard state.hostingWindow?.attachedSheet == nil else { return }
         let panel = NSOpenPanel()
         panel.allowedContentTypes = [.image, .png, .jpeg]
         panel.canChooseFiles = true
         panel.canChooseDirectories = false
         panel.allowsMultipleSelection = false
         
-        // [修复] Popover 本身层级较高，NSOpenPanel 默认层级较低容易被遮挡。
-        // 强制将文件选择器的窗口层级拉高到 popUpMenu 级别，并激活 App。
-        panel.level = .popUpMenu
-        NSApp.activate(ignoringOtherApps: true)
-        
-        panel.begin { response in
+        // 先收起悬浮窗，再展示所属文档的原生 sheet，不用提高窗口级别压住其它应用。
+        uiState.isShowingSignaturePopover = false
+        state.filePanel = panel
+        let completion: (NSApplication.ModalResponse) -> Void = { [weak state] response in
+            state?.filePanel = nil
+            guard let state, !state.isClosed else { return }
             if response == .OK, let url = panel.url {
                 do {
                     let _ = try state.importSignature(from: url)
-                    // 导入成功，刷新列表
-                    loadSignatures()
                 } catch {
+                    state.documentManager.saveIssue = error.localizedDescription
                     Logger.view.error("\(error.localizedDescription)")
                 }
             }
         }
+        if let window = state.hostingWindow, window.attachedSheet == nil {
+            panel.beginSheetModal(for: window, completionHandler: completion)
+        } else { panel.begin(completionHandler: completion) }
     }
     
     // [逻辑：从磁盘彻底删除某个签名]

@@ -25,8 +25,10 @@ struct ColorPickerMenu: View {
             Button(action: {
                 #if os(macOS)
                 // 仅在 macOS 支持高级系统调色板 (NSColorPanel)
-                ColorPanelManager.shared.show(initialColor: state.currentColor) { newColor in
-                    state.currentColor = newColor
+                // 系统颜色面板是共享单例；回调不能长期保留已经关闭的文档窗口。
+                ColorPanelManager.shared.show(initialColor: state.currentColor) { [weak document = state] newColor in
+                    guard let document, !document.isClosed else { return }
+                    document.currentColor = newColor
                 }
                 #endif
             }) {
@@ -84,40 +86,12 @@ struct DrawButtonView: View {
             VStack {
                 Text(state.L("Line Weight") + ": \(String(format: "%.1f", state.currentLineWidth))")
                     .font(.caption)
-                Slider(value: $state.currentLineWidth, in: 2...6, step: 0.5)
+                // 只修改新笔迹的默认宽度；已提交笔迹的几何和原生附件保持一致。
+                Slider(value: $state.currentLineWidth, in: CGFloat(AnnotationDefaults.lineWidthRange.lowerBound)...CGFloat(AnnotationDefaults.lineWidthRange.upperBound), step: 0.5)
                     .frame(width: 150)
             }
             .padding()
-            // 实时同步给选中的手绘标注
-            .onChange(of: state.currentLineWidth) { _, newValue in
-                if let annot = state.selectedAnnotation {
-                    let types: Set<String> = ["Ink"]
-                    if types.contains(annot.type ?? "") {
-                        let newBorder = annot.border?.copy() as? PDFBorder ?? PDFBorder()
-                        newBorder.lineWidth = newValue
-                        annot.border = newBorder
-                        
-                        // 顺带同步同一批次的笔画
-                        if let batchID = annot.userName, let doc = state.pdfView.document {
-                            if let basePage = annot.page {
-                                let baseIndex = doc.index(for: basePage)
-                                let start = max(0, baseIndex - 2)
-                                let end = min(doc.pageCount, baseIndex + 3)
-                                for i in start..<end {
-                                    if let page = doc.page(at: i) {
-                                        for a in page.annotations where a.userName == batchID && a != annot {
-                                            let batchBorder = a.border?.copy() as? PDFBorder ?? PDFBorder()
-                                            batchBorder.lineWidth = newValue
-                                            a.border = batchBorder
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                        state.pdfView.setPlatformNeedsDisplay()
-                    }
-                }
-            }
+
         }
     }
 }
@@ -130,18 +104,18 @@ struct AnnotationEditorView: View {
     
     var body: some View {
         VStack(spacing: 15) {
-            Text("调整标注").font(.headline).padding(.top)
+            Text(state.L("Annotation Editor")).font(.headline).padding(.top)
             
             // 颜色选择排排坐
             HStack(spacing: 20) {
-                ForEach([("蓝色", PlatformColor.platformBlue), ("红色", PlatformColor.platformRed), ("黄色", PlatformColor.platformYellow), ("绿色", PlatformColor.platformGreen), ("紫色", PlatformColor.platformPurple)], id: \.0) { name, color in
+                ForEach([("Blue", PlatformColor.platformBlue), ("Red", PlatformColor.platformRed), ("Yellow", PlatformColor.platformYellow), ("Green", PlatformColor.platformGreen), ("Purple", PlatformColor.platformPurple)], id: \.0) { name, color in
                     Button(action: {
                         if let annot = state.selectedAnnotation {
                             StandardInk.setColor(color, to: annot)
-                            // 极品细节：不仅改这条的颜色，还要用 syncBatchColor 找出同一个字的其他笔画一起改掉！
+                            // 同一批次的碎片同步改色。
                             state.pdfView.syncBatchColor(for: annot)
                             
-                            // [新增] 完美复刻 macOS 逻辑：修改批注颜色时，同步更新全局的画笔颜色！
+                            // 同步工具颜色与持久化回调。
                             state.currentColor = color
                             state.pdfView.onColorChanged?(color, annot.type ?? "")
                             
@@ -153,6 +127,7 @@ struct AnnotationEditorView: View {
                             // 加一层极淡的外阴影描边，否则白色的页面遇到淡黄色的圆点就看不清边缘了
                             .overlay(Circle().stroke(Color.primary.opacity(0.2), lineWidth: 1))
                     }
+                    .accessibilityLabel(state.L(name))
                 }
             }
             
@@ -163,7 +138,7 @@ struct AnnotationEditorView: View {
                 state.deleteSelectedAnnotation()
                 uiState.isShowingAnnotationEditor = false
             }) {
-                Label("删除标注", systemImage: "trash").frame(maxWidth: .infinity)
+                Label(state.L("Delete Annotation"), systemImage: "trash").frame(maxWidth: .infinity)
             }
             .buttonStyle(.bordered).padding(.horizontal)
         }
@@ -172,43 +147,26 @@ struct AnnotationEditorView: View {
     }
 }
 
-class ColorPanelManager: NSObject, NSWindowDelegate {
+class ColorPanelManager: NSObject {
     static let shared = ColorPanelManager()
     private var colorUpdateCallback: ((NSColor) -> Void)?
-    private var isObserving = false
     
     func show(initialColor: NSColor, onUpdate: @escaping (NSColor) -> Void) {
         self.colorUpdateCallback = onUpdate
         
         let panel = NSColorPanel.shared
+        // 系统颜色面板由各个 ColorPicker 共用；每次打开都重新指定目标，
+        // 防止设置页改色后，工具栏的颜色回调仍被交给另一个控件。
+        panel.setTarget(self)
+        panel.setAction(#selector(colorDidChange(_:)))
         panel.color = initialColor
         panel.showsAlpha = false
         panel.mode = .RGB
-        
-        if !isObserving {
-            panel.setTarget(self)
-            panel.setAction(#selector(colorDidChange(_:)))
-            isObserving = true
-        }
         
         panel.makeKeyAndOrderFront(nil)
     }
     
     @objc private func colorDidChange(_ sender: NSColorPanel) {
         colorUpdateCallback?(sender.color)
-    }
-}
-
-extension NSImage {
-    /// 动态绘制一个纯平面的实心圆点（无高光、无阴影、无模板化剥色）
-    static func flatColorDot(color: NSColor) -> NSImage {
-        let size = NSSize(width: 14, height: 14)
-        let image = NSImage(size: size)
-        image.lockFocus()
-        color.setFill()
-        NSBezierPath(ovalIn: NSRect(origin: NSPoint(x: 1, y: 1), size: NSSize(width: 12, height: 12))).fill()
-        image.unlockFocus()
-        image.isTemplate = false // 极度关键：禁止被 Menu 染成黑白单色！
-        return image
     }
 }

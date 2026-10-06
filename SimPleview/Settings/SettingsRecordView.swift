@@ -1,8 +1,6 @@
 import SwiftUI
 
-/// [教程注释：阅读记录与作者管理库的综合设置面板]
-/// 为什么阅读记录（Record）和作者库（Authors）会放在一起？
-/// 因为“阅读记录”的每一篇论文都需要“作者”署名，它们在底层数据结构上是高度耦合的。
+/// 阅读记录的存放位置和图表设置，作为阅读设置页的一组表单项。
 struct RecordSettingsView: View {
     // [AppStorage 数据源绑定]
     @AppStorage("appLanguage") var appLanguage: AppLanguage = .zh
@@ -13,84 +11,37 @@ struct RecordSettingsView: View {
     // [ObservedObject 内存管理绑定]
     // 追踪器和作者大总管
     @ObservedObject var tracker = ReadingTracker.shared
-    @ObservedObject var globalManager = GlobalAuthorManager.shared
     
-    let colors = ["Blue", "Red", "Yellow", "Green", "Purple"]
     
     private func LS(_ key: String) -> String {
         return SimPleview.L.s(key, appLanguage)
     }
-    
-    private func swiftColor(for name: String) -> Color {
-        if name.hasPrefix("#") {
-            return Color(nsColor: NSColor(hex: name) ?? .clear)
-        }
-        switch name {
-        case "Blue": return .blue
-        case "Red": return .red
-        case "Yellow": return .yellow
-        case "Green": return .green
-        case "Purple": return .purple
-        default: return .clear
-        }
-    }
-    
-    // [原生化] 适配系统原生 ColorPicker
-    private func colorBinding(for colorString: Binding<String>) -> Binding<Color> {
-        Binding<Color>(
-            get: { self.swiftColor(for: colorString.wrappedValue) },
-            set: { newColor in
-                colorString.wrappedValue = NSColor(newColor).hexString
-            }
-        )
-    }
+
+    // 与阅读图表使用相同的有限值检查，不能直接 Int(NaN/Infinity)。
+    private var segmentCount: Int { ValidatedLimits.count(heatmapSegments, fallback: 50, range: 10...100) }
     
     var body: some View {
-        ScrollView {
-            VStack(spacing: 20) {
-                // 上半部分：热力图相关的纯 UI 设定
-                Form {
-                    Section(LS("General Options")) {
-                        // [文件保存路径选择器]
-                        LabeledContent(LS("Save Location") + ":") {
-                            HStack {
-                                Text(tracker.saveDirectoryURL.path)
-                                    .lineLimit(1)
-                                    .truncationMode(.middle)
-                                    .foregroundColor(.secondary)
-                                
-                                Button(LS("Change...")) {
-                                    changeSaveDirectory()
-                                }
-                            }
-                        }
-                        
-                        // [热力图粒度调整器]
-                        LabeledContent(LS("Heatmap Granularity") + ":") {
-                            HStack {
-                                Slider(value: $heatmapSegments, in: 10...100, step: 10)
-                                Text("\(Int(heatmapSegments))")
-                                    .frame(width: 30, alignment: .trailing)
-                            }
-                        }
-                        
-                        // [图表颜色选择]
-                        ColorPicker(LS("Heatmap Color") + ":", selection: colorBinding(for: $heatmapColorTheme), supportsOpacity: false)
-                        ColorPicker(LS("Rating Chart Color") + ":", selection: colorBinding(for: $ratingChartColorTheme), supportsOpacity: false)
-                    }
+        Section(LS("Reading Record Settings")) {
+            LabeledContent(LS("Save Location")) {
+                HStack {
+                    Text(tracker.saveDirectoryURL.path)
+                        .lineLimit(1).truncationMode(.middle).foregroundStyle(.secondary)
+                    Button(LS("Change...")) { changeSaveDirectory() }
                 }
-                #if os(macOS)
-                .formStyle(.grouped)
-                #endif
-                .frame(maxWidth: 500)
-                .padding(.top, 60)
-                
             }
-            .padding(.vertical, 20)
-            .frame(maxWidth: .infinity, alignment: .center)
+            LabeledContent(LS("Heatmap Granularity")) {
+                HStack {
+                    Slider(value: Binding(get: { Double(segmentCount) }, set: { heatmapSegments = $0 }), in: 10...100, step: 10)
+                        .frame(maxWidth: 200)
+                        .accessibilityLabel(LS("Heatmap Granularity"))
+                    Text("\(segmentCount)").monospacedDigit().frame(width: 30, alignment: .trailing)
+                }
+            }
+            ColorPicker(LS("Heatmap Color"), selection: SettingsColorBinding.make($heatmapColorTheme), supportsOpacity: false)
+            ColorPicker(LS("Rating Chart Color"), selection: SettingsColorBinding.make($ratingChartColorTheme), supportsOpacity: false)
         }
     }
-    
+
     // [底层交互：修改阅读记录存放在硬盘里的哪一层文件夹]
     private func changeSaveDirectory() {
         let panel = NSOpenPanel()
@@ -102,7 +53,7 @@ struct RecordSettingsView: View {
         panel.prompt = LS("Select")
         
         if panel.runModal() == .OK, let url = panel.url {
-            // 如果选好了，告诉底层引擎切换写入目标。引擎会自动把老文件夹的东西搬去新文件夹。
+            // 先保存旧目录的记录，再切换目录；原记录不会自动搬迁。
             tracker.customDirectoryURL = url
         }
     }

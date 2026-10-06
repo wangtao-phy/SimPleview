@@ -66,6 +66,15 @@ extension AppState {
     // [教程注释：基于 Combine 的响应式编程流]
     func setupObservers() {
         let nc = NotificationCenter.default
+        FeaturePreferences.shared.$eyeCare
+            .removeDuplicates().receive(on: DispatchQueue.main)
+            .sink { [weak self] enabled in
+                guard let self else { return }
+                let color = enabled ? self.pageBackgroundColor : .default
+                if self.pdfView._threadSafePageBackgroundColor != color {
+                    self.pdfView._threadSafePageBackgroundColor = color
+                }
+            }.store(in: &cancellables)
         
         // 只监听本窗口。必须在读取 PDFView 或进入 MainActor 闭包之前切回主队列；
         // NotificationCenter 会在发布线程同步投递，不能假设 PDFKit 总在主线程发通知。
@@ -199,11 +208,12 @@ extension AppState {
                 guard let self = self else { return }
                 // 同步护眼色到所有窗口（@AppStorage 的 didSet 只在改色的当前窗口触发，跨窗口同步靠此观察器）
                 let bgRaw = UserDefaults.standard.integer(forKey: "pdfPageBackgroundColor")
-                let bgColor = PDFPageBackgroundColor(rawValue: bgRaw) ?? .default
+                let bgColor = FeaturePreferences.shared.eyeCare ? (PDFPageBackgroundColor(rawValue: bgRaw) ?? .default) : .default
                 if self.pdfView._threadSafePageBackgroundColor != bgColor {
                     self.pdfView._threadSafePageBackgroundColor = bgColor
-                    self.pdfView.setPlatformNeedsDisplay()
                 }
+                let width = AnnotationDefaults.lineWidth()
+                if self.currentLineWidth != width { self.currentLineWidth = width }
                 // 同步内存模式渲染策略
                 let policy = MemoryMode.current.policy
                 if self.pdfView.interpolationQuality != policy.interpolationQuality {

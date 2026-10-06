@@ -9,8 +9,6 @@ import AppKit
 /// 这是每个单独文档窗口的“大管家”，负责搭建左、中、右三个区域的整体骨架 (NavigationSplitView + Inspector)，
 /// 并挂载所有的快捷键、菜单事件和跨平台的界面状态协调。
 struct ContentView: View {
-    // 观察全局统一的快捷键派发中心
-    @ObservedObject var shortcutManager = ShortcutManager.shared
     
     // [核心概念：@StateObject]
     // 这是 SwiftUI 中极度重要的数据声明方式。
@@ -21,7 +19,7 @@ struct ContentView: View {
     // 同理，生成这个专属窗口自己的界面状态控制器。
     @StateObject var uiState = UIState()
     
-    @ObservedObject private var aiConfiguration = AIConfigurationStore.shared
+    @ObservedObject private var features = FeaturePreferences.shared
     
     // [教程注释：获取系统环境]
     // 监听当前是白天(Light)还是黑夜(Dark)模式，用于后续底层渲染适配。
@@ -56,10 +54,6 @@ struct ContentView: View {
         _state = StateObject(wrappedValue: state)
     }
     
-    private func executeIfActive(_ action: @escaping () -> Void) {
-        if hostingWindow?.isKeyWindow == true { action() }
-    }
-    
     // MARK: - Core Application View Structure
     
     var body: some View {
@@ -79,7 +73,6 @@ struct ContentView: View {
                     .modifier(MacToolbarModifier(
                         state: state,
                         uiState: uiState,
-                        shortcutManager: shortcutManager,
                         pageNumberInput: AnyView(pageNumberInput)
                     ))
                 
@@ -93,11 +86,6 @@ struct ContentView: View {
                 }
             }        }
         .environment(state.liveState)
-        // [核心概念：环境聚焦值传递]
-        // 让整个应用里所有的“专注事件” (如菜单栏快捷键) 都能顺利找到我！
-        .focusedSceneValue(\.appState, state)
-        .focusedSceneValue(\.uiState, uiState)
-        
         // 监听外部应用（如文件管家）调用的 "在 App 中打开此文件" 事件。
         .onChange(of: uiState.isSlideshowActive) { _, isActive in
             if isActive {
@@ -113,7 +101,7 @@ struct ContentView: View {
         // [高级黑科技：窗口状态桥接]
         // WindowAccessor 是一段我们自己封装的原生视图，它可以神不知鬼不觉地爬到树的顶端，
         // 把底层的 NSWindow 拿出来赋给我们的 hostingWindow 变量。
-        .background(WindowAccessor(window: $hostingWindow, state: state))
+        .background(WindowAccessor(window: $hostingWindow, state: state, uiState: uiState))
         // 响应底层脏数据状态，让 Mac 窗口标题栏自动出现代表“未保存更改”的黑色圆点
         .onReceive(state.documentManager.$isDirty) { isDirty in
             hostingWindow?.isDocumentEdited = isDirty
@@ -141,6 +129,9 @@ struct ContentView: View {
         }
         // 当用户在设置中改变了休眠时间：
         // 只有那些当前不在焦点（后台）的窗口，才需要用新时间重新启动一轮休眠倒计时。
+        .onChange(of: features.ai) { _, enabled in
+            if !enabled { uiState.isAIChatPresented = false }
+        }
         .onChange(of: hibernationTimeoutStr) { _, _ in
             if let window = hostingWindow, !window.isKeyWindow {
                 state.scheduleHibernation()
@@ -182,7 +173,7 @@ struct ContentView: View {
                         Text(state.L("Open File Description"))
                     } actions: {
                         Button(state.L("Open File")) {
-                            executeOpenFlow()
+                            AppDelegate.openDocumentDialog()
                         }
                         .buttonStyle(.borderedProminent)
                     }
@@ -213,7 +204,7 @@ struct ContentView: View {
                 }
             }
             .overlay(alignment: .bottom) {
-                if uiState.isAIChatPresented {
+                if features.ai && uiState.isAIChatPresented {
                     AIChatView(state: state, uiState: uiState)
                         .transition(.move(edge: .bottom))
                         .zIndex(2)
@@ -249,35 +240,7 @@ struct ContentView: View {
                     .font(.caption)
                     .help(state.documentManager.saveIssue ?? "点击将标注保存到原 PDF；iCloud 同步由系统完成。")
 
-                    // 右侧 AI 控制
-                    HStack(spacing: 12) {
-                        Picker("AI 模型", selection: Binding(get: { aiConfiguration.selectedModelID }, set: { aiConfiguration.select($0) })) {
-                            Text("请选择模型").tag(UUID?.none)
-                            ForEach(aiConfiguration.routes) { route in
-                                Text(route.label).tag(Optional(route.id))
-                            }
-                        }
-                        .frame(width: 300)
-                        .labelsHidden()
-
-                        Button(action: {
-                            withAnimation(.spring(response: 0.4, dampingFraction: 0.8)) {
-                                uiState.isAIChatPresented.toggle()
-                            }
-                        }) {
-                            Image(systemName: "sparkles")
-                                .font(.system(size: 12, weight: .bold))
-                                .foregroundColor(uiState.isAIChatPresented ? .white : .primary)
-                                .padding(.horizontal, 10)
-                                .padding(.vertical, 6)
-                                .background(uiState.isAIChatPresented ? Color.blue : Color(NSColor.controlBackgroundColor))
-                                .cornerRadius(6)
-                                .shadow(color: Color.black.opacity(0.1), radius: 2, x: 0, y: 1)
-                        }
-                        .buttonStyle(.plain)
-                        .keyboardShortcut(shortcutManager.toggleAIChat.keyEquivalent, modifiers: shortcutManager.toggleAIChat.modifiers)
-                    }
-                    .font(.caption)
+                    if features.ai { AIAssistantControls(uiState: uiState) }
                 }
                 .padding(.horizontal, 12)
                 .frame(height: 28)
@@ -300,29 +263,7 @@ struct ContentView: View {
             case .failure(_): break
             }
         }
-        .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("TriggerBurnIn"))) { _ in
-            if hostingWindow?.isKeyWindow == true {
-                state.documentManager.burnInAnnotations(pdfView: state.pdfView)
-            }
-        }
-        .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("GlobalUndo"))) { _ in executeIfActive { state.undo() } }
-        .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("GlobalRedo"))) { _ in executeIfActive { state.redo() } }
-        .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("GlobalSave"))) { _ in executeIfActive { state.save(immediate: true) } }
-        .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("GlobalHighlight"))) { _ in executeIfActive { state.activeType = .highlight } }
-        .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("GlobalUnderline"))) { _ in executeIfActive { state.activeType = .underline } }
-        .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("GlobalStrikeout"))) { _ in executeIfActive { state.activeType = .strikeout } }
-        .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("GlobalNone"))) { _ in executeIfActive { state.activeType = .none } }
-        .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("GlobalInk"))) { _ in executeIfActive { state.activeType = .ink } }
-        .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("GlobalCompareView"))) { _ in executeIfActive { state.openCompareWindow() } }
-        .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("GlobalPrint"))) { _ in
-            executeIfActive { state.printDocument() }
-        }
-        .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("GlobalPresentation"))) { _ in
-            executeIfActive {
-                uiState.isSlideshowActive.toggle()
-            }
-        }
-        .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("GlobalRevealInFinder"))) { _ in executeIfActive { state.revealInFinder() } }
+
     }
 
     // 翻页控件输入框独立拆分成一个组件视图，保持主代码的整洁
@@ -356,16 +297,6 @@ struct ContentView: View {
         .padding(.trailing, 4)
     }
 
-    /// 触发 macOS 底层的文件打开流
-    private func executeOpenFlow() {
-        let panel = NSOpenPanel()
-        panel.allowedContentTypes = [.pdf]
-        panel.begin { response in
-            if response == .OK, let url = panel.url {
-                state.loadPDF(url: url)
-            }
-        }
-    }
 }
 
 // [终极架构：隔离修饰器]
@@ -374,20 +305,12 @@ struct ContentView: View {
 struct MacToolbarModifier: ViewModifier {
     @ObservedObject var state: AppState
     @ObservedObject var uiState: UIState
-    @ObservedObject var shortcutManager: ShortcutManager
     let pageNumberInput: AnyView
     
-    @State private var quickLookURL: URL?
     
     func body(content: Content) -> some View {
         content
             .mainToolbar(state: state, uiState: uiState, pageNumberInput: pageNumberInput)
-            // [极其关键的修复] 将 ToolbarItem 中的快捷键提取到后台层，避免在 Customize Toolbar 面板中克隆带有 Shortcut 的按钮引发布局死循环崩溃
-            .background(
-                Button("") { state.openInBrowser() }
-                    .keyboardShortcut(shortcutManager.openInBrowser.keyEquivalent, modifiers: shortcutManager.openInBrowser.modifiers)
-                    .disabled(state.fileURL == nil)
-                    .opacity(0)
-            )
+
     }
 }

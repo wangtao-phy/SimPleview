@@ -94,6 +94,7 @@ final class AppState: NSObject, ObservableObject, PDFViewDelegate {
     // 当粗细改变时，通知到底层 PDFView，并更新偏好设置
     @Published var currentLineWidth: CGFloat = 3.0 {
         didSet {
+            guard currentLineWidth != oldValue else { return }
             UserDefaults.standard.set(currentLineWidth, forKey: "defaultLineWidth")
             pdfView._threadSafeLineWidth = currentLineWidth
         }
@@ -127,10 +128,13 @@ final class AppState: NSObject, ObservableObject, PDFViewDelegate {
     @AppStorage("appLanguage") var appLanguage: AppLanguage = .zh
     @AppStorage("pdfPageBackgroundColor") var pageBackgroundColor: PDFPageBackgroundColor = .default {
         didSet {
-            pdfView._threadSafePageBackgroundColor = pageBackgroundColor
-            pdfView.setPlatformNeedsDisplay()
+            pdfView._threadSafePageBackgroundColor = effectivePageBackgroundColor
         }
     }
+    var effectivePageBackgroundColor: PDFPageBackgroundColor {
+        FeaturePreferences.shared.eyeCare ? pageBackgroundColor : .default
+    }
+
     func L(_ key: String) -> String {
         return SimPleview.L.s(key, appLanguage)
     }
@@ -245,6 +249,7 @@ final class AppState: NSObject, ObservableObject, PDFViewDelegate {
     var loadGeneration: UInt = 0
     var editRevision: UInt = 0
     var isClosed = false
+    var filePanel: NSOpenPanel?
     var isResolvingReload = false
     
     // [核心概念：Combine 的垃圾桶]
@@ -277,10 +282,10 @@ final class AppState: NSObject, ObservableObject, PDFViewDelegate {
     
     // [生命周期：对象诞生]
     override init() {
-        let savedWidth = UserDefaults.standard.value(forKey: "defaultLineWidth") as? CGFloat ?? 3.0
+        let savedWidth = AnnotationDefaults.lineWidth()
         self.currentLineWidth = savedWidth
         super.init()
-        self.pdfView._threadSafePageBackgroundColor = self.pageBackgroundColor
+        self.pdfView._threadSafePageBackgroundColor = self.effectivePageBackgroundColor
         // 设置自己作为各个组件的事件代理人
         self.pdfView.manager = self.annotationManager
         pdfView.delegate = self
@@ -303,6 +308,8 @@ final class AppState: NSObject, ObservableObject, PDFViewDelegate {
     func cleanup() {
         guard !isClosed else { return }
         isClosed = true
+        filePanel?.cancel(nil)
+        filePanel = nil
         autosaveTask?.cancel()
         autosaveTask = nil
         loadGeneration &+= 1
@@ -314,7 +321,7 @@ final class AppState: NSObject, ObservableObject, PDFViewDelegate {
         
         // 保留一个不关联文档的新视图，断开 AppState 对旧视图树的引用。
         pdfView = CustomPDFView()
-        pdfView._threadSafePageBackgroundColor = self.pageBackgroundColor
+        pdfView._threadSafePageBackgroundColor = self.effectivePageBackgroundColor
         
         documentManager.closeAll()
         historyTimerTask?.cancel()
@@ -351,6 +358,8 @@ final class AppState: NSObject, ObservableObject, PDFViewDelegate {
         
         // 从全局花名册中把自己划掉
         AppState.removeInstance(self)
+        // 精读标签检查完成后，才允许回收已关闭文档的阅读记录。
+        readingTracker.trimRecordsCache()
         if let monitor = eventMonitor {
             #if os(macOS)
             NSEvent.removeMonitor(monitor)
@@ -402,7 +411,7 @@ final class AppState: NSObject, ObservableObject, PDFViewDelegate {
         // 直接绕过 SwiftUI，实例化一个纯净的 CustomPDFView（继承 PDFView），
         // 复用主窗口同款的护眼色渲染逻辑（draw(_:to:) 中的背景滤镜）
         let purePDFView = CustomPDFView()
-        purePDFView._threadSafePageBackgroundColor = self.pageBackgroundColor
+        purePDFView._threadSafePageBackgroundColor = self.effectivePageBackgroundColor
         purePDFView.preparePageBackground(for: currentDoc)
         purePDFView.document = currentDoc
         purePDFView.autoScales = true
@@ -419,6 +428,7 @@ final class AppState: NSObject, ObservableObject, PDFViewDelegate {
             defer: false
         )
         window.title = "\(self.L("Comparison")) - \(self.fileName)"
+        window.isReleasedWhenClosed = false
         window.tabbingMode = .disallowed // 强制独立窗口，禁止被 macOS 自动合并为标签页
         
         window.contentView = purePDFView
@@ -480,10 +490,9 @@ class CompareWindowController: NSWindowController {
     @objc private func backgroundChanged() {
         guard let pdfView = pdfView else { return }
         let raw = UserDefaults.standard.integer(forKey: "pdfPageBackgroundColor")
-        let color = PDFPageBackgroundColor(rawValue: raw) ?? .default
+        let color = FeaturePreferences.shared.eyeCare ? (PDFPageBackgroundColor(rawValue: raw) ?? .default) : .default
         if pdfView._threadSafePageBackgroundColor != color {
             pdfView._threadSafePageBackgroundColor = color
-            pdfView.setPlatformNeedsDisplay()
         }
     }
     
@@ -492,15 +501,3 @@ class CompareWindowController: NSWindowController {
     }
 }
 #endif
-
-// [教程注释：多窗口焦点绑定支持]
-struct AppStateKey: FocusedValueKey {
-    typealias Value = AppState
-}
-
-extension FocusedValues {
-    var appState: AppState? {
-        get { self[AppStateKey.self] }
-        set { self[AppStateKey.self] = newValue }
-    }
-}

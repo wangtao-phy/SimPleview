@@ -3,20 +3,18 @@ import SwiftUI
 import Combine
 import os
 
-/// [教程注释：零开销时间追踪器 (ReadingTracker)]
-/// 这是一个统计你看了一篇文献多久的神器。
-/// 最大的亮点：它是“事件驱动(Event-driven)”的！
-/// 一般新手做时间统计，会搞个 Timer 每一秒跑一次，非常耗电！
-/// 我们的做法是：当你进来的这一秒，记录一个时间戳；当你翻页离开的瞬间，再拿当前时间减去刚才的时间戳，不耗费任何闲置 CPU。
+/// 按窗口/翻页事件结算阅读时间，记录串行落盘；缓存仅回收可安全重读的记录。
 @MainActor
 class ReadingTracker: ObservableObject {
     
     // [内存层：数据源]
     /// 缓存了当前正在看的所有文档的记录。之所以放在内存里，是为了避免频繁去读取硬盘。
-    @Published var recordsCache: [String: DocumentRecord] = [:]
+    @Published private(set) var recordsCache: [String: DocumentRecord] = [:]
+    private var cacheOrder: [String] = []
+    private var pendingWrites: [String: Int] = [:]
     
     /// 脏标记(Dirty Flag)：用来记住哪些记录被人改过但还没存到硬盘上。
-    var dirtyRecords: Set<String> = []
+    private(set) var dirtyRecords: Set<String> = []
     @Published var lastError: String?
     private let writeFailures = OSAllocatedUnfairLock(initialState: [String: String]())
     
@@ -52,6 +50,7 @@ class ReadingTracker: ObservableObject {
             }
             createDirectoryIfNeeded()
             recordsCache.removeAll() // 清空缓存，准备从新房子里拉取数据
+            cacheOrder.removeAll()
             currentRecord = nil
             GlobalAuthorManager.shared.reload()
             
@@ -142,6 +141,8 @@ class ReadingTracker: ObservableObject {
     func updateRecord(_ record: DocumentRecord) {
         recordsCache[record.documentID] = record
         dirtyRecords.insert(record.documentID) // 盖上脏标记的戳
+        touchRecord(record.documentID)
+        trimRecordsCache()
     }
     
     func loadRecord(for title: String, displayTitle: String? = nil) -> DocumentRecord {
@@ -184,7 +185,35 @@ class ReadingTracker: ObservableObject {
             recordsCache[title] = recordToReturn
         }
         
+        touchRecord(title)
+        trimRecordsCache()
         return recordToReturn
+    }
+
+    private func touchRecord(_ id: String) {
+        cacheOrder.removeAll { $0 == id }
+        cacheOrder.append(id)
+    }
+
+    /// 按最近访问顺序保留 32 份记录。打开窗口、未保存、在途写入和失败记录
+    /// 都不能淘汰；多次写同一记录用计数保护，旧回调不能提前解除新写入的保护。
+    /// 多条淘汰合并为一次发布，避免每移除一项就刷新整个记录界面。
+    func trimRecordsCache(limit: Int = 32) {
+        cacheOrder.removeAll { recordsCache[$0] == nil }
+        guard recordsCache.count > limit else { return }
+        var protected = dirtyRecords.union(writeFailures.withLock { Set($0.keys) })
+        protected.formUnion(pendingWrites.keys)
+        protected.formUnion(AppState.allInstances.compactMap { item in
+            guard let state = item.value, !state.isClosed else { return nil }
+            return state.documentID
+        })
+        if let currentDocumentID { protected.insert(currentDocumentID) }
+        let removed = Set(cacheOrder.filter { !protected.contains($0) }.prefix(recordsCache.count - limit))
+        guard !removed.isEmpty else { return }
+        var cache = recordsCache
+        for id in removed { cache.removeValue(forKey: id) }
+        cacheOrder.removeAll { removed.contains($0) }
+        recordsCache = cache
     }
     
     // [最高权限覆盖] 当在全局设置修改作者后，立刻更新内存缓存，防止脏数据回流
@@ -192,6 +221,9 @@ class ReadingTracker: ObservableObject {
         var needsRefresh = false
         for (docID, var record) in recordsCache {
             for i in 0..<record.authors.count where record.authors[i].name.trimmingCharacters(in: .whitespacesAndNewlines) == name {
+                if record.authors[i].firstName != globalAuthor.firstName || record.authors[i].lastName != globalAuthor.lastName {
+                    dirtyRecords.insert(docID)
+                }
                 record.authors[i].firstName = globalAuthor.firstName
                 record.authors[i].lastName = globalAuthor.lastName
                 record.authors[i].bio = globalAuthor.bio
@@ -214,17 +246,27 @@ class ReadingTracker: ObservableObject {
         let target = saveDirectoryURL
         let failures = writeFailures
         if !snapshots.isEmpty {
+            let writingIDs = snapshots.map(\.documentID)
+            for id in writingIDs { pendingWrites[id, default: 0] += 1 }
             // 作者信息先在主执行器更新，退出时的 saveAuthors 才能包含本轮修改。
             GlobalAuthorManager.shared.upsert(snapshots.flatMap { record in
                 record.authors.map { (record.documentID, $0) }
             })
-            persistenceQueue.async {
+            persistenceQueue.async { [weak self] in
                 for record in snapshots {
                     do {
                         let name = record.documentID.replacingOccurrences(of: "/", with: "-")
                         try JSONEncoder().encode(record).write(to: target.appendingPathComponent(name + ".json"), options: .atomic)
                         _ = failures.withLock { $0.removeValue(forKey: record.documentID) }
                     } catch { failures.withLock { $0[record.documentID] = error.localizedDescription } }
+                }
+                Task { @MainActor [weak self] in
+                    guard let self else { return }
+                    for id in writingIDs {
+                        if let count = self.pendingWrites[id], count > 1 { self.pendingWrites[id] = count - 1 }
+                        else { self.pendingWrites.removeValue(forKey: id) }
+                    }
+                    self.trimRecordsCache()
                 }
             }
         }

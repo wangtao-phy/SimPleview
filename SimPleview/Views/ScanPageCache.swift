@@ -48,6 +48,8 @@ nonisolated struct ScanPage: @unchecked Sendable {
 /// 各窗口共用一个预备队列；缓存每窗口 48 MiB、单页 24 MiB，关闭/内存压力可取消。
 final class ScanPageCache {
     var source: PDFRenderSource?
+    /// 仅在主执行器、完整图像入缓存后通知。回调不得强持有阅读窗口。
+    var onImageReady: (@MainActor @Sendable (ScanPage) -> Void)?
     nonisolated private struct Key: Hashable, Sendable {
         let page: ObjectIdentifier
         let geometry: [CGFloat]
@@ -189,6 +191,7 @@ final class ScanPageCache {
                         state.entries[key] = Entry(source: scan, image: image, bytes: cost, access: state.clock)
                         state.bytes += cost
                     }
+                    self.onImageReady?(scan)
                 }
             }
         }

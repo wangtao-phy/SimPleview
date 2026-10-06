@@ -1,6 +1,7 @@
 import SwiftUI
 
 struct SettingsAIView: View {
+    @ObservedObject private var features = FeaturePreferences.shared
     @ObservedObject var shortcutManager = ShortcutManager.shared
     @ObservedObject private var configuration: AIConfigurationStore
     private let keyLoader: (String) throws -> String
@@ -103,7 +104,9 @@ struct SettingsAIView: View {
                             HStack {
                                 Text(LS("Toggle AI Assistant"))
                                 Spacer()
-                                ShortcutRecorderView(shortcut: $shortcutManager.toggleAIChat, onSave: {
+                                ShortcutRecorderView(shortcut: shortcutManager.binding(for: .toggleAIChat), validate: {
+                                    shortcutManager.validationMessage(for: $0, replacing: .toggleAIChat, language: appLanguage)
+                                }, onSave: {
                                     ShortcutManager.shared.saveToDefaults()
                                 }).frame(width: 100)
                             }
@@ -132,11 +135,23 @@ struct SettingsAIView: View {
         }
         .frame(minWidth: 600, idealWidth: 720, maxWidth: .infinity,
                minHeight: 500, idealHeight: 720, maxHeight: .infinity)
+        .disabled(!features.ai)
+        .opacity(features.ai ? 1 : 0.5)
+        .help(features.ai ? "" : LS("AI Disabled Help"))
         .onAppear {
+            guard features.ai else { return }
             selectedEndpoint = configuration.endpoints.first?.id
             if selectedEndpoint == nil { addCustomEndpoint() } else { loadEndpoint() }
         }
+        .onChange(of: features.ai) { _, enabled in
+            // 禁用时不读取钥匙串；重新启用只载入尚未初始化的表单，保留未保存草稿。
+            if enabled, draft.baseURL.isEmpty, draft.name.isEmpty {
+                selectedEndpoint = configuration.endpoints.first?.id
+                if selectedEndpoint == nil { addCustomEndpoint() } else { loadEndpoint() }
+            }
+        }
         .onChange(of: selectedEndpoint) { _, newValue in
+            guard features.ai else { return }
             if newValue == nil {
                 // 从菜单主动选择“新 API”时不能仍编辑旧接口，避免误覆盖。
                 // newEndpoint 已设置新草稿时则保持该草稿（含模板）。

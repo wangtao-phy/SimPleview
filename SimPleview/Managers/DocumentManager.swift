@@ -30,6 +30,9 @@ final class DocumentManager: ObservableObject {
     // [保存防抖]
     /// 用于防抖动 (Debounce) 的保存任务，避免频繁修改导致频繁磁盘 I/O，损坏 SSD 寿命
     private(set) var isSaving = false
+    @Published var isExporting = false
+    private(set) var isClosed = false
+    var exportPanel: NSSavePanel?
     
     /// 监听外部文件被其他应用修改的监听器
     var fileMonitor: FileMonitor? {
@@ -133,6 +136,9 @@ final class DocumentManager: ObservableObject {
     
     // 程序退出时的终极清理
     func closeAll() {
+        isClosed = true
+        exportPanel?.cancel(nil)
+        exportPanel = nil
         // 停止事件源；描述符由取消回调独立关闭，随后释放安全访问租约。
         fileMonitor?.stop()
         fileMonitor = nil
