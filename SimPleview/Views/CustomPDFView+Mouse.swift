@@ -250,43 +250,11 @@ extension CustomPDFView {
     }
 
     override func mouseMoved(with event: NSEvent) {
+        // 正常事件已由窗口监视器处理；仅在尚未挂接时回退，避免重复命中计算。
+        if linkEventMonitor == nil { updateLinkHover(at: convert(event.locationInWindow, from: nil)) }
         super.mouseMoved(with: event)
-        
-        let viewPoint = convert(event.locationInWindow, from: nil)
-        
-        guard let page = page(for: viewPoint, nearest: false) else {
-            handleMouseLeaveLink()
-            return
-        }
-        
-        let pagePoint = convert(viewPoint, to: page)
-        let annotation = internalLink(at: pagePoint, on: page)
-        
-        // Link type check
-        if let linkAnnot = annotation, (linkAnnot.type ?? "").lowercased() == "link" {
-            // Ignore external links (Web URLs)
-            let isExternal = linkAnnot.url != nil || (linkAnnot.action as? PDFActionURL) != nil
-            if isExternal {
-                handleMouseLeaveLink()
-                return
-            }
-            
-            // 同一链接内移动不重复创建任务；命中范围严格使用当前页面的链接区域。
-            guard currentHoveredLink !== linkAnnot ||
-                  (hoverTask == nil && hoverPopover?.isShown != true) else { return }
-            hoverTask?.cancel()
-            updateHoveredLink(linkAnnot)
-            hoverTask = Task { @MainActor [weak self] in
-                try? await Task.sleep(for: .milliseconds(500))
-                guard !Task.isCancelled, let self, self.currentHoveredLink === linkAnnot else { return }
-                self.hoverTask = nil
-                self.showLinkPreviewPopover(for: linkAnnot, in: self)
-            }
-        } else {
-            handleMouseLeaveLink()
-        }
     }
-    
+
     /// 先更新状态，再发布绘制快照。反过来会把旧阴影留到下一次页面刷新。
     /// 只使旧、新链接所在的小区域失效，不为悬停效果刷新整个阅读视图。
     func updateHoveredLink(_ annotation: PDFAnnotation?) {
@@ -323,7 +291,7 @@ extension CustomPDFView {
         }
     }
 
-    private func showLinkPreviewPopover(for linkAnnot: PDFAnnotation, in view: NSView) {
+    func showLinkPreviewPopover(for linkAnnot: PDFAnnotation, in view: NSView) {
         guard let page = linkAnnot.page, page.document === document, window != nil else { return }
         let previous = hoverPopover
         hoverPopover = nil

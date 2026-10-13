@@ -25,6 +25,7 @@ extension CustomPDFView {
     override func viewWillMove(toSuperview newSuperview: NSView?) {
         super.viewWillMove(toSuperview: newSuperview)
         if newSuperview == nil {
+            stopLinkTracking()
             scanCache.removeAll()
             cleanupMenuObservers()
             removeRenderObservers()
@@ -34,10 +35,11 @@ extension CustomPDFView {
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
         if window == nil {
-            resetLinkPreview()
+            stopLinkTracking()
             scanCache.removeAll()
             removeRenderObservers()
         } else {
+            startLinkTracking()
             publishRenderSnapshot()
             scheduleRenderSnapshot()
         }

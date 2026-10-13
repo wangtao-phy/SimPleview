@@ -111,6 +111,8 @@ class CustomPDFView: PDFView {
     
     // Link Hover Preview State
     var trackingArea: NSTrackingArea?
+    var linkEventMonitor: Any?
+    var linkTrackingObservers: [(center: NotificationCenter, token: NSObjectProtocol)] = []
     var hoverTask: Task<Void, Never>?
     var hoverPopover: NSPopover?
     var isHoveringLinkPreview = false
@@ -199,6 +201,9 @@ class CustomPDFView: PDFView {
     }
     
     isolated deinit {
+        if let linkEventMonitor { NSEvent.removeMonitor(linkEventMonitor) }
+        for observer in linkTrackingObservers { observer.center.removeObserver(observer.token) }
+        hoverTask?.cancel()
         for observer in renderObservers { NotificationCenter.default.removeObserver(observer) }
         if let obs = menuObserver {
             NotificationCenter.default.removeObserver(obs)
