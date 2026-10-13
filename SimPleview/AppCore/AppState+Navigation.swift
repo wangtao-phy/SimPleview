@@ -7,6 +7,23 @@ extension AppState {
     
     // MARK: - Navigation
 
+    /// 目录目标绑定具体页面实例。拒绝热重载前的节点，并保留章节在页内的准确坐标。
+    func goToOutline(_ outline: PDFOutline) {
+        guard let document = pdfView.document, let destination = outline.destination,
+              let page = destination.page, page.document === document else { return }
+        let index = document.index(for: page)
+        guard (0..<document.pageCount).contains(index) else { return }
+
+        suppressPageUpdates(for: .milliseconds(150))
+        navigationManager.recordHistoryAction(currentPageIndex: liveState.currentPageIndex)
+        navigationManager.currentPageIndex = index
+        if !selectedIndices.contains(index) { selectedIndices = [index] }
+        liveState.currentPageIndex = index
+        liveState.selectedOutline = outline
+        // 不再紧接着 goToPage：第二次跳页会覆盖目录目标的页内位置。
+        pdfView.go(to: destination)
+    }
+
     /// 快速连续跳转只保留最后一次解锁任务，旧回调不能提前解除新跳转的保护。
     func suppressPageUpdates(for duration: Duration) {
         navigationUnlockTask?.cancel()

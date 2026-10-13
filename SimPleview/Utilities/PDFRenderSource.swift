@@ -5,6 +5,9 @@ import PDFKit
 /// 只复用最初没有可见标注、且页面内容与几何未变的页面；编辑页仍取实时快照。
 /// 以弱页面身份定位原始页码，重排、插页后不能按当前页码读取旧文件。
 final class PDFRenderSource {
+    // 多窗口共用预算，不能让每份 PDF 都长期保留最多 64 MiB 的额外字节副本。
+    private static var retainedBytes = 0
+    private static let byteLimit = 128 * 1024 * 1024
     private struct Original {
         weak var page: PDFPage?
         let index: Int
@@ -16,9 +19,11 @@ final class PDFRenderSource {
     private var originals: [ObjectIdentifier: Original] = [:]
     private var originalPages: [Original] = []
 
-    init(document: PDFDocument, data: Data) {
+    init?(document: PDFDocument, data: Data) {
+        guard data.count <= Self.byteLimit - Self.retainedBytes else { return nil }
         self.document = document
         self.data = data
+        Self.retainedBytes += data.count
         guard !document.isEncrypted else { return }
         for index in 0..<document.pageCount {
             guard let page = document.page(at: index) else { continue }
@@ -30,6 +35,8 @@ final class PDFRenderSource {
             }
         }
     }
+
+    isolated deinit { Self.retainedBytes -= data.count }
 
     /// PDFKit 搜索页面文字，不搜索标注内容。仅增删标注时可共用原始字节；
     /// 页面身份、顺序、裁剪框或旋转改变时必须使用当前文档快照。

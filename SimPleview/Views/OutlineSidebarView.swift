@@ -1,5 +1,6 @@
 import SwiftUI
 import PDFKit
+import Combine
 
 /// [教程注释：PDF 目录树视图]
 /// 这是一个递归渲染的树状结构（Tree View），用于展示 PDF 自带的书签大纲 (Table of Contents)。
@@ -77,14 +78,7 @@ struct OutlineView: View {
                                 }
                             },
                             onSelect: {
-                                state.liveState.selectedOutline = item.outline
-                                if let dest = item.outline.destination {
-                                    state.pdfView.go(to: dest)
-                                    // [P0修复] 安全解包 dest.page，防止损坏的 PDF 目录导致崩溃
-                                    if let page = dest.page {
-                                        state.goToPage(state.pdfView.document?.index(for: page) ?? state.liveState.currentPageIndex)
-                                    }
-                                }
+                                state.goToOutline(item.outline)
                             }
                         )
                         .id(item.id)
@@ -103,6 +97,13 @@ struct OutlineView: View {
         }
         }
         .onAppear { rebuildVisibleItems() }
+        // 热重载保留 documentVersion，避免缩略图整栏闪白。目录单独监听文档替换，
+        // 丢弃旧节点及其折叠 ID；只在替换时重建，不在翻页或滚动时遍历目录。
+        .onReceive(NotificationCenter.default.publisher(for: .PDFViewDocumentChanged, object: state.pdfView)
+            .receive(on: DispatchQueue.main)) { _ in
+            collapsedNodes.removeAll()
+            rebuildVisibleItems()
+        }
         .onChange(of: state.documentVersion) { _, _ in rebuildVisibleItems() }
     }
 }

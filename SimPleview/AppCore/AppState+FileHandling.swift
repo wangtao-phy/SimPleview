@@ -103,7 +103,8 @@ extension AppState {
         let revision = editRevision
         loadTask?.cancel()
         loadTask = Task.detached(priority: .userInitiated) { [weak self] in
-            guard !Task.isCancelled else { return }
+            guard await PDFWorkLimiter.loading.acquire() else { return }
+            if Task.isCancelled { await PDFWorkLimiter.loading.release(); return }
             // 每个加载任务持有自己的安全访问租约。旧任务结束时只释放自己的
             // startAccessing，不能按 URL 相等去释放另一个同 URL 新任务的权限。
             let accessing = targetURL.startAccessingSecurityScopedResource()
@@ -126,6 +127,7 @@ extension AppState {
                 }
             }
             if let doc, doc.isEncrypted { doc.unlock(withPassword: "") }
+            // 直到主线程接收文档才释放名额，避免已解析的大文件在回写队列里堆积。
             await MainActor.run {
                 guard let self, !self.isClosed, !Task.isCancelled,
                       self.loadGeneration == generation else { return }
@@ -154,6 +156,7 @@ extension AppState {
                 _ = self.documentManager.handleDocumentAccess(url: targetURL)
                 self.setupDocument(doc, url: targetURL, isHotReloading: isHotReloading, renderData: renderData)
             }
+            await PDFWorkLimiter.loading.release()
         }
     }
 
@@ -162,10 +165,12 @@ extension AppState {
         let migratedInk = StandardInk.migrate(in: doc)
         // 必须先关掉原生手绘层，再交给 PDFView，避免先创建模糊位图缓存。
         StandardInk.prepareForScreen(in: doc)
-        let renderSource = doc.isEncrypted ? nil : renderData.map { PDFRenderSource(document: doc, data: $0) }
+        let renderSource = doc.isEncrypted ? nil : renderData.flatMap { PDFRenderSource(document: doc, data: $0) }
         self.pdfView.scanCache.source = renderSource
         self.fileURL = url
         self.pdfView.preparePageBackground(for: doc)
+        // 目录节点属于具体 PDFDocument，不能让旧选中项继续持有替换前的页面。
+        self.liveState.selectedOutline = nil
         self.pdfView.document = doc
         self.pdfView.setAnnotationsVisible(areAnnotationsVisible)
         
@@ -206,7 +211,10 @@ extension AppState {
         // 普通 Task 会继承 MainActor；detached + 独立 URL 文档才真正隔离解析。
         // 回写只短暂取得 self，关闭窗口不会被全文统计任务强引用保活。
         statisticsTask = Task.detached(priority: .utility) { [weak self] in
-            guard let statistics = DocumentStatistics.read(url: url), !Task.isCancelled else { return }
+            guard await PDFWorkLimiter.statistics.acquire() else { return }
+            let statistics = DocumentStatistics.read(url: url)
+            await PDFWorkLimiter.statistics.release()
+            guard let statistics, !Task.isCancelled else { return }
             await MainActor.run {
                 guard let self, !self.isClosed, !Task.isCancelled,
                       self.pdfView.document.map(ObjectIdentifier.init) == documentID else { return }
@@ -286,6 +294,8 @@ extension AppState {
             self.objectWillChange.send()
         }
         self.thumbnailManager.renderSource = renderSource
+        (hostingWindow?.windowController as? AppWindowController)?.applyPendingRestoration()
+        WindowRegistry.shared.scheduleSessionCheckpoint()
     }
     
     /// 只有当前活动窗口可以拥有全局秒表；后台加载/热重载只准备记录，不抢计时。

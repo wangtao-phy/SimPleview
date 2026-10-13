@@ -140,6 +140,10 @@ extension CustomPDFView {
     /// 由于 `PDFView.draw(_:to:)` 是 ObjC API，Swift 6 在 `DefaultActorIsolation=MainActor` 模式下
     /// 会隐式检查主线程，若不加 `nonisolated` 标记，将在真机上触发 `dispatch_assert_queue_fail` 致命崩溃。
     nonisolated override func draw(_ page: PDFPage, to context: CGContext) {
+        // 关闭/换文档后仍可能收到在途瓦片回调。PDFPage 不拥有其文档；
+        // 已脱离文档的页直接退出，其余页保留文档直到本次绘制结束。
+        guard let drawingDocument = page.document else { return }
+        defer { withExtendedLifetime(drawingDocument) {} }
         // PDFKit 从瓦片线程调用 ObjC 渲染钩子。super 的实现由 PDFKit 管理；
         // 自定义部分只读取一次锁保护快照，不访问主线程的数组、批注或路径。
         let selector = #selector(PDFView.draw(_:to:))

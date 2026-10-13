@@ -33,6 +33,8 @@ struct WindowAccessor: NSViewRepresentable {
                 if let wc = newWindow?.windowController as? AppWindowController, let state = state {
                     wc.appState = state
                     wc.uiState = uiState
+                    wc.applyPendingRestoration()
+                    wc.observeSessionState()
                     ReaderCommandRouter.shared.refreshMenus()
                 }
                 if newWindow?.isKeyWindow == true { state?.updateReadingTracking() }
@@ -88,10 +90,18 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         // 使用 DispatchQueue.main.async 确保是在下一个事件循环弹出，不阻塞系统绘制。
         DispatchQueue.main.async {
             // 系统可能先请求打开无标题文档；恢复判断完成之前不能先弹文件选择器。
-            defer { self.hasCompletedStartup = true }
+            let registry = WindowRegistry.shared
+            registry.isRestoringSession = true
+            defer {
+                registry.isRestoringSession = false
+                self.hasCompletedStartup = true
+                registry.checkpointSession()
+            }
             // [新特性：恢复上次强退或正常退出前打开的窗口组]
-            if let savedData = UserDefaults.standard.data(forKey: "SavedWindowGroups"),
-               let savedGroups = try? JSONDecoder().decode([SavedGroup].self, from: savedData) {
+            let legacy = UserDefaults.standard.data(forKey: "SavedWindowGroups")
+                .flatMap { try? JSONDecoder().decode([SavedGroup].self, from: $0) }
+            if let savedGroups = registry.sessionStore.load() ?? legacy {
+                var activeWindow: NSWindow?
                 var restoredAny = false
                 
                 for group in savedGroups {
@@ -102,15 +112,32 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                     } else {
                         // 实体分组
                         var firstWindow: NSWindow? = nil
-                        for path in group.urls {
+                        var selectedWindow: NSWindow?
+                        for (index, path) in group.urls.enumerated() {
                             let url = URL(fileURLWithPath: path)
                             if FileManager.default.fileExists(atPath: path) {
                                 // 按实际成功打开的首个文件建组。原首文件丢失时，
                                 // 后续文件也不能被自动加入上一个恢复的分组。
-                                let window = NSApp.openSwiftUIWindow(for: url, independent: true)
-                                if let first = firstWindow { first.addTabbedWindow(window, ordered: .above) }
+                                let saved = group.states.flatMap { index < $0.count ? $0[index] : nil }
+                                let window = NSApp.openSwiftUIWindow(for: url, independent: true, restoration: saved)
+                                // 接在末尾；反复接在首标签后会把保存的标签顺序倒置。
+                                if let first = firstWindow {
+                                    (first.tabGroup?.windows.last ?? first).addTabbedWindow(window, ordered: .above)
+                                }
                                 else { firstWindow = window }
+                                if index == group.selectedIndex {
+                                    selectedWindow = window
+                                }
                                 restoredAny = true
+                            }
+                        }
+                        if let selectedWindow { firstWindow?.tabGroup?.selectedWindow = selectedWindow }
+                        if group.isKeyGroup == true { activeWindow = selectedWindow ?? firstWindow }
+                        if let first = firstWindow, let text = group.frame {
+                            let frame = NSRectFromString(text)
+                            if [frame.minX, frame.minY, frame.width, frame.height].allSatisfy(\.isFinite),
+                               frame.width >= first.minSize.width, frame.height >= first.minSize.height {
+                                first.setFrame(first.constrainFrameRect(frame, to: first.screen), display: false)
                             }
                         }
                         // 恢复自定义分组名称
@@ -121,8 +148,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                     }
                 }
                 
-                // 恢复完毕后清空，避免干扰下次正常打开
-                UserDefaults.standard.removeObject(forKey: "SavedWindowGroups")
+                // 不能清空恢复记录；恢复过程中再次崩溃仍需要上一份完整会话。
+                activeWindow?.makeKeyAndOrderFront(nil)
                 if restoredAny {
                     return // 成功恢复了老窗口，不再弹出空文件选择器
                 }
@@ -250,43 +277,14 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         // 清理由于打开 PDF 产生的临时缓存权限签标
         
         // [新特性：Cmd+Q 强制落盘所有未保存文档，并持久化记录当前打开的窗口组]
-        var savedGroups: [SavedGroup] = []
-        var processedWindowIDs = Set<ObjectIdentifier>()
-        let appWindows = WindowRegistry.shared.controllers.compactMap { $0.window }
-        
-        for window in appWindows {
-            // 首先保存脏数据
-            if let wc = window.windowController as? AppWindowController, let state = wc.appState, state.hasUnsavedChanges {
-                guard state.save(sync: true) else {
-                    AppState.isAppExiting = false
-                    return .terminateCancel
-                }
-            }
-            
-            let winID = ObjectIdentifier(window)
-            if processedWindowIDs.contains(winID) { continue }
-            
-            let tabs = WindowRegistry.shared.tabs(in: window)
-            var urls: [String] = []
-            
-            for w in tabs {
-                processedWindowIDs.insert(ObjectIdentifier(w))
-                if let wc = w.windowController as? AppWindowController, let url = wc.appState?.fileURL {
-                    urls.append(url.path)
-                }
-            }
-            
-            if !urls.isEmpty {
-                let savedName = UserDefaults.standard.string(forKey: "CustomGroupName_\(tabs.first!.windowNumber)") ?? "未命名分组"
-                savedGroups.append(SavedGroup(name: savedName, urls: urls))
+        for controller in WindowRegistry.shared.controllers {
+            if let reader = controller as? AppWindowController,
+               let state = reader.appState, state.hasUnsavedChanges, !state.save(sync: true) {
+                AppState.isAppExiting = false
+                return .terminateCancel
             }
         }
-        
-        // 把空分组也存进去
-        for emptyGroup in WindowRegistry.shared.emptyGroups {
-            savedGroups.append(SavedGroup(name: emptyGroup.name, urls: []))
-        }
-        
+
         // 这些数据此前是纯异步写入，terminateNow 会让尚未开始的任务直接丢失。
         let recordsSaved = ReadingTracker.shared.saveAllRecords(sync: true)
         let authorsSaved = GlobalAuthorManager.shared.saveAuthors(sync: true)
@@ -308,9 +306,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         }
         // 所有保存门槛通过后才提交退出元数据；取消退出保留现有权限与恢复信息。
         UserDefaults.standard.removeObject(forKey: "OpenedPDFBookmarks")
-        if let data = try? JSONEncoder().encode(savedGroups) {
-            UserDefaults.standard.set(data, forKey: "SavedWindowGroups")
-        }
+        WindowRegistry.shared.checkpointSession(synchronously: true)
         return .terminateNow
     }
     
@@ -323,6 +319,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 class AppWindowController: NSWindowController {
     var appState: AppState?
     weak var uiState: UIState?
+    var documentURL: URL?
+    var restoration: SavedReaderState?
+    var sessionObservers = Set<AnyCancellable>()
 }
 
 struct EmptyGroup: Identifiable, Codable {
@@ -333,6 +332,11 @@ struct EmptyGroup: Identifiable, Codable {
 struct SavedGroup: Codable {
     let name: String
     let urls: [String]
+    // 可选字段兼容旧版仅保存路径的记录。
+    var states: [SavedReaderState]?
+    var frame: String?
+    var selectedIndex: Int?
+    var isKeyGroup: Bool?
 }
 
 /// [教程注释：自定义窗口池管理者]
@@ -342,13 +346,24 @@ struct SavedGroup: Codable {
 class WindowRegistry: NSObject, NSWindowDelegate, ObservableObject {
     static let shared = WindowRegistry()
     @Published var controllers: [NSWindowController] = []
-    @Published var emptyGroups: [EmptyGroup] = []
+    @Published var emptyGroups: [EmptyGroup] = [] {
+        didSet { scheduleSessionCheckpoint() }
+    }
+    let sessionStore = WindowSessionStore()
+    // Finder 可能先于启动回调创建窗口；恢复完成前不能覆盖上次会话。
+    var isRestoringSession = true
+    var sessionCheckpoint: DispatchWorkItem?
     private var closingWindows = Set<ObjectIdentifier>()
     
     func add(_ controller: NSWindowController) {
         controllers.append(controller)
         controller.window?.delegate = self
+        checkpointSession()
     }
+
+    func windowDidBecomeKey(_ notification: Notification) { scheduleSessionCheckpoint() }
+    func windowDidMove(_ notification: Notification) { scheduleSessionCheckpoint() }
+    func windowDidResize(_ notification: Notification) { scheduleSessionCheckpoint() }
 
     /// tabbedWindows 在标签栏隐藏时会返回 nil，不能用来判断是否只剩一页。
     /// 关闭判断、管理面板与退出保存共用原生分组成员，不额外缓存窗口引用。
@@ -424,6 +439,7 @@ class WindowRegistry: NSObject, NSWindowDelegate, ObservableObject {
             DispatchQueue.main.async {
                 // 确保无论是匹配上的，还是因为某种原因 window 已经变 nil 的游离 Controller，全部删掉！
                 self.controllers.removeAll { $0.window === window || $0.window == nil }
+                self.checkpointSession()
                 // 清空根视图引用，释放界面持有的文档及图像。
                 window.contentViewController = nil
                 
@@ -436,7 +452,8 @@ class WindowRegistry: NSObject, NSWindowDelegate, ObservableObject {
 /// [教程注释：手动把 SwiftUI 的 View 包裹进 macOS 原生窗口]
 extension NSApplication {
     @discardableResult
-    func openSwiftUIWindow(for url: URL, independent: Bool = false) -> NSWindow {
+    func openSwiftUIWindow(for url: URL, independent: Bool = false,
+                           restoration: SavedReaderState? = nil) -> NSWindow {
         let contentView = ContentView(url: url)
         
         let hostingController = NSHostingController(rootView: contentView)
@@ -447,7 +464,8 @@ extension NSApplication {
             defer: false
         )
         
-        window.isReleasedWhenClosed = true
+        // NSWindowController 与 registry 负责 ARC 寿命，不能再让 AppKit 手动释放窗口。
+        window.isReleasedWhenClosed = false
         
         window.titleVisibility = .visible
         window.titlebarAppearsTransparent = true
@@ -474,6 +492,8 @@ extension NSApplication {
         }
         
         let windowController = AppWindowController(window: window)
+        windowController.documentURL = url // SwiftUI/文档尚未加载也必须能保存这条路径。
+        windowController.restoration = restoration
         WindowRegistry.shared.add(windowController)
         
         windowController.showWindow(nil)

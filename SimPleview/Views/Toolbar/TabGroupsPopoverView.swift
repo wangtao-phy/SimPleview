@@ -149,6 +149,7 @@ struct WindowGroupSection: View {
                 if isEditingName {
                     TextField("输入分组名称...", text: $customGroupName, onCommit: {
                         UserDefaults.standard.set(customGroupName, forKey: groupKey)
+                        WindowRegistry.shared.scheduleSessionCheckpoint()
                         isEditingName = false
                     })
                     .textFieldStyle(RoundedBorderTextFieldStyle())
@@ -220,6 +221,7 @@ struct WindowGroupSection: View {
             if WindowRegistry.shared.tabs(in: targetWindow).contains(draggedWindow) { return }
             targetWindow.addTabbedWindow(draggedWindow, ordered: .above)
             WindowRegistry.shared.objectWillChange.send()
+            WindowRegistry.shared.scheduleSessionCheckpoint()
         }
     }
     
@@ -244,6 +246,7 @@ struct WindowGroupSection: View {
                 targetWindow.addTabbedWindow(w, ordered: .above)
             }
             WindowRegistry.shared.objectWillChange.send()
+            WindowRegistry.shared.scheduleSessionCheckpoint()
         }
     }
 }
@@ -311,6 +314,7 @@ struct TabItemView: View {
             if WindowRegistry.shared.tabs(in: targetWindow).contains(draggedWindow) { return }
             targetWindow.addTabbedWindow(draggedWindow, ordered: .above)
             WindowRegistry.shared.objectWillChange.send()
+            WindowRegistry.shared.scheduleSessionCheckpoint()
         }
     }
 }
@@ -411,6 +415,7 @@ struct EmptyGroupSection: View {
                     
                     DragDropManager.shared.draggingWindow = nil
                     WindowRegistry.shared.objectWillChange.send()
+                    WindowRegistry.shared.scheduleSessionCheckpoint()
                     onRemove()
                     return true
                 }

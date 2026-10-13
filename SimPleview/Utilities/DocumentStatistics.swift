@@ -8,6 +8,7 @@ nonisolated struct DocumentStatistics: Sendable {
     /// 本方法只在独立工作任务中调用，自己打开自己的 PDFDocument；不会把
     /// AppState 或正在显示的 PDFPage 保留到后台。逐页释放临时文本/解析对象。
     static func read(url: URL) -> Self? {
+        guard !Task.isCancelled else { return nil }
         let accessing = url.startAccessingSecurityScopedResource()
         defer { if accessing { url.stopAccessingSecurityScopedResource() } }
         guard let document = PDFDocument(url: url) else { return nil }
