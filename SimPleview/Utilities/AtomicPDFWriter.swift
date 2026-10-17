@@ -8,7 +8,7 @@ import PDFKit
 enum AtomicPDFWriter {
     /// 自动保存必须确认磁盘仍是本窗口读取/上次保存的版本，避免静默覆盖
     /// iCloud 或另一窗口刚同步来的文件。比较在文件协调区内、替换之前完成。
-    struct FileVersion: Equatable {
+    nonisolated struct FileVersion: Equatable, Sendable {
         let modified: Date
         let size: UInt64
         let inode: UInt64
@@ -23,7 +23,8 @@ enum AtomicPDFWriter {
         }
     }
 
-    static func write(_ document: PDFDocument, to destination: URL, expectedVersion: FileVersion? = nil) throws {
+    @discardableResult
+    static func write(_ document: PDFDocument, to destination: URL, expectedVersion: FileVersion? = nil) throws -> FileVersion {
         let temporary = destination.deletingLastPathComponent()
             .appendingPathComponent(".SimPleview-\(UUID().uuidString).pdf")
         let visibleCopy = destination.deletingLastPathComponent()
@@ -47,6 +48,7 @@ enum AtomicPDFWriter {
         }
         var coordinationError: NSError?
         var writeError: Error?
+        var writtenVersion: FileVersion?
         NSFileCoordinator().coordinate(writingItemAt: destination, options: .forReplacing,
                                         error: &coordinationError) { target in
             do {
@@ -59,9 +61,13 @@ enum AtomicPDFWriter {
                 } else {
                     try FileManager.default.moveItem(at: candidate, to: target)
                 }
+                // 必须仍在协调区内取版本，不能把其他进程稍后写入的文件当成自己的保存结果。
+                writtenVersion = try FileVersion(url: target)
             } catch { writeError = error }
         }
         if let error = coordinationError ?? writeError as NSError? { throw error }
+        guard let writtenVersion else { throw CocoaError(.fileWriteUnknown) }
+        return writtenVersion
     }
 
     /// 验证的不只是页数。标注数量/类型及本应用的分块矢量数据必须经过

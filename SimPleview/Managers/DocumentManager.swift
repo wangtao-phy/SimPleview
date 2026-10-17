@@ -13,7 +13,7 @@ final class DocumentManager: ObservableObject {
     /// 当前打开的 PDF 文件的本地 URL
     @Published var fileURL: URL? {
         didSet {
-            savedFileVersion = fileURL.flatMap { try? AtomicPDFWriter.FileVersion(url: $0) }
+            savedFileVersion = nil
             saveIssue = nil
         }
     }
@@ -42,6 +42,13 @@ final class DocumentManager: ObservableObject {
         }
     }
     
+    /// 内容与版本必须来自同一次协调读取。不能在主队列收到旧内容时，
+    /// 再把磁盘上已更新的版本登记为已读，否则下一次自动保存可能覆盖外部修改。
+    func didLoadFile(at url: URL, version: AtomicPDFWriter.FileVersion?) {
+        fileURL = url
+        savedFileVersion = version
+    }
+
     // MARK: - Bookmark Management (书签权限管理)
     // 苹果系统有极其严格的沙盒机制。用户选择了一个文件授权给你，重启 App 之后，这个 URL 就作废了！
     // 所以我们需要把那个 URL 的底层权限打包成“书签 (Bookmark Data)”，存进系统偏好设置。下次通过书签还原出带权限的 URL。
@@ -82,7 +89,6 @@ final class DocumentManager: ObservableObject {
         defer {
             if accessing { url.stopAccessingSecurityScopedResource() }
             isSaving = false
-            monitor?.updateLastKnownModDate()
             // 只操作本次保存对应的监视器，不影响随后打开的新文档。
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) { [weak monitor] in
                 monitor?.isSelfSaving = false
@@ -91,10 +97,12 @@ final class DocumentManager: ObservableObject {
         do {
             if isImage {
                 guard try ImageDocumentManager.promptSaveAs(pdfDocument: document, originalURL: url) != nil else { return false }
+                savedFileVersion = try? AtomicPDFWriter.FileVersion(url: url)
             } else {
-                try AtomicPDFWriter.write(document, to: url, expectedVersion: automatically ? savedFileVersion : nil)
+                savedFileVersion = try AtomicPDFWriter.write(document, to: url, expectedVersion: automatically ? savedFileVersion : nil)
             }
-            savedFileVersion = try? AtomicPDFWriter.FileVersion(url: url)
+            // 只有成功写入的确切版本才可确认；失败时保留待处理的外部文件事件。
+            if let savedFileVersion { monitor?.acknowledge(savedFileVersion) }
             saveIssue = nil
             isDirty = false
             return true

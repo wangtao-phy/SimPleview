@@ -85,17 +85,14 @@ extension AppState {
                 guard let doc = self?.pdfView.document, page.document === doc else { return nil }
                 return doc.index(for: page)
             }
-            .removeDuplicates() // 如果页码没变就不要重复触发后面的逻辑
             .sink { [weak self] index in
-                // 收到新页码后的处理
-                DispatchQueue.main.async {
-                    // 【稳健性优化】如果正在程序跳转导航中，不要接收系统的页码事件，防止动画回跳导致状态冲突！
-                    guard let self = self, !self.isNavigating else { return }
-                    if self.liveState.currentPageIndex != index {
-                        self.liveState.currentPageIndex = index
-                        
-                        self.updateReadingTracking()
-                    }
+                // 已在主队列，直接提交；再次排队会让旧页码越过文档替换。
+                // 去重应在跳转保护之后按当前状态判断，不能记住被保护期丢弃的事件。
+                guard let self, !self.isClosed, !self.isNavigating,
+                      let document = self.pdfView.document, (0..<document.pageCount).contains(index) else { return }
+                if self.liveState.currentPageIndex != index {
+                    self.liveState.currentPageIndex = index
+                    self.updateReadingTracking()
                 }
             }
             .store(in: &cancellables)
@@ -173,16 +170,20 @@ extension AppState {
             .store(in: &cancellables)
             
         // 保存由 applicationShouldTerminate 统一完成，可取消的阶段才能处理失败。
-        nc.publisher(for: NSWindow.willEnterFullScreenNotification)
-            .sink { [weak self] _ in self?.pdfView.autoScales = false }
-            .store(in: &cancellables)
-        nc.publisher(for: NSWindow.didEnterFullScreenNotification)
-            .sink { [weak self] _ in self?.pdfView.autoScales = true }
-            .store(in: &cancellables)
-        nc.publisher(for: NSWindow.didExitFullScreenNotification)
-            .sink { [weak self] _ in self?.pdfView.autoScales = true }
-            .store(in: &cancellables)
-            
+        for (name, autoScales) in [
+            (NSWindow.willEnterFullScreenNotification, false),
+            (NSWindow.didEnterFullScreenNotification, true),
+            (NSWindow.didExitFullScreenNotification, true)
+        ] {
+            nc.publisher(for: name).receive(on: DispatchQueue.main)
+                .sink { [weak self] notification in
+                    // 全屏属于窗口本身，不能使其他窗口重新缩放或重排扫描页。
+                    guard let self, !self.isClosed, let window = notification.object as? NSWindow,
+                          window === self.hostingWindow else { return }
+                    self.pdfView.autoScales = autoScales
+                }.store(in: &cancellables)
+        }
+
         // [新增：监听选中状态用于 AI 字数统计]
         nc.publisher(for: .PDFViewSelectionChanged, object: pdfView)
             .debounce(for: .milliseconds(300), scheduler: RunLoop.main)

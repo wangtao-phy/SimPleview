@@ -54,13 +54,24 @@ final class ThumbnailStore {
     /// 压力解除前维持较低预算，避免一次清理后马上填回原来的容量。
     func trim(to bytes: Int) {
         currentLimit = min(byteLimit, max(0, bytes))
-        evictIfNeeded()
+        // 批量缩预算时只排序一次；逐项重新扫描整个字典会阻塞主线程。
+        guard totalBytes > currentLimit else { return }
+        for entry in entries.sorted(by: evictionPrecedes) {
+            if totalBytes <= currentLimit { break }
+            remove(entry.key)
+        }
+    }
+
+    private func evictionPrecedes(_ lhs: (key: Key, value: Entry), _ rhs: (key: Key, value: Entry)) -> Bool {
+        let leftVisible = visible[lhs.key.owner]?.contains(lhs.key.page) == true
+        let rightVisible = visible[rhs.key.owner]?.contains(rhs.key.page) == true
+        if leftVisible != rightVisible { return !leftVisible }
+        return lhs.value.access < rhs.value.access
     }
 
     private func evictIfNeeded() {
         while totalBytes > currentLimit {
-            let hidden = entries.filter { !(visible[$0.key.owner]?.contains($0.key.page) ?? false) }
-            guard let oldest = (hidden.isEmpty ? entries : hidden).min(by: { $0.value.access < $1.value.access })?.key else { break }
+            guard let oldest = entries.min(by: evictionPrecedes)?.key else { break }
             remove(oldest)
         }
     }

@@ -345,9 +345,8 @@ final class AppState: NSObject, ObservableObject, PDFViewDelegate {
         selectedAnnotation = nil
         navigationManager.clearHistory()
         
-        if MemoryMode.current.policy.aggressivePurgeOnClose {
-            thumbnailManager.clearCache()
-        }
+        // 两种模式均在关闭时释放本窗口的缓存，直接执行，保留其他窗口的缓存。
+        thumbnailManager.clearCache()
         searchManager.performSearch(in: nil, pdfView: nil)
         
         

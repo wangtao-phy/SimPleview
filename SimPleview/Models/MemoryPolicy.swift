@@ -15,8 +15,6 @@ protocol MemoryPolicy {
     var delaysNavigationJumps: Bool { get }
     
     // MARK: - 休眠级策略
-    /// 文档关闭时，是否要激进地清空整个 Thumbnail 缓存？
-    var aggressivePurgeOnClose: Bool { get }
     /// 是否允许休眠
     var allowsHibernation: Bool { get }
 }
@@ -29,7 +27,6 @@ struct PerformanceMemoryPolicy: MemoryPolicy {
     
     var delaysNavigationJumps: Bool { false }
     
-    var aggressivePurgeOnClose: Bool { true } // 关闭后释放该窗口缓存
     var allowsHibernation: Bool { false }
 }
 
@@ -41,6 +38,5 @@ struct SavingMemoryPolicy: MemoryPolicy {
     
     var delaysNavigationJumps: Bool { true }
     
-    var aggressivePurgeOnClose: Bool { true } // 关文档必须清理全部缓存
     var allowsHibernation: Bool { true }
 }

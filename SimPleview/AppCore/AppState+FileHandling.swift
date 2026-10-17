@@ -110,6 +110,7 @@ extension AppState {
             let accessing = targetURL.startAccessingSecurityScopedResource()
             defer { if accessing { targetURL.stopAccessingSecurityScopedResource() } }
             var renderData: Data?
+            var fileVersion: AtomicPDFWriter.FileVersion?
             var doc: PDFDocument?
             if ImageDocumentManager.isImageFile(url: targetURL) {
                 doc = ImageDocumentManager.createPDFDocument(fromImageURL: targetURL)
@@ -124,6 +125,7 @@ extension AppState {
                         renderData = try? Data(contentsOf: url)
                     }
                     doc = PDFDocument(url: url)
+                    fileVersion = try? AtomicPDFWriter.FileVersion(url: url)
                 }
             }
             if let doc, doc.isEncrypted { doc.unlock(withPassword: "") }
@@ -154,20 +156,20 @@ extension AppState {
                 self.selectedAnnotation = nil
                 self.searchManager.clear()
                 _ = self.documentManager.handleDocumentAccess(url: targetURL)
-                self.setupDocument(doc, url: targetURL, isHotReloading: isHotReloading, renderData: renderData)
+                self.setupDocument(doc, url: targetURL, fileVersion: fileVersion, isHotReloading: isHotReloading, renderData: renderData)
             }
             await PDFWorkLimiter.loading.release()
         }
     }
 
     // [教程注释：文件加载完毕后的基建配置]
-    func setupDocument(_ doc: PDFDocument, url: URL, isHotReloading: Bool = false, renderData: Data? = nil) {
+    func setupDocument(_ doc: PDFDocument, url: URL, fileVersion: AtomicPDFWriter.FileVersion?, isHotReloading: Bool = false, renderData: Data? = nil) {
         let migratedInk = StandardInk.migrate(in: doc)
         // 必须先关掉原生手绘层，再交给 PDFView，避免先创建模糊位图缓存。
         StandardInk.prepareForScreen(in: doc)
         let renderSource = doc.isEncrypted ? nil : renderData.flatMap { PDFRenderSource(document: doc, data: $0) }
         self.pdfView.scanCache.source = renderSource
-        self.fileURL = url
+        self.documentManager.didLoadFile(at: url, version: fileVersion)
         self.pdfView.preparePageBackground(for: doc)
         // 目录节点属于具体 PDFDocument，不能让旧选中项继续持有替换前的页面。
         self.liveState.selectedOutline = nil
@@ -231,9 +233,11 @@ extension AppState {
         // 用 DispatchSource 监听硬盘上的文件。如果此时用户用另外的 PDF 软件修改了这个文件并保存，
         // 我们的 App 会瞬间感知到，并自动重新加载。
         let monitor = FileMonitor(url: url)
-        monitor.onDidChange = { [weak self] in
+        monitor.onDidChange = { [weak self, weak monitor, weak doc] in
             DispatchQueue.main.async {
-                guard let self = self else { return }
+                // 已停用监视器的迟到回调不能重新打开旧文件或改变新文档的位置。
+                guard let self, !self.isClosed, let monitor, let doc,
+                      self.documentManager.fileMonitor === monitor, self.pdfView.document === doc else { return }
                 // 对于文件被外部修改（如 Markup popover 点击 Done），我们发起热重载
                 // 并提前记录当前的物理坐标，伪装成一次“休眠唤醒”来避开全量重置
                 let pageIndex = self.liveState.currentPageIndex
@@ -296,6 +300,11 @@ extension AppState {
         self.thumbnailManager.renderSource = renderSource
         (hostingWindow?.windowController as? AppWindowController)?.applyPendingRestoration()
         WindowRegistry.shared.scheduleSessionCheckpoint()
+        if let fileVersion {
+            monitor.acknowledge(fileVersion)
+            // 后台读取完成到界面绑定之间也可能发生外部保存；补查一次，不轮询。
+            monitor.checkForChanges()
+        }
     }
     
     /// 只有当前活动窗口可以拥有全局秒表；后台加载/热重载只准备记录，不抢计时。
