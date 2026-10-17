@@ -48,7 +48,7 @@ final class MemoryManager {
         ThumbnailStore.shared.trim(to: limit * 1024 * 1024)
         ReadingTracker.shared.trimRecordsCache(limit: 8)
         for weakState in AppState.allInstances {
-            weakState.value?.searchManager.releaseSnapshot()
+            weakState.value?.searchManager.cancelSearch()
             weakState.value?.pdfView.scanCache.removeAll(pauseFor: 30)
         }
     }

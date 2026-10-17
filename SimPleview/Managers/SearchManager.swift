@@ -2,13 +2,9 @@ import SwiftUI
 import PDFKit
 import Combine
 
-/// [教程注释：搜索系统引擎 (SearchManager)]
-/// `SearchManager` 负责管理 PDF 内的全局搜索逻辑：
-/// 1. 提供搜索的响应式状态（例如：是否正在搜索、搜索文本、当前高亮结果索引）
-/// 2. 在后台线程执行异步的文本搜索，防止大型 PDF 搜索时主线程卡死
-/// 3. 管理搜索结果的上下跳转逻辑
+/// 原生异步全文搜索；只保存有限的页码、行框和文字，不持有结果选区或 PDF 副本。
+@MainActor
 final class SearchManager: ObservableObject {
-    
     // [UI 绑定状态]
     /// 用户当前输入的搜索关键词
     @Published var searchQuery: String = ""
@@ -20,22 +16,18 @@ final class SearchManager: ObservableObject {
     @Published var isSearching: Bool = false
     
     private var searchGeneration: UInt = 0
-    private weak var snapshotDocument: PDFDocument?
-    private var snapshotRevision: UInt?
-    private var snapshotData: Data?
+    private weak var searchingDocument: PDFDocument?
+    private var searchObservers: [AnyCancellable] = []
+    private var startPage = 0
+    private let resultLimit = 200
+    private var forwardMatches: [SearchMatch] = []
+    private var wrappedMatches: [SearchMatch] = []
 
-    deinit { searchQueue.cancelAllOperations() }
-    
-    // [核心引擎：搜索队列]
-    // 因为 PDF 搜索非常消耗 CPU，如果用户连续快速打字 "h", "he", "hel", "hello"
-    // 我们不能开四个线程去搜，所以这是一个最大并发度为 1 的串行队列。
-    private let searchQueue: OperationQueue = {
-        let q = OperationQueue()
-        q.maxConcurrentOperationCount = 1
-        q.qualityOfService = .userInitiated // 优先级很高，毕竟用户在等
-        return q
-    }()
-    
+    isolated deinit {
+        for observer in searchObservers { observer.cancel() }
+        searchingDocument?.cancelFindString()
+    }
+
     /// 动态计算并用于在右上角或侧边栏显示的文本进度（例如："2 / 15"）
     var searchProgressText: String {
         guard !searchResults.isEmpty else { return "" }
@@ -43,161 +35,70 @@ final class SearchManager: ObservableObject {
         return "\(current) / \(searchResults.count)"
     }
     
-    // [逻辑流程：发起一场搜索]
-    /// 在指定的 PDF 文档中触发全局字符串搜索
-    /// - Parameters:
-    ///   - document: 当前打开的 PDFDocument
-    ///   - pdfView: 当前渲染的 PDFView，用于在重置搜索时清除高亮等状态
-    func performSearch(in document: PDFDocument?, pdfView: PDFView?, revision: UInt = 0, source: PDFRenderSource? = nil) {
-        // 第一步：立刻废弃掉之前正在进行的旧搜索（因为用户的 query 可能已经变了）
-        searchQueue.cancelAllOperations()
-        // 已完成的 Operation 可能还有主队列回调，cancelAllOperations 不会
-        // 再取消它。使用请求代数，防止旧结果在清空、换词或关闭后回填。
-        searchGeneration &+= 1
-        let generation = searchGeneration
-        
-        let query = searchQuery.trimmingCharacters(in: .whitespacesAndNewlines)
-        
-        // 如果输入为空，大扫除，清空所有搜索状态
-        guard !query.isEmpty, let document = document else {
-            self.searchResults = []
-            self.currentSearchIndex = nil
-            self.isSearching = false
-            releaseSnapshot()
-            return
-        }
-        
-        isSearching = true
+    /// 使用 PDFKit 自己的异步搜索，直接搜索当前编辑文档。不能把活动文档
+    /// 丢给后台线程，也不必在主线程序列化整本 PDF 或长期缓存另一份文件。
+    func performSearch(in document: PDFDocument?, pdfView: PDFView?) {
+        cancelSearch()
+        searchResults = []
         currentSearchIndex = nil
-        let currentQuery = query
+        let query = searchQuery.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !query.isEmpty, let document, !document.isLocked, document.pageCount > 0 else { return }
 
-        let startIndex = pdfView?.currentPage.map { document.index(for: $0) } ?? 0
-        
-        // 同一编辑版本只准备一次输入。优先共用正文/缩略图已加载的原始字节，
-        // Data 的赋值不会复制底层缓冲；不能复用时才在主执行器隔离活动文档。
-        // 后台队列始终只接收不可变数据，不访问正在编辑的 PDFKit 对象。
-        let documentData: Data
-        if snapshotDocument === document, snapshotRevision == revision, let data = snapshotData {
-            documentData = data
-        } else {
-            releaseSnapshot()
-            guard let data = source?.searchData(for: document) ?? document.dataRepresentation() else { isSearching = false; return }
-            snapshotDocument = document
-            snapshotRevision = revision
-            snapshotData = data
-            documentData = data
+        startPage = pdfView?.currentPage.flatMap { page in
+            page.document === document ? document.index(for: page) : nil
+        } ?? 0
+        searchingDocument = document
+        isSearching = true
+        let generation = searchGeneration
+        for name in [Notification.Name.PDFDocumentDidFindMatch, .PDFDocumentDidEndFind] {
+            // 通过主队列接收原生结果；PDFSelection 不跨执行器缓存。代数同时
+            // 屏蔽已经排队的旧通知，换词/换文件/关闭后不能回填上一轮结果。
+            let observer = NotificationCenter.default.publisher(for: name, object: document)
+                .receive(on: DispatchQueue.main)
+                .sink { [weak self] notification in
+                    guard let self, self.searchGeneration == generation,
+                          notification.object as? PDFDocument === self.searchingDocument else { return }
+                    if name == .PDFDocumentDidEndFind { self.finishSearch() }
+                    else if let selection = notification.userInfo?[PDFDocumentFoundSelectionKey] as? PDFSelection {
+                        self.receive(selection)
+                    }
+                }
+            searchObservers.append(observer)
         }
-        let operation = BlockOperation()
-        operation.addExecutionBlock { [weak self, weak operation] in
-            // 刚进来就先查一下有没有被取消，不要浪费算力
-            guard let operation = operation, !operation.isCancelled else { return }
-            guard let safeDocument = PDFDocument(data: documentData) else {
-                DispatchQueue.main.async { [weak self] in
-                    guard let self, self.searchGeneration == generation else { return }
-                    self.isSearching = false
-                }
-                return
-            }
-            
-            // [流式渐进搜索引擎 (Iterative Streaming Search)]
-            // 获取当前所处页码，以此作为搜索起点
-            
-            // PDFKit 的字符选区包含端点，0…0 并非零长度，会跳过页首字符。
-            // 用前一非空页的末字符作为起点；第一页传 nil，从文档开头搜索。
-            var currentSelection: PDFSelection? = nil
-            if startIndex > 0, startIndex < safeDocument.pageCount {
-                for index in stride(from: startIndex - 1, through: 0, by: -1) {
-                    guard let page = safeDocument.page(at: index), page.numberOfCharacters > 0 else { continue }
-                    let last = page.numberOfCharacters - 1
-                    currentSelection = safeDocument.selection(from: page, atCharacterIndex: last, to: page, atCharacterIndex: last)
-                    break
-                }
-            }
-            
-            var matches: [SearchMatch] = []
-            var hasWrapped = false // 记录是否已经查到文档末尾并折返到了开头
-            
-            // 使用 while 循环配合 findString(fromSelection:)，可以每次只搜出一个结果就立即返回
-            // 这种“一次给一个”的方式能完美避免死锁整个文档，极大节约 CPU！
-            while !operation.isCancelled && matches.count < 200 {
-                var shouldBreak = false
-                var shouldContinue = false
-                
-                // [极限内存优化：切断 C 语言底层内存堆积]
-                // 搜索时底层产生的海量临时缓存必须在每次循环后立刻释放，否则 200 次循环将导致几百兆的内存峰值。
-                autoreleasepool {
-                    // 从上一次找到的光标位置继续往下找
-                    guard let sel = safeDocument.findString(currentQuery, fromSelection: currentSelection, withOptions: [.caseInsensitive, .diacriticInsensitive]) else {
-                        // 如果往后找不到了
-                        if !hasWrapped && startIndex > 0 {
-                            // 【折返逻辑】：如果不是从第一页开始找的，那就折返到全书第 0 页重新继续找
-                            hasWrapped = true
-                            currentSelection = nil
-                            shouldContinue = true
-                            return
-                        } else {
-                            // 已经搜遍全书了，退出循环
-                            shouldBreak = true
-                            return
-                        }
-                    }
-                    
-                    // 检查折返后是否已经扫过了起始页，如果是，说明搜完了整整一圈
-                    if hasWrapped, let page = sel.pages.first, safeDocument.index(for: page) >= startIndex {
-                        shouldBreak = true
-                        return
-                    }
-                    
-                    // 成功找到一个结果，更新光标位置
-                    currentSelection = sel
-                    
-                    guard let page = sel.pages.first else { 
-                        shouldContinue = true
-                        return 
-                    }
-                    
-                    // [极限内存优化：丢弃原生 Selection 换取内存自由]
-                    // 彻底抛弃庞大的 PDFSelection 强引用。我们只抽取出轻量级的 CGRect 坐标。
-                    let bounds = sel.selectionsByLine().map { $0.bounds(for: page) }
-                    let match = SearchMatch(
-                        boundsArray: bounds,
-                        pageIndex: safeDocument.index(for: page),
-                        context: sel.string ?? ""
-                    )
-                    matches.append(match)
-                    
-                    // [P1优化] 批量上屏：每累积 15 个结果或第 1 个结果时才投递，
-                    // 将主线程 dispatch 次数从 200 降到 ~15 次，消除 O(n²) 数组拷贝
-                    if matches.count == 1 || matches.count % 15 == 0 {
-                        let currentMatchesSnapshot = matches
-                        DispatchQueue.main.async {
-                            guard let self = self, !operation.isCancelled, self.searchGeneration == generation else { return }
-                            self.searchResults = currentMatchesSnapshot
-                            if self.currentSearchIndex == nil {
-                                self.currentSearchIndex = 0
-                            }
-                        }
-                    }
-                }
-                
-                if shouldBreak { break }
-                if shouldContinue { continue }
-            }
-            
-            // 收尾动作：先投递最后一批未上屏的结果（防止总数非 15 倍数时遗漏尾部），再标记搜索结束
-            DispatchQueue.main.async {
-                guard let self = self, !operation.isCancelled, self.searchGeneration == generation else { return }
-                self.searchResults = matches
-                if self.currentSearchIndex == nil && !matches.isEmpty {
-                    self.currentSearchIndex = 0
-                }
-                self.isSearching = false
-            }
-        }
-        
-        searchQueue.addOperation(operation) // 把任务扔进队列开始跑
+        document.beginFindString(query, withOptions: [.caseInsensitive, .diacriticInsensitive])
     }
-    
+
+    private func receive(_ selection: PDFSelection) {
+        guard let document = searchingDocument, let page = selection.pages.first,
+              page.document === document else { return }
+        let index = document.index(for: page)
+        guard (0..<document.pageCount).contains(index) else { return }
+        // 跨页短语仍作为一次匹配；定位首个命中页，只收集属于该页的行框。
+        let bounds = selection.selectionsByLine().filter { $0.pages.contains(page) }.map { $0.bounds(for: page) }
+        let match = SearchMatch(boundsArray: bounds, pageIndex: index, context: selection.string ?? "")
+        if index < startPage {
+            // 原生搜索从首页开始。暂存前半部分的有限结果，最后才接到当前页
+            // 之后的结果后面，避免搜索过程中插队、改变用户正在选择的结果。
+            if wrappedMatches.count < resultLimit { wrappedMatches.append(match) }
+        } else {
+            forwardMatches.append(match)
+            if forwardMatches.count == resultLimit { finishSearch() }
+            else if forwardMatches.count == 1 || forwardMatches.count.isMultiple(of: 15) {
+                publish(forwardMatches)
+            }
+        }
+    }
+
+    private func publish(_ matches: [SearchMatch]) {
+        searchResults = matches
+        if currentSearchIndex == nil, !matches.isEmpty { currentSearchIndex = 0 }
+    }
+
+    private func finishSearch() {
+        publish(Array((forwardMatches + wrappedMatches).prefix(resultLimit)))
+        cancelSearch()
+    }
+
     // [交互逻辑：上下翻阅搜索结果]
     
     /// 跳转到下一个搜索结果 (支持首尾循环跳转，到了最后一个按下一个会回到第一个)
@@ -240,21 +141,24 @@ final class SearchManager: ObservableObject {
         }
     }
 
-    // 清空重置
     func clear() {
-        searchGeneration &+= 1
-        searchQueue.cancelAllOperations()
+        cancelSearch()
         searchQuery = ""
         searchResults = []
         currentSearchIndex = nil
-        isSearching = false
-        releaseSnapshot()
     }
 
-    /// 只释放可重建的输入，已显示结果和选区保持不变。
-    func releaseSnapshot() {
-        snapshotData = nil
-        snapshotDocument = nil
-        snapshotRevision = nil
+    /// 先移除订阅，再取消原生任务；取消自身也可能同步发布结束通知。
+    /// 休眠只停止工作并释放临时匹配，保留已经显示的结果和查询。
+    func cancelSearch() {
+        searchGeneration &+= 1
+        for observer in searchObservers { observer.cancel() }
+        searchObservers.removeAll()
+        let document = searchingDocument
+        searchingDocument = nil
+        document?.cancelFindString()
+        forwardMatches.removeAll()
+        wrappedMatches.removeAll()
+        isSearching = false
     }
 }

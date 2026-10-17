@@ -27,6 +27,7 @@ extension AppState {
         pdfView.backgroundGeometryDocument = nil
         pdfView.preparePageBackground(for: document)
         documentVersion = UUID()
+        performSearch() // 页码映射改变后重新搜索，不能继续使用重排/删除前的结果。
         let revision = UUID()
         pageStructureChanged = revision
         if let annotation = selectedAnnotation, annotation.page?.document !== document { selectedAnnotation = nil }
@@ -180,6 +181,7 @@ extension AppState {
     /// 旋转仅更新几何和对应缩略图，不重建整个侧栏，保留多选和滚动位置。
     func refreshPageGeometry(in doc: PDFDocument, at indices: [Int]) {
         guard pdfView.document === doc else { return }
+        performSearch() // 旋转后重新取得原生文字选区的坐标。
         pdfView.backgroundGeometryDocument = nil
         pdfView.preparePageBackground(for: doc)
         var ratios = pageAspectRatios
