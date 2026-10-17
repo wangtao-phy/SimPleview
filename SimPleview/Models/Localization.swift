@@ -137,6 +137,8 @@ struct L {
             "Outline": [.zh: "目录", .en: "Outline"],
             "Annotations": [.zh: "标注", .en: "Annotations"],
             "Search": [.zh: "搜索", .en: "Search"],
+            "Start Search from Current Page": [.zh: "从当前页开始搜索", .en: "Start search from the current page"],
+            "Search Start Help": [.zh: "关闭后从文档开头开始。下次搜索生效。", .en: "Turn off to start from the beginning of the document. Applies to the next search."],
             "Reminder Access Required": [.zh: "未获得提醒事项访问权限", .en: "Access to reminders is required."],
             "Calendar Access Required": [.zh: "未获得日历访问权限", .en: "Full calendar access is required."],
             "Title Required": [.zh: "标题不能为空", .en: "Enter a title."],

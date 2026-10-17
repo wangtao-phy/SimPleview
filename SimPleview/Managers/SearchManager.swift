@@ -44,9 +44,11 @@ final class SearchManager: ObservableObject {
         let query = searchQuery.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !query.isEmpty, let document, !document.isLocked, document.pageCount > 0 else { return }
 
-        startPage = pdfView?.currentPage.flatMap { page in
+        // 未设置时保持原有的当前页优先；每次搜索重新读取，供所有窗口共用。
+        let fromCurrentPage = UserDefaults.standard.object(forKey: "searchFromCurrentPage") as? Bool ?? true
+        startPage = fromCurrentPage ? (pdfView?.currentPage.flatMap { page in
             page.document === document ? document.index(for: page) : nil
-        } ?? 0
+        } ?? 0) : 0
         searchingDocument = document
         isSearching = true
         let generation = searchGeneration

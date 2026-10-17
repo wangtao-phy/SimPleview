@@ -11,6 +11,7 @@ struct GeneralSettingsView: View {
     @AppStorage("customBrowserPath") var customBrowserPath: String = ""
     @AppStorage("enableReadingRecord") var enableReadingRecord: Bool = false
     @AppStorage("enableTodo") var enableTodo: Bool = true
+    @AppStorage("searchFromCurrentPage") private var searchFromCurrentPage = true
     
     @ObservedObject private var features = FeaturePreferences.shared
 
@@ -63,6 +64,12 @@ struct GeneralSettingsView: View {
                 .padding(.vertical, 4)
             }
             
+            Section(LS("Search")) {
+                Toggle(LS("Start Search from Current Page"), isOn: $searchFromCurrentPage)
+                Text(LS("Search Start Help"))
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+
             Section(LS("External Applications")) {
                 VStack(alignment: .leading, spacing: 4) {
                     Picker(selection: $externalBrowser) {
