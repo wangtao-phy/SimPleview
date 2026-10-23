@@ -18,10 +18,11 @@ extension AppState {
     // [逻辑流程：存盘操作接口]
     // 转发给内部的 documentManager。
     // 保存事务同步返回实际结果；sync 保留为现有调用点的兼容参数。
-    var hasUnsavedChanges: Bool { isDirty || !pdfView.draftInkPaths.isEmpty }
+    var hasUnsavedChanges: Bool { isDirty || !pdfView.draftInkPaths.isEmpty || pdfView.formSession.hasPendingText }
 
     @discardableResult
     func save(sync: Bool = false, immediate: Bool = false) -> Bool {
+        guard pdfView.formSession.commit() else { return false }
         // Cmd+S/Cmd+Q 不保证改变第一响应者，必须主动提交尚未落入 PDF 的草稿。
         pdfView.commitDraftInk()
         autosaveTask?.cancel()
@@ -42,7 +43,7 @@ extension AppState {
                   self.fileURL == url, self.isDirty, !self.isResolvingReload else { return }
             self.autosaveTask = nil
             // 不在尚未抬笔的事件追踪循环中取快照；抬笔回调会重新安排保存。
-            guard self.pdfView.currentDrawingPath == nil else { return }
+            guard self.pdfView.currentDrawingPath == nil, !self.pdfView.formSession.isEditing else { return }
             guard let document = self.pdfView.makeAutosaveDocument() else {
                 self.documentManager.saveIssue = "无法生成完整的标注副本，修改仍保留在窗口中，请手动保存。"
                 return
@@ -54,6 +55,7 @@ extension AppState {
     // [原生打印功能]
     func printDocument() {
         guard !isClosed, NSApp.modalWindow == nil, hostingWindow?.attachedSheet == nil else { return }
+        guard pdfView.formSession.commit() else { return }
         // 打印独立副本，恢复屏幕上被隐藏的标准矢量笔迹；不改动正在阅读的文档。
         // PDFDocument 创建真正的 NSPrintOperation，不依赖临时 PDFView 的窗口与布局。
         pdfView.commitDraftInk()

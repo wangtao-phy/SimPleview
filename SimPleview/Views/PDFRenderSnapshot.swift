@@ -84,6 +84,8 @@ extension CustomPDFView {
             guard page.document === document else { continue }
             if !pages.contains(where: { $0 === page }) { pages.append(page) }
         }
+        formSession.refresh(pages: pages)
+        if isFormFilling { formSession.prepare(pages: pages) }
         for page in pages {
             var strokes: [PDFRenderSnapshot.Stroke] = []
             var noteIcons: [PDFRenderSnapshot.NoteIcon] = []
@@ -93,6 +95,19 @@ extension CustomPDFView {
                 strokes.append(.init(path: immutable, color: color.cgColor, width: width, fill: fill))
             }
             let annotations = page.displaysAnnotations ? page.annotations : []
+            if isFormFilling {
+                // 填表提示只属于屏幕快照，不写入 PDF，也不改变原字段的背景或边框。
+                for field in annotations where field.type == "Widget" && !field.isReadOnly {
+                    add(NSBezierPath(roundedRect: field.bounds, xRadius: 2, yRadius: 2),
+                        color: .controlAccentColor, width: 1 / max(scaleFactor, 0.1))
+                }
+                if page.displaysAnnotations {
+                    for bounds in formSession.candidateBounds(on: page) {
+                        add(NSBezierPath(roundedRect: bounds, xRadius: 2, yRadius: 2),
+                            color: .controlAccentColor, width: 1 / max(scaleFactor, 0.1))
+                    }
+                }
+            }
             let selected = annotations.filter { currentSelectedBatchID != nil && $0.userName == currentSelectedBatchID }
             let selectedInk = selected.filter(InkEditSession.canEdit)
             let edit = inkEditSession?.page === page ? inkEditSession : nil

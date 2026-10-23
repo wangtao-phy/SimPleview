@@ -52,8 +52,12 @@ final class ReaderCommandRouter: NSObject, NSMenuItemValidation, NSMenuDelegate 
     }
 
     private func restoreMenusIfNeeded() {
-        guard !menuRepairScheduled, let menu = NSApp.mainMenu,
-              sectionsByMenu.count != 4 || sectionsByMenu.contains(where: {
+        guard !menuRepairScheduled, let menu = NSApp.mainMenu else { return }
+        // SwiftUI 也可能只重建应用菜单。阅读菜单仍完整时，更新入口也必须补回。
+        let updateMissing = menu.items.first?.submenu?.items.contains(where: {
+            $0.identifier?.rawValue == "simpleview.standard.Check for Updates..."
+        }) != true
+        guard updateMissing || sectionsByMenu.count != 4 || sectionsByMenu.contains(where: {
                   $0.menu !== menu || $0.submenu?.items.contains(where: {
                       $0.identifier?.rawValue.hasPrefix("simpleview.command.") == true
                   }) != true

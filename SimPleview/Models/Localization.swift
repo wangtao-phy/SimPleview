@@ -9,6 +9,10 @@ struct L {
     // 如果字典里找不到对应的语言翻译，则使用 `??` (Nil-Coalescing Operator) 降级返回原 Key。
     // [P0修复] 将字典提升为 static let，避免每次调用都重新创建 100+ 条目的字典
     private static let dict: [String: [AppLanguage: String]] = [
+            "Form Filling": [.zh: "填写表单", .en: "Form Filling"],
+            "On": [.zh: "已开启", .en: "On"],
+            "Off": [.zh: "已关闭", .en: "Off"],
+            "Form Filling Help": [.zh: "显示表单字段并识别填空位置；点击输入，再点此按钮退出。填写内容保存为标准 PDF 表单。", .en: "Show form fields and detect blanks. Click to enter text, then click this button to finish. Entries are saved as standard PDF form fields."],
             "Retry Saving": [.zh: "重试保存", .en: "Retry Saving"],
             "AI Request Failed": [.zh: "AI 请求未完成", .en: "AI Request Failed"],
             "Unable to Prepare Export": [.zh: "无法准备导出，当前文档已保留。", .en: "Unable to prepare export. The current document is unchanged."],
@@ -92,10 +96,6 @@ struct L {
             "Actual Size": [.zh: "实际大小", .en: "Actual Size"],
             "Fit Page": [.zh: "自动适应页面", .en: "Fit Page"],
             "Toggle Annotations": [.zh: "显示或隐藏标注", .en: "Show or Hide Annotations"],
-            "Retry Link Preview": [.zh: "重试预览", .en: "Retry preview"],
-            "Link Preview Unavailable": [.zh: "暂时无法生成预览，可直接跳转到链接位置。", .en: "Preview unavailable. You can go directly to the link destination."],
-            "Go to Link Destination": [.zh: "跳转到链接位置", .en: "Go to link destination"],
-            "Unknown Link": [.zh: "无法识别链接", .en: "Unknown link"],
             "Refresh": [.zh: "刷新", .en: "Refresh"],
             "Tomorrow": [.zh: "明天", .en: "Tomorrow"],
             "Current Paper": [.zh: "本文献", .en: "Current Paper"],

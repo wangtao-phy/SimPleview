@@ -15,6 +15,16 @@ import os
 class CustomPDFView: PDFView {
     nonisolated let renderSnapshot = OSAllocatedUnfairLock(initialState: PDFRenderSnapshot())
     nonisolated let scanCache = ScanPageCache()
+    lazy var formSession = PDFFormSession(view: self)
+    var consumesFormMouseGesture = false
+    var isFormFilling = false {
+        didSet {
+            guard isFormFilling != oldValue else { return }
+            resetLinkPreview()
+            if !isFormFilling { formSession.cancelDetection() }
+            setPlatformNeedsDisplay()
+        }
+    }
     // 不重写 document：PDFKit 的后台页面分析会通过 ObjC 读取该属性。
     // Swift 的 MainActor getter 会使原生后台调用触发线程断言；缓存由
     // prepareForDocumentReplacement、视图移除和内存压力入口负责清理。
@@ -113,6 +123,9 @@ class CustomPDFView: PDFView {
     var trackingArea: NSTrackingArea?
     var linkEventMonitor: Any?
     var linkTrackingObservers: [(center: NotificationCenter, token: NSObjectProtocol)] = []
+    var linkMouseGesture: InternalLinkGesture?
+    // 拦截过 down 的手势即使因重载而取消，也不能把孤立的 drag/up 交给 PDFKit。
+    var consumesLinkMouseGesture = false
     var hoverTask: Task<Void, Never>?
     var hoverPopover: NSPopover?
     var isHoveringLinkPreview = false
@@ -169,6 +182,7 @@ class CustomPDFView: PDFView {
     /// 文件替换和关闭共用的引用释放点。弹窗、悬停和拖动状态都可能拥有旧页；
     /// 先关观察者/弹窗，再清状态，避免重载后回调修改已不属于当前文档的批注。
     func prepareForDocumentReplacement() {
+        isFormFilling = false
         scanCache.source = nil
         backgroundGeometryDocument = nil
         navigationRenderPage = nil
@@ -186,6 +200,7 @@ class CustomPDFView: PDFView {
         clearSelection()
         highlightedSelections = nil
         renderSnapshot.withLock { $0 = PDFRenderSnapshot() }
+        formSession.reset()
     }
 
     // 支持在草稿阶段（还没 commit）的单笔撤销

@@ -26,10 +26,15 @@ final class AppState: NSObject, ObservableObject, PDFViewDelegate {
     // [核心概念：响应式视图容器]
     // 整个 App 最核心的组件就是这个 PDFView，它是苹果官方提供的重量级 PDF 渲染引擎。
     @Published var pdfView = CustomPDFView()
+    @Published var isFormFilling = false {
+        didSet { pdfView.isFormFilling = isFormFilling }
+    }
     @Published var areAnnotationsVisible = true {
         didSet {
             guard areAnnotationsVisible != oldValue else { return }
             if !areAnnotationsVisible {
+                guard pdfView.formSession.commit() else { areAnnotationsVisible = true; return }
+                isFormFilling = false
                 // 隐藏前结束编辑并提交草稿，避免看不见的对象仍能被拖动/删除。
                 activeType = .none
                 pdfView.activeType = .none
@@ -106,6 +111,10 @@ final class AppState: NSObject, ObservableObject, PDFViewDelegate {
     @Published var activeType: AnnotationType = AnnotationType.none {
         didSet {
             if activeType != AnnotationType.none {
+                guard pdfView.formSession.commit() else { activeType = .none; return }
+                if isFormFilling {
+                    isFormFilling = false
+                }
                 areAnnotationsVisible = true
                 applyAnnotation()
                 resetAnnotationTimer()

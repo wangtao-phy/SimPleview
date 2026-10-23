@@ -17,6 +17,7 @@ extension DocumentManager {
               let pdfView, let document = pdfView.document, let originalURL = self.fileURL else { return }
         if let panel = exportPanel { panel.makeKeyAndOrderFront(nil); return }
         guard pdfView.window?.attachedSheet == nil else { return }
+        if let reader = pdfView as? CustomPDFView, !reader.formSession.commit() { return }
         
         let panel = NSSavePanel()
         let originalName = originalURL.deletingPathExtension().lastPathComponent

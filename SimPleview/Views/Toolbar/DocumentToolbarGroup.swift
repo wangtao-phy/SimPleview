@@ -25,6 +25,15 @@ struct DocumentToolbarGroup: CustomizableToolbarContent {
                 SignaturePopoverView(state: state, uiState: uiState)
             }
         }
+        ToolbarItem(id: "FormFilling", placement: .primaryAction) {
+            Button(action: { state.toggleFormFilling() }) {
+                Label(state.L("Form Filling"), systemImage: "rectangle.and.pencil.and.ellipsis")
+                    .foregroundStyle(state.isFormFilling ? Color.accentColor : Color.primary)
+            }
+            .help(state.L("Form Filling Help"))
+            .accessibilityValue(state.isFormFilling ? state.L("On") : state.L("Off"))
+            .disabled(!state.canFillForms)
+        }
         ToolbarItem(id: "RotateLeft", placement: .primaryAction) {
             Button(action: { state.rotateSelectedPagesLeft() }) {
                 Label(state.L("Rotate Left"), systemImage: "rotate.left") 

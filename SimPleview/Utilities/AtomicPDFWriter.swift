@@ -33,7 +33,18 @@ enum AtomicPDFWriter {
             try? FileManager.default.removeItem(at: temporary)
             try? FileManager.default.removeItem(at: visibleCopy)
         }
-        guard document.write(to: temporary), let verification = PDFDocument(url: temporary) else {
+        var formNames = Set<String>()
+        for index in 0..<document.pageCount {
+            for field in document.page(at: index)?.annotations ?? [] where field.type == "Widget" {
+                if let name = field.fieldName, name.hasPrefix("SimPleview.Form.") { formNames.insert(name) }
+            }
+        }
+        let repairForms = !formNames.isEmpty || PDFFormCatalog.containsGeneratedFields(in: document)
+        guard document.write(to: temporary) else { throw validationError("无法写入临时 PDF") }
+        // PDFKit 新建的 Widget 可能没有 AcroForm 根登记。只在验证前补齐本应用的
+        // 标准字段，不能以页面上“看见了输入框”代替真正可互操作的表单。
+        if repairForms { try PDFFormCatalog.attachGeneratedFields(in: temporary, fieldNames: formNames) }
+        guard let verification = PDFDocument(url: temporary) else {
             throw validationError("无法写入或重新打开临时 PDF")
         }
         try validateAnnotations(from: document, in: verification)
@@ -41,8 +52,9 @@ enum AtomicPDFWriter {
         if StandardInk.restoreExportVisibility(in: verification) {
             // 在验证副本上恢复文件可见性，活动文档始终保持原生位图层关闭。
             // 使用第二个临时文件，不能覆写 verification 正在读取的文件。
-            guard verification.write(to: visibleCopy),
-                  let reopened = PDFDocument(url: visibleCopy) else { throw validationError("无法写入可见标注副本") }
+            guard verification.write(to: visibleCopy) else { throw validationError("无法写入可见标注副本") }
+            if repairForms { try PDFFormCatalog.attachGeneratedFields(in: visibleCopy, fieldNames: formNames) }
+            guard let reopened = PDFDocument(url: visibleCopy) else { throw validationError("无法重新打开可见标注副本") }
             try validateAnnotations(from: document, in: reopened)
             candidate = visibleCopy
         }
@@ -78,6 +90,21 @@ enum AtomicPDFWriter {
             guard let original = source.page(at: index), let copy = saved.page(at: index) else { throw validationError("无法读取页面") }
             let before = original.annotations, after = copy.annotations
             guard before.map({ $0.type ?? "" }).sorted() == after.map({ $0.type ?? "" }).sorted() else { throw validationError("标注数量或类型发生变化") }
+            // 只在已有逐页校验中比较标准字段，不依赖保存后的标注顺序。只读字段和
+            // 选择字段同样必须保留；按钮附带各自的 On 值，避免同名单选项互换状态漏检。
+            let widgetValues = [before, after].map { annotations in
+                annotations.reduce(into: [[String?]: Int]()) { values, annotation in
+                    guard annotation.type == "Widget" else { return }
+                    let type = annotation.widgetFieldType
+                    let hasStringValue = type == .text || type == .choice || type == .button
+                    let value: [String?] = [annotation.fieldName, type.rawValue,
+                        hasStringValue ? annotation.widgetStringValue : nil,
+                        type == .button ? String(annotation.buttonWidgetState.rawValue) : nil,
+                        type == .button ? annotation.buttonWidgetStateString : nil]
+                    values[value, default: 0] += 1
+                }
+            }
+            guard widgetValues[0] == widgetValues[1] else { throw validationError("表单字段名称或填写内容未完整保留") }
             for annotation in before where annotation.type == "Ink" && StandardInk.isAppInk(annotation) {
                 let strokeID = annotation.value(forAnnotationKey: VectorInk.idKey) as? String
                 guard let restored = after.first(where: {

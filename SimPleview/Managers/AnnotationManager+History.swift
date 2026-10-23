@@ -16,6 +16,7 @@ extension AnnotationManager {
     private struct HistoryChange {
         let inverse: UndoAction
         var affectedPages: Set<Int> = []
+        var nativeFormPages: Set<Int> = []
         var navigateTo: Int? = nil
     }
 
@@ -23,6 +24,10 @@ extension AnnotationManager {
         guard let document, let action = isUndo ? batchStack.last : redoStack.last,
               let change = applyHistoryAction(action, to: document) else { return false }
         finishHistory(isUndo: isUndo, inverse: change.inverse)
+        // 删除最后一个字段后页面已没有 Widget，仍须清除 PDFKit 缓存的可点击区域。
+        for index in change.nativeFormPages {
+            if let page = document.page(at: index) { pdfView?.annotationsChanged(on: page) }
+        }
         if let index = change.navigateTo {
             onThumbnailUpdate(-1)
             onPageChange(index)
@@ -46,30 +51,35 @@ extension AnnotationManager {
             guard !indices.isEmpty, indices.allSatisfy({ (0..<document.pageCount).contains($0) }) else { return nil }
             var removed: [PDFAnnotation] = []
             var pageIndices: [Int] = []
+            var nativeFormPages = Set<Int>()
             for index in indices.sorted() {
                 guard let page = document.page(at: index) else { continue }
-                for annotation in page.annotations where annotation.userName == batchID {
+                for annotation in page.annotations where annotation.historyIdentifier == batchID {
                     // 移出页面即可隐藏，不修改 shouldDisplay；矢量手绘和签名需要
                     // 保留原生外观隐藏标志，否则重做会重新叠上 PDFKit 的模糊底图。
                     page.removeAnnotation(annotation)
                     removed.append(annotation)
                     pageIndices.append(index)
+                    if annotation.type?.lowercased() == "widget" { nativeFormPages.insert(index) }
                 }
             }
             guard !removed.isEmpty else { return nil }
             removeFromSidebar(removed)
-            return HistoryChange(inverse: .deleteAnnotation(annotations: removed, pageIndices: pageIndices), affectedPages: Set(pageIndices))
+            return HistoryChange(inverse: .deleteAnnotation(annotations: removed, pageIndices: pageIndices), affectedPages: Set(pageIndices), nativeFormPages: nativeFormPages)
 
         case .deleteAnnotation(let annotations, let indices):
             guard !annotations.isEmpty, annotations.count == indices.count,
                   indices.allSatisfy({ (0..<document.pageCount).contains($0) }),
-                  let batchID = annotations.first?.userName,
-                  annotations.allSatisfy({ $0.userName == batchID }) else { return nil }
+                  let batchID = annotations.first?.historyIdentifier,
+                  annotations.allSatisfy({ $0.historyIdentifier == batchID }) else { return nil }
             for (annotation, index) in zip(annotations, indices) {
                 document.page(at: index)?.addAnnotation(annotation)
             }
             for annotation in annotations { register(annotation, in: document) }
-            return HistoryChange(inverse: .annotation(batchID: batchID, pageIndices: Set(indices)), affectedPages: Set(indices))
+            let nativeFormPages = Set(zip(annotations, indices).compactMap { annotation, index in
+                annotation.type?.lowercased() == "widget" ? index : nil
+            })
+            return HistoryChange(inverse: .annotation(batchID: batchID, pageIndices: Set(indices)), affectedPages: Set(indices), nativeFormPages: nativeFormPages)
 
         case .replaceInk(let current, let previous, let index):
             guard let page = document.page(at: index), !current.isEmpty, !previous.isEmpty,

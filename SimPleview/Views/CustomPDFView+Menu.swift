@@ -4,6 +4,7 @@ import PDFKit
 
 extension CustomPDFView {
     override func menu(for event: NSEvent) -> NSMenu? {
+        if isFormFilling { return super.menu(for: event) }
         // 先让系统生成它默认的那一套冗长繁琐的菜单
         guard let menu = super.menu(for: event) else { return nil }
         
@@ -12,7 +13,8 @@ extension CustomPDFView {
         let pagePoint = convert(viewPoint, to: page)
         
         // 如果右键点在了一个批注上...
-        if page.displaysAnnotations, let annotation = page.annotation(at: pagePoint) {
+        if page.displaysAnnotations, let annotation = page.annotation(at: pagePoint),
+           !annotation.isFormFieldPresentation {
             lastClickedAnnotation = annotation
             initialAnnotationColor = annotation.color
             

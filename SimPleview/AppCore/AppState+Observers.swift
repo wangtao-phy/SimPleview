@@ -66,6 +66,10 @@ extension AppState {
     // [教程注释：基于 Combine 的响应式编程流]
     func setupObservers() {
         let nc = NotificationCenter.default
+        nc.publisher(for: .PDFViewDocumentChanged, object: pdfView)
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in self?.isFormFilling = false }
+            .store(in: &cancellables)
         FeaturePreferences.shared.$eyeCare
             .removeDuplicates().receive(on: DispatchQueue.main)
             .sink { [weak self] enabled in

@@ -112,6 +112,9 @@ extension AppState {
     #if os(macOS)
     func pdfView(_ pdfView: PDFView, willHitAnnotation annotation: PDFAnnotation, withEvent event: NSEvent) -> PDFAnnotation? {
         guard (pdfView as? CustomPDFView)?.annotationsVisible != false else { return nil }
+        if (pdfView as? CustomPDFView)?.isFormFilling == true || annotation.isFormFieldPresentation {
+            return annotation
+        }
         if let bid = annotation.userName {
             DispatchQueue.main.async { [weak self] in
                 if self?.selectedAnnotation?.userName != bid {

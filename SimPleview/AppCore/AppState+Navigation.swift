@@ -144,6 +144,7 @@ extension AppState {
     
     // MARK: - Undo/Redo (撤销/重做机制)
     func undo() {
+        guard pdfView.formSession.commit() else { return }
         // [新逻辑：如果是绘图过程中，优先单笔撤销]
         if pdfView.undoDraftInk() {
             return
@@ -169,6 +170,7 @@ extension AppState {
     }
     
     func redo() {
+        guard pdfView.formSession.commit() else { return }
         let action = redoStack.last
         if annotationManager.redo(in: pdfView.document, pdfView: pdfView, onThumbnailUpdate: { [weak self] index in
             if index == -1 {

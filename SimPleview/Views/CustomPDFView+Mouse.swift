@@ -6,6 +6,7 @@ import Combine
 extension CustomPDFView {
 
     override func mouseDown(with event: NSEvent) {
+        if isFormFilling { super.mouseDown(with: event); return }
 
         // [关键修复：焦点抢占] 当从侧边栏或悬浮窗点击进来时，PDFView 必须夺回 FirstResponder 身份，否则后续的 Backspace 键盘事件(keyDown) 会被系统丢弃！
         self.window?.makeFirstResponder(self)
@@ -119,7 +120,6 @@ extension CustomPDFView {
             return
         }
 
-        if let link = internalLink(at: pagePoint, on: page), trackInternalLink(link, on: page) { return }
         resetLinkPreview()
         if trackInkTransform(with: event, page: page, point: pagePoint) { return }
 
@@ -291,56 +291,56 @@ extension CustomPDFView {
         }
     }
 
-    func showLinkPreviewPopover(for linkAnnot: PDFAnnotation, in view: NSView) {
-        guard let page = linkAnnot.page, page.document === document, window != nil else { return }
-        let previous = hoverPopover
-        hoverPopover = nil
-        previous?.close()
-        previous?.contentViewController = nil
-        isHoveringLinkPreview = false
-        let popover = NSPopover()
-        let popoverView = LinkPreviewPopoverView(
-            destination: linkDestination(for: linkAnnot),
-            renderSource: scanCache.source,
-            onOpenDestination: { [weak self, weak popover] in
-                guard let self,
-                      let destination = self.linkDestination(for: linkAnnot) else { return }
-                popover?.close()
-                self.resetLinkPreview()
-                self.go(to: destination)
-            }
-        ) { [weak self, weak popover] isHovering in
-            Task { @MainActor in
-                // 已关闭浮窗的迟到回调不能取消新链接的展示任务。
-                guard let self, let popover, self.hoverPopover === popover else { return }
-                self.isHoveringLinkPreview = isHovering
-                guard self.currentHoveredLink == nil else { return }
-                if isHovering {
-                    self.hoverTask?.cancel()
-                    self.hoverTask = nil
-                } else {
-                    self.handleMouseLeaveLink()
-                }
-            }
+    func showLinkPreviewPopover(for linkAnnot: PDFAnnotation) {
+        guard let sourceDocument = document, let page = linkAnnot.page,
+              page.document === sourceDocument, let destination = linkDestination(for: linkAnnot),
+              let target = destination.page, let window,
+              let input = PDFPageRenderInput.capture(target, source: scanCache.source) else { return }
+        let scale = 1.5 * window.backingScaleFactor
+        let point = destination.point
+        let annotations = target.annotations.contains {
+            $0.type != "Link" && ($0.shouldDisplay || StandardInk.isScreenHidden($0))
         }
-
-        // 悬浮窗由悬停状态管理，不用 transient 吞掉用于点击原文链接的那次鼠标事件。
-        popover.behavior = .applicationDefined
-        popover.delegate = self
-        popover.animates = false
-        
-        let host = NSHostingController(rootView: popoverView)
-        popover.contentViewController = host
-        // Explicitly set the initial content size dynamically so NSPopover correctly calculates screen edge collisions BEFORE it appears
-        popover.contentSize = NSSize(width: popoverView.outerWidth, height: popoverView.outerHeight)
-        
-        self.hoverPopover = popover
-        
-        let linkRect = self.convert(linkAnnot.bounds, from: page)
-        popover.show(relativeTo: linkRect, of: view, preferredEdge: .minY)
+        // 只在内容就绪后打开浮窗。失败由渲染器自动重建专属进程重试；
+        // 不弹“无法显示”或永久加载框，也不影响用户直接点击主页面的链接。
+        hoverTask = Task { @MainActor [weak self, weak linkAnnot, weak sourceDocument] in
+            let preview = await LinkPreviewRenderer.preview(input: input, point: point, scale: scale,
+                includeAnnotations: annotations)
+            guard !Task.isCancelled, let self, let linkAnnot, let sourceDocument,
+                  self.document === sourceDocument, self.currentHoveredLink === linkAnnot else { return }
+            self.hoverTask = nil
+            guard let preview, let copy = PDFDocument(data: preview.pdfData), copy.pageCount == 1,
+                  let previewPage = copy.page(at: 0),
+                  let window = self.window else { return }
+            let previous = self.hoverPopover
+            self.hoverPopover = nil
+            previous?.close()
+            previous?.contentViewController = nil
+            self.isHoveringLinkPreview = false
+            let popover = NSPopover()
+            let content = LinkPreviewPopoverView(document: copy, preview: preview).onHover { [weak self, weak popover] hovering in
+                guard let self, let popover, self.hoverPopover === popover else { return }
+                self.isHoveringLinkPreview = hovering
+                guard self.currentHoveredLink == nil else { return }
+                if hovering { self.hoverTask?.cancel(); self.hoverTask = nil }
+                else { self.handleMouseLeaveLink() }
+            }
+            popover.behavior = .applicationDefined
+            popover.delegate = self
+            popover.animates = false
+            popover.contentViewController = NSHostingController(rootView: content)
+            let screen = window.screen?.visibleFrame.size ?? CGSize(width: 1440, height: 900)
+            let ratio = CGFloat(preview.image.height) / CGFloat(preview.image.width)
+            let width = min(1200, screen.width * 0.85, screen.height * 0.65 / ratio,
+                            previewPage.bounds(for: .mediaBox).width * 1.5)
+            popover.contentSize = CGSize(width: width, height: width * ratio)
+            self.hoverPopover = popover
+            popover.show(relativeTo: self.convert(linkAnnot.bounds, from: page), of: self, preferredEdge: .minY)
+        }
     }
 
     override func mouseUp(with event: NSEvent) { 
+        if isFormFilling { super.mouseUp(with: event); return }
         // 原生选择抬起事件处理
 
         guard event.type == .leftMouseUp else {
@@ -385,7 +385,7 @@ extension CustomPDFView {
                 }
             }
             if let borderHit = annotations.first(where: { 
-                supportedTypes.contains(($0.type ?? "").lowercased()) && 
+                !$0.isFormFieldPresentation && supportedTypes.contains(($0.type ?? "").lowercased()) &&
                 $0.userName == selectedBatchID && 
                 isClickOnBorder(clickPoint: pagePoint, annotationBounds: $0.bounds) 
             }) {
@@ -399,7 +399,7 @@ extension CustomPDFView {
         // 2. 如果没点中边框/图标，那就看看点中了哪个标注的【内部】
         // 这里加上 10 像素的容错，方便用户选中细小的下划线
         if let targetAnnotation = annotations.first(where: { 
-            supportedTypes.contains(($0.type ?? "").lowercased()) && 
+            !$0.isFormFieldPresentation && supportedTypes.contains(($0.type ?? "").lowercased()) &&
             $0.bounds.insetBy(dx: -10, dy: -10).intersects(clickRect) 
         }) {
             // 乐观更新本地选中状态
@@ -509,6 +509,7 @@ extension CustomPDFView {
     }
     
     override func keyDown(with event: NSEvent) {
+        if isFormFilling { super.keyDown(with: event); return }
         // [用户体验优化：键盘快捷键删除标注]
         // 51 是 Backspace (退格键)，117 是 Forward Delete (删除键)
         if event.keyCode == 51 || event.keyCode == 117 {
