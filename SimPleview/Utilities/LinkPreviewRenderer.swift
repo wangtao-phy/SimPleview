@@ -118,7 +118,8 @@ nonisolated enum LinkPreviewRenderer {
     /// 在 SwiftUI/AppDelegate 初始化之前运行，不恢复窗口或启动其它业务。
     static func runWorkerIfRequested() {
         let args = CommandLine.arguments
-        guard args.count == 3, args[1] == argument else { return }
+        guard args.count > 1, args[1] == argument else { return }
+        guard args.count == 3 else { exit(1) } // 无效 worker 请求不能进入主应用或写入运行标记。
         let directory = URL(fileURLWithPath: args[2], isDirectory: true)
         do {
             let request = try JSONDecoder().decode(Request.self, from: Data(contentsOf: directory.appendingPathComponent("request.json")))

@@ -74,7 +74,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     // App 完全启动后的回调
     func applicationDidFinishLaunching(_ notification: Notification) {
         // SwiftUI App.init 时 NSApp 可能尚未创建，访问窗口的服务必须在此启动。
-        UpdateManager.shared.startMonitoring()
         FocusSessionManager.shared.startService()
         ReaderCommandRouter.shared.start()
         // 标准 InkList 交给 PDFKit 渲染，避免全局交换系统方法影响导出与其他文档。
@@ -94,8 +93,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             registry.isRestoringSession = true
             defer {
                 registry.isRestoringSession = false
-                self.hasCompletedStartup = true
                 registry.checkpointSession()
+                self.finishStartup()
             }
             // [新特性：恢复上次强退或正常退出前打开的窗口组]
             let legacy = UserDefaults.standard.data(forKey: "SavedWindowGroups")
@@ -155,15 +154,24 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 }
             }
             
-            // 到实际展示时再判断，Finder 打开文件可能已在这一轮恢复期间创建窗口。
-            // 空分组没有可操作的阅读窗口，不能因此阻止首次文件选择器出现。
-            let hasDocumentWindows = WindowRegistry.shared.controllers.contains {
-                $0 is AppWindowController && $0.window != nil
-            }
-            if !hasDocumentWindows {
+        }
+    }
+
+    private func finishStartup() {
+        Task { @MainActor [weak self] in
+            let shouldOfferFilePicker = await CrashRecovery.shared.presentIfNeeded()
+            guard let self, !CrashRecovery.shared.isEndingSession else { return }
+            self.hasCompletedStartup = true
+            UpdateManager.shared.startMonitoring()
+            // 诊断结束后重新判断；期间 Finder 可能已请求打开文件。
+            if shouldOfferFilePicker && !WindowRegistry.shared.controllers.contains(where: { $0 is AppWindowController && $0.window != nil }) {
                 Self.openDocumentDialog()
             }
         }
+    }
+
+    func applicationWillTerminate(_ notification: Notification) {
+        CrashRecovery.shared.finishSession()
     }
     
     // 用户点击 Dock 栏图标（应用如果已经在后台运行）
@@ -204,6 +212,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         panel.begin { response in
             openPanel = nil
             if response == .OK, let url = panel.url { NSApp.openSwiftUIWindow(for: url) }
+            CrashRecovery.shared.interfaceDidChange()
         }
     }
     

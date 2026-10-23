@@ -4,6 +4,7 @@ import SwiftUI
 @main enum AppEntry {
     static func main() {
         LinkPreviewRenderer.runWorkerIfRequested()
+        CrashRecovery.shared.beginSession()
         SimpleViewApp.main()
     }
 }
