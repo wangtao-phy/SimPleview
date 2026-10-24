@@ -225,8 +225,7 @@ import PDFKit
               page.displaysAnnotations else { return false }
         let local = view.convert(point, to: page)
         if let field = page.annotations.reversed().first(where: {
-            $0.type == "Widget" && $0.widgetFieldType == .text &&
-                $0.fieldName?.hasPrefix("SimPleview.Form.") == true && $0.bounds.contains(local)
+            $0.isAppGeneratedFormField && $0.bounds.contains(local)
         }), !field.isReadOnly {
             if editingField === field, editor != nil { return false } // 原控件处理光标定位。
             guard commit() else { return true }
@@ -247,6 +246,7 @@ import PDFKit
         let batchID = "SimPleview.Form." + UUID().uuidString
         field.widgetFieldType = .text
         field.fieldName = batchID
+        field.markAppGeneratedFormField()
         field.widgetStringValue = candidate.text ?? ""
         field.font = .systemFont(ofSize: candidate.fontSize)
         field.fontColor = .black
@@ -295,14 +295,27 @@ import PDFKit
     private func positionEditor() {
         guard let view, let editor, let root = editor.superview, let field = editingField,
               let page = field.page, page.document === view.document else { return }
-        editor.frame = root.convert(view.convert(field.bounds, from: page), from: view).insetBy(dx: -2, dy: -2)
+        let bounds = field.bounds
+        let origin = root.convert(view.convert(bounds.origin, from: page), from: view)
+        let right = root.convert(view.convert(CGPoint(x: bounds.maxX, y: bounds.minY), from: page), from: view)
+        let top = root.convert(view.convert(CGPoint(x: bounds.minX, y: bounds.maxY), from: page), from: view)
+        let target = root.convert(view.convert(bounds, from: page), from: view).insetBy(dx: -2, dy: -2)
+        // 保持输入框的逻辑宽度，再按 PDF 页的真实坐标方向旋转整个控件。
+        // 仅使用旋转后的外接矩形会把横向长字段挤成只能显示一两字的窄框。
+        editor.frameRotation = 0
+        editor.setFrameSize(CGSize(width: hypot(right.x - origin.x, right.y - origin.y) + 4,
+                                  height: hypot(top.x - origin.x, top.y - origin.y) + 4))
+        editor.frameRotation = atan2(right.y - origin.y, right.x - origin.x) * 180 / .pi
+        let actual = editor.convert(editor.bounds, to: root)
+        editor.setFrameOrigin(CGPoint(x: editor.frame.minX + target.minX - actual.minX,
+                                      y: editor.frame.minY + target.minY - actual.minY))
         editor.font = .systemFont(ofSize: (field.font?.pointSize ?? 12) * view.scaleFactor)
         editor.isHidden = !view.visibleRect.intersects(view.convert(field.bounds, from: page))
     }
 
     func ownsEditorPoint(_ point: CGPoint) -> Bool {
-        guard let view, let editor, !editor.isHidden, let root = editor.superview else { return false }
-        return editor.frame.contains(root.convert(point, from: view))
+        guard let view, let editor, !editor.isHidden, editor.superview != nil else { return false }
+        return editor.bounds.contains(editor.convert(point, from: view))
     }
 
     private func updateEditorValue() {

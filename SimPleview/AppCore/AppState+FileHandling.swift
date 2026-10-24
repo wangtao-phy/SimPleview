@@ -21,13 +21,13 @@ extension AppState {
     var hasUnsavedChanges: Bool { isDirty || !pdfView.draftInkPaths.isEmpty || pdfView.formSession.hasPendingText }
 
     @discardableResult
-    func save(sync: Bool = false, immediate: Bool = false) -> Bool {
+    func save(sync: Bool = false, immediate: Bool = false, automatically: Bool = false) -> Bool {
         guard pdfView.formSession.commit() else { return false }
         // Cmd+S/Cmd+Q 不保证改变第一响应者，必须主动提交尚未落入 PDF 的草稿。
         pdfView.commitDraftInk()
         autosaveTask?.cancel()
         autosaveTask = nil
-        return documentManager.save(pdfView: pdfView, sync: sync, immediate: immediate)
+        return documentManager.save(pdfView: pdfView, sync: sync, immediate: immediate, automatically: automatically)
     }
     
     /// 停止编辑两秒后写回原 PDF。任务只弱引用窗口，并验证文档加载代数和

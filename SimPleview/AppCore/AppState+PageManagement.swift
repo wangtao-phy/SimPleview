@@ -133,13 +133,27 @@ extension AppState {
 
     func insertPages(from source: PDFDocument, at index: Int) {
         guard let doc = pdfView.document, !source.isLocked, source.pageCount > 0 else { return }
-        let pages = (0..<source.pageCount).compactMap { source.page(at: $0)?.copy() as? PDFPage }
-        guard pages.count == source.pageCount else { return }
+        let originals = (0..<source.pageCount).compactMap { source.page(at: $0) }
+        guard originals.count == source.pageCount else { return }
+        guard !originals.contains(where: { $0.annotations.contains(where: \.requiresOriginalFormContext) }) else {
+            documentManager.saveIssue = L("Document Form Copy Unsupported")
+            return // 尚未改目标文档；不能把文档级字段树静默变成孤立的页面控件。
+        }
+        let pages = originals.compactMap { $0.copy() as? PDFPage }
+        guard pages.count == originals.count else { return }
         // 粘贴是新的标注副本。批次 ID 必须与原件分开，否则侧栏会把两份
         // 笔迹当成同一组；只重置本应用的 ID，保留外部批注的作者名称。
         var batches: [String: String] = [:]
-        for page in pages {
+        for (original, page) in zip(originals, pages) {
+            let fieldNames = Set(original.annotations.filter(\.isAppGeneratedFormField).compactMap(\.fieldName))
             for annotation in page.annotations {
+                // 插入的是独立字段副本，不能与原页共用字段名。只重置本应用
+                // 创建且已验证的平坦文本字段；副本尚没有可验证的原始字段树。
+                if annotation.type == "Widget", annotation.widgetFieldType == .text,
+                   let name = annotation.fieldName, fieldNames.contains(name) {
+                    annotation.markAppGeneratedFormField()
+                    annotation.fieldName = "SimPleview.Form." + UUID().uuidString
+                }
                 if let name = annotation.userName, name.hasPrefix("B-") || name.hasPrefix("S-") {
                     let replacement = batches[name] ?? String(name.prefix(2)) + UUID().uuidString
                     batches[name] = replacement
@@ -297,12 +311,28 @@ extension AppState {
     @MainActor
     func exportPagesAsPDF(at indices: Set<Int>) -> URL? {
         guard let doc = pdfView.document, !indices.isEmpty else { return nil }
-        let newDoc = PDFDocument()
         let sortedIndices = indices.sorted()
-        
-        for idx in sortedIndices {
-            // PDFPage.copy() 是深度拷贝，断开它和原文档的联系
-            if let page = doc.page(at: idx), let copy = page.copy() as? PDFPage {
+        guard sortedIndices.allSatisfy({ (0..<doc.pageCount).contains($0) }) else { return nil }
+        let pages = sortedIndices.compactMap { doc.page(at: $0) }
+        guard pages.count == sortedIndices.count else { return nil }
+        let newDoc: PDFDocument
+        if pages.contains(where: { $0.annotations.contains(where: \.requiresOriginalFormContext) }) {
+            // 全选可以直接保留整个文档目录；局部页面尚无可靠的第三方字段树迁移。
+            guard pages.count == doc.pageCount, let data = StandardInk.exportData(of: doc),
+                  let copy = PDFDocument(data: data) else {
+                documentManager.saveIssue = L("Document Form Copy Unsupported")
+                return nil
+            }
+            newDoc = copy
+        } else {
+            newDoc = PDFDocument()
+            for page in pages {
+                // PDFPage.copy() 是深度拷贝，断开它和原文档的联系。
+                guard let copy = page.copy() as? PDFPage else { return nil }
+                let fieldNames = Set(page.annotations.filter(\.isAppGeneratedFormField).compactMap(\.fieldName))
+                for field in copy.annotations where field.type == "Widget" && field.widgetFieldType == .text {
+                    if let name = field.fieldName, fieldNames.contains(name) { field.markAppGeneratedFormField() }
+                }
                 newDoc.insert(copy, at: newDoc.pageCount)
             }
         }

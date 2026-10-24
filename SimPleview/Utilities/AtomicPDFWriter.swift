@@ -33,12 +33,7 @@ enum AtomicPDFWriter {
             try? FileManager.default.removeItem(at: temporary)
             try? FileManager.default.removeItem(at: visibleCopy)
         }
-        var formNames = Set<String>()
-        for index in 0..<document.pageCount {
-            for field in document.page(at: index)?.annotations ?? [] where field.type == "Widget" {
-                if let name = field.fieldName, name.hasPrefix("SimPleview.Form.") { formNames.insert(name) }
-            }
-        }
+        let formNames = PDFFormCatalog.generatedFieldNames(in: document)
         let repairForms = !formNames.isEmpty || PDFFormCatalog.containsGeneratedFields(in: document)
         guard document.write(to: temporary) else { throw validationError("无法写入临时 PDF") }
         // PDFKit 新建的 Widget 可能没有 AcroForm 根登记。只在验证前补齐本应用的

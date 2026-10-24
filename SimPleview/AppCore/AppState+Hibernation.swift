@@ -54,7 +54,9 @@ extension AppState {
         // 睡觉前，先把用户画到一半的批注存入硬盘！安全第一！
         // 图片的休眠仅清缓存，保留修改，不自动弹出另存为。
         if let url = fileURL, !ImageDocumentManager.isImageFile(url: url), hasUnsavedChanges {
-            guard save(sync: true) else { return }
+            // 休眠属于后台自动保存：沿用磁盘版本校验，冲突时保留两边修改，
+            // 不把外部更新覆盖掉，也不从后台弹出保存错误窗口。
+            guard save(sync: true, automatically: true) else { return }
         }
         
         thumbnailManager.suspend()

@@ -54,11 +54,23 @@ extension DocumentManager {
         }
         isExporting = true
         let sourceURL = fileURL
+        let formNames = flatten ? [] : PDFFormCatalog.generatedFieldNames(in: document)
+        let repairForms = !flatten && (!formNames.isEmpty || PDFFormCatalog.containsGeneratedFields(in: document))
         Task.detached(priority: .userInitiated) { [weak self, weak window] in
             let accessing = targetURL.startAccessingSecurityScopedResource()
             defer { if accessing { targetURL.stopAccessingSecurityScopedResource() } }
             do {
-                let data = flatten ? try Self.burnInData(documentData) : documentData
+                var data = flatten ? try Self.burnInData(documentData) : documentData
+                if repairForms {
+                    // 与普通保存共用目录校验。只修独立临时副本，失败时不替换
+                    // 已有导出文件；活动文档和原 PDF 均不交给后台修改。
+                    let temporary = FileManager.default.temporaryDirectory
+                        .appendingPathComponent("simpleview-export-\(UUID().uuidString).pdf")
+                    defer { try? FileManager.default.removeItem(at: temporary) }
+                    try data.write(to: temporary)
+                    try PDFFormCatalog.attachGeneratedFields(in: temporary, fieldNames: formNames)
+                    data = try Data(contentsOf: temporary, options: .mappedIfSafe)
+                }
                 // 原子写入失败保留已有目标文件，不把半成品当作导出成功。
                 try data.write(to: targetURL, options: .atomic)
                 await MainActor.run {

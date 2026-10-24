@@ -190,7 +190,9 @@ extension CustomPDFView {
         if event.window === window, formSession.ownsEditorPoint(convert(event.locationInWindow, from: nil)) {
             return false // 输入框中的定位、拖选和复制完全由 AppKit 处理。
         }
-        if event.type == .leftMouseDown, event.window === window {
+        let formModifiers: NSEvent.ModifierFlags = [.command, .control, .option, .shift]
+        if event.type == .leftMouseDown, event.window === window,
+           event.modifierFlags.intersection(formModifiers).isEmpty {
             let point = convert(event.locationInWindow, from: nil)
             if ownsLinkPoint(point), formSession.activateField(at: point) {
                 consumesFormMouseGesture = true

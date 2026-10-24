@@ -102,12 +102,21 @@ import os
             }
             return nil
         }
-        let report = await withTaskCancellationHandler { await worker.value } onCancel: { worker.cancel() }
+        var report = await withTaskCancellationHandler { await worker.value } onCancel: { worker.cancel() }
         guard !Task.isCancelled, !isEndingSession else { return false }
         // continuation 恢复到任务重新执行之间仍可能先打开文件面板，故最终展示前
         // 重新判断；等待不会消耗轮询资源，也不在其它面板上叠加新的模态窗口。
         while !readyForUI {
             guard await waitForReadyUI(), !Task.isCancelled, !isEndingSession else { return false }
+            if report == nil {
+                // 等待文件面板/前台激活期间系统可能才写完报告，展示前再补查。
+                // 仅在界面恢复事件后执行，不增加常驻扫描或定时器。
+                let refresh = Task.detached(priority: .utility) {
+                    CrashReportFinder.latestReport(for: session.identity, in: directories, before: before)
+                }
+                report = await withTaskCancellationHandler { await refresh.value } onCancel: { refresh.cancel() }
+                guard !Task.isCancelled, !isEndingSession else { return false }
+            }
         }
         let text = diagnosticText(for: session, report: report)
         let alert = makeAlert(text: text, hasReport: report != nil)

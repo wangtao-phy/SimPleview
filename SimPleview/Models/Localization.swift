@@ -16,6 +16,7 @@ struct L {
             "No Crash Report Help": [.zh: "未找到可读取的对应系统报告。系统可能尚未生成报告，或此次结束未产生崩溃报告。可点击“查看报告”打开本机诊断目录。", .en: "No readable matching system report was found. It may not have been created yet, or this interruption may not produce one. Click Show Report to open the local diagnostic folder."],
             "Crash Report Truncated": [.zh: "显示内容已截断；完整信息保留在原系统报告中，可通过 Finder 查看。", .en: "The displayed text is truncated. The full details remain in the original system report, available through Finder."],
             "Previous Launch": [.zh: "上次启动", .en: "Previous Launch"],
+            "Document Form Copy Unsupported": [.zh: "这些页面包含依赖原文档的表单字段，无法安全插入或局部复制。可在原文件中填写，或先导出烧录副本。", .en: "These pages contain form fields that depend on their original document and cannot be safely inserted or copied individually. Fill in the original file, or export a flattened copy first."],
             "Continue": [.zh: "继续", .en: "Continue"],
             "Copy Diagnostics": [.zh: "复制诊断信息", .en: "Copy Diagnostics"],
             "Show Diagnostic Report": [.zh: "查看报告", .en: "Show Report"],

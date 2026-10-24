@@ -5,7 +5,7 @@ import PDFKit
 /// PDFKit 会保存页面上的 Widget，却不一定把新增字段登记到 /AcroForm/Fields。
 /// 这里只补齐本应用新写出的未加密、传统 xref 临时 PDF；不重绘页面、不改原字段树。
 /// 不支持的结构直接抛错，由外层保存事务保留原文件。
-@MainActor enum PDFFormCatalog {
+nonisolated enum PDFFormCatalog {
     private struct Reference: Hashable {
         let number: Int
         let generation: Int
@@ -103,12 +103,23 @@ import PDFKit
     }
 
     /// 只检查源文件的根字段数组；普通文档无须为这个判断生成整本快照。
-    static func containsGeneratedFields(in document: PDFDocument) -> Bool {
+    @MainActor static func containsGeneratedFields(in document: PDFDocument) -> Bool {
         guard let catalog = document.documentRef?.catalog else { return false }
         var form: CGPDFDictionaryRef?, fields: CGPDFArrayRef?
         guard CGPDFDictionaryGetDictionary(catalog, "AcroForm", &form), let form,
               CGPDFDictionaryGetArray(form, "Fields", &fields), let fields else { return false }
         return !generatedNames(in: fields).isEmpty
+    }
+
+    /// 活动文档只能在其所属主执行器读取；后台补目录只接收这些不可变名称。
+    @MainActor static func generatedFieldNames(in document: PDFDocument) -> Set<String> {
+        var names = Set<String>()
+        for index in 0..<document.pageCount {
+            for field in document.page(at: index)?.annotations ?? [] where field.isAppGeneratedFormField {
+                if let name = field.fieldName { names.insert(name) }
+            }
+        }
+        return names
     }
 
     private static func generatedNames(in fields: CGPDFArrayRef) -> [String] {
@@ -180,23 +191,53 @@ import PDFKit
         var rootReader = try object(root)
         let catalog = try rootReader.dictionary()
         guard catalog.values["/Type"].map({ rootReader.text($0) }) == "/Catalog" else { throw invalid() }
-        var generated: [Reference] = [], parents: [Reference] = [], found = Set<String>()
-        for (number, entry) in entries where !fieldNames.isEmpty {
-            let ref = Reference(number: number, generation: entry.generation)
-            var reader = try object(ref)
-            guard let dictionary = try? reader.dictionary(), dictionary.values["/Subtype"].map({ reader.text($0) }) == "/Widget",
-                  let nameValue = dictionary.values["/T"] else { continue }
-            let raw = reader.text(nameValue)
-            guard raw.hasPrefix("("), raw.hasSuffix(")"), fieldNames.contains(String(raw.dropFirst().dropLast())) else { continue }
-            found.insert(String(raw.dropFirst().dropLast()))
-            // 已有字段子树由 AcroForm 原样拥有，不能把它的 Widget 子节点再挂成根字段。
-            if let parent = dictionary.values["/Parent"] {
-                guard let ref = reference(parent, data: data) else { throw invalid() }
-                parents.append(ref); continue
+        // PDFKit 可能为根字段数组另造同名 Widget；只有页面 Annots 的对象才是
+        // 用户正在编辑的字段。沿实际页树收集，不能遍历所有 xref 对象后全部挂根。
+        func references(_ value: Range<Int>) throws -> [Reference] {
+            var reader = try reference(value, data: data).map(object) ?? Reader(data: data, position: value.lowerBound)
+            guard reader.text(try reader.token()) == "[" else { throw invalid() }
+            var result: [Reference] = []
+            while true {
+                let saved = reader.position, next = try reader.token()
+                if reader.text(next) == "]" { return result }
+                reader.position = saved
+                guard let ref = reference(try reader.value(), data: data) else { throw invalid() }
+                result.append(ref)
             }
-            guard dictionary.values["/FT"].map({ reader.text($0) }) == "/Tx" else { throw invalid() }
-            generated.append(ref)
         }
+        var generated: [Reference] = [], found = Set<String>(), visitedPages = Set<Reference>()
+        func collect(_ ref: Reference, depth: Int = 0) throws {
+            guard depth < 64, visitedPages.insert(ref).inserted else { throw invalid() }
+            var reader = try object(ref)
+            let page = try reader.dictionary()
+            if page.values["/Type"].map({ reader.text($0) }) == "/Pages" {
+                guard let kids = page.values["/Kids"] else { throw invalid() }
+                for child in try references(kids) { try collect(child, depth: depth + 1) }
+                return
+            }
+            guard page.values["/Type"].map({ reader.text($0) }) == "/Page" else { throw invalid() }
+            guard let annotations = page.values["/Annots"] else { return }
+            for annotation in try references(annotations) {
+                var source = try object(annotation)
+                let field = try source.dictionary()
+                guard field.values["/Subtype"].map({ source.text($0) }) == "/Widget",
+                      let nameValue = field.values["/T"] else { continue }
+                let raw = source.text(nameValue)
+                guard raw.hasPrefix("("), raw.hasSuffix(")") else { continue }
+                let name = String(raw.dropFirst().dropLast())
+                guard name.hasPrefix("SimPleview.Form.") else { continue }
+                // 层级字段仍属于原字段树，不将子节点变成新的根字段。
+                if field.values["/Parent"] != nil || field.values["/Kids"] != nil {
+                    guard !fieldNames.contains(name) else { throw invalid() }
+                    continue
+                }
+                guard field.values["/FT"].map({ source.text($0) }) == "/Tx" else { continue }
+                guard fieldNames.contains(name), found.insert(name).inserted else { throw invalid() }
+                generated.append(annotation)
+            }
+        }
+        guard let pagesValue = catalog.values["/Pages"], let pages = reference(pagesValue, data: data) else { throw invalid() }
+        try collect(pages)
         guard found == fieldNames else { throw invalid() }
         var updates: [Reference: Data] = [:]
         let formValue = catalog.values["/AcroForm"]
@@ -219,16 +260,6 @@ import PDFKit
                 roots.append(ref)
             }
         }
-        for parent in parents {
-            var ancestor = parent, visited = Set<Reference>()
-            while !registered.contains(ancestor) {
-                guard visited.insert(ancestor).inserted, visited.count <= 64 else { throw invalid() }
-                var reader = try object(ancestor)
-                let dictionary = try reader.dictionary()
-                guard let value = dictionary.values["/Parent"], let next = reference(value, data: data) else { throw invalid() }
-                ancestor = next
-            }
-        }
         let retained = try roots.filter { ref in
             var reader = try object(ref)
             let field = try reader.dictionary()
@@ -239,16 +270,16 @@ import PDFKit
             let raw = reader.text(nameRange)
             guard raw.hasPrefix("("), raw.hasSuffix(")") else { return true }
             let name = String(raw.dropFirst().dropLast())
-            return !name.hasPrefix("SimPleview.Form.") || fieldNames.contains(name)
+            return !name.hasPrefix("SimPleview.Form.")
         }
-        let additions = generated.filter { !registered.contains($0) }.sorted { $0.number < $1.number }
-        guard !additions.isEmpty || retained.count != roots.count else {
+        let canonical = retained + generated.sorted { $0.number < $1.number }
+        guard canonical != roots else {
             // 无须追加也要检查编码后的真实字段名，不能把无法处理的旧引用误判为已清理。
             if form != nil { try validate(url, fieldNames: fieldNames, count: roots.count) }
             else if !fieldNames.isEmpty { throw invalid() }
             return
         }
-        let newArray = Data(("[ " + (retained + additions).map(\.text).joined(separator: " ") + " ]").utf8)
+        let newArray = Data(("[ " + canonical.map(\.text).joined(separator: " ") + " ]").utf8)
         var nextSize = size
         if let fieldsRef { updates[fieldsRef] = newArray }
         else {
@@ -284,7 +315,7 @@ import PDFKit
         let handle = try FileHandle(forWritingTo: url)
         defer { try? handle.close() }
         try handle.seekToEnd(); try handle.write(contentsOf: suffix)
-        try validate(url, fieldNames: fieldNames, count: retained.count + additions.count)
+        try validate(url, fieldNames: fieldNames, count: canonical.count)
     }
 
     private static func validate(_ url: URL, fieldNames: Set<String>, count: Int) throws {
