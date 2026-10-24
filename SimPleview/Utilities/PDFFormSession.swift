@@ -172,11 +172,11 @@ import PDFKit
                   let page = self.requestedPages.compactMap(\.page).first(where: { self.cachedHints(on: $0) == nil }),
                   let document = view.document, page.document === document {
                 let bounds = page.bounds(for: .cropBox), rotation = page.rotation
-                var candidates: [PDFFormDetection.Candidate] = []
-                if let input = PDFFormDetection.capture(page, source: view.scanCache.source) {
-                    let worker = Task.detached(priority: .utility) { PDFFormDetection.candidates(input: input) }
-                    candidates = await withTaskCancellationHandler { await worker.value } onCancel: { worker.cancel() }
-                }
+                // 捕获失败不是“这页没有填空”，不能永久缓存为空；下次视口
+                // 更新时仍可重试。本轮直接结束，不在失败页上循环耗费资源。
+                guard let input = PDFFormDetection.capture(page, source: view.scanCache.source) else { break }
+                let worker = Task.detached(priority: .utility) { PDFFormDetection.candidates(input: input) }
+                let candidates = await withTaskCancellationHandler { await worker.value } onCancel: { worker.cancel() }
                 guard !Task.isCancelled, self.detectionID == id, view.isFormFilling,
                       view.document === document, page.document === document,
                       page.bounds(for: .cropBox) == bounds, page.rotation == rotation else { break }
@@ -211,7 +211,8 @@ import PDFKit
             let area = candidate.bounds.width * candidate.bounds.height
             return !widgets.contains {
                 let overlap = candidate.bounds.intersection($0.bounds)
-                return !overlap.isNull && overlap.width * overlap.height >= area * 0.5
+                let otherArea = $0.bounds.width * $0.bounds.height
+                return otherArea > 0 && !overlap.isNull && overlap.width * overlap.height >= min(area, otherArea) * 0.5
             }
         }
     }
@@ -247,6 +248,7 @@ import PDFKit
         field.widgetFieldType = .text
         field.fieldName = batchID
         field.markAppGeneratedFormField()
+        field.isMultiline = candidate.isMultiline
         field.widgetStringValue = candidate.text ?? ""
         field.font = .systemFont(ofSize: candidate.fontSize)
         field.fontColor = .black
@@ -279,8 +281,11 @@ import PDFKit
         control.backgroundColor = .textBackgroundColor
         control.textColor = .textColor
         control.focusRingType = .exterior
-        control.maximumNumberOfLines = 1
-        control.cell?.isScrollable = true
+        control.maximumNumberOfLines = field.isMultiline ? 0 : 1
+        control.cell?.usesSingleLineMode = !field.isMultiline
+        control.cell?.wraps = field.isMultiline
+        control.cell?.isScrollable = !field.isMultiline
+        if field.isMultiline { control.lineBreakMode = .byWordWrapping }
         control.delegate = self
         editor = control
         editingField = field
@@ -344,6 +349,14 @@ import PDFKit
         finishEditor()
         hasPendingText = false
         view?.onSaveRequired?()
+    }
+
+    func control(_ control: NSControl, textView: NSTextView, doCommandBy command: Selector) -> Bool {
+        guard control === editor, editingField?.isMultiline == true,
+              command == #selector(NSTextView.insertNewline(_:)) else { return false }
+        // 大框中的 Return 插入真正换行；单行字段及 Tab 继续使用 AppKit 行为。
+        textView.insertNewlineIgnoringFieldEditor(nil)
+        return true
     }
 
     isolated deinit {

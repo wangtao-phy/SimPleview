@@ -11,12 +11,12 @@ nonisolated enum PDFFormDetection {
         let legacyIndex: Int?
         /// nil 表示旧提示的可见内容无法可靠恢复；主线程必须保留它，不能覆盖。
         let text: String?
+        var isMultiline = false
     }
 
     struct Input: Sendable {
         let page: PDFPageRenderInput
         let hints: [Candidate]
-        let occupied: [CGRect]
     }
 
     /// PDFKit 的单页导出会丢掉 Apple 自定义表单键。先从活动页抽取只读值，
@@ -24,7 +24,6 @@ nonisolated enum PDFFormDetection {
     @MainActor static func capture(_ page: PDFPage, source: PDFRenderSource?) -> Input? {
         guard !Task.isCancelled else { return nil }
         let annotations = page.annotations
-        let occupied = annotations.filter { $0.type == "Widget" }.map(\.bounds)
         var hints: [Candidate] = []
         for (index, annotation) in annotations.enumerated() {
             guard !Task.isCancelled else { return nil }
@@ -46,7 +45,7 @@ nonisolated enum PDFFormDetection {
                                    legacyIndex: index, text: text))
         }
         guard !Task.isCancelled, let snapshot = PDFPageRenderInput.capture(page, source: source) else { return nil }
-        return Input(page: snapshot, hints: hints, occupied: occupied)
+        return Input(page: snapshot, hints: hints)
     }
 
     static func candidates(input: Input) -> [Candidate] {
@@ -54,7 +53,9 @@ nonisolated enum PDFFormDetection {
             guard !Task.isCancelled, let document = PDFDocument(data: input.page.data),
                   input.page.index >= 0, input.page.index < document.pageCount,
                   let page = document.page(at: input.page.index), !document.isLocked else { return [] }
-            var occupied = input.occupied
+            // 缓存页面固有的填空几何。当前 Widget 的覆盖在显示/点击时判断，
+            // 避免字段删除或撤销后，这个位置永远留在旧的“已占用”缓存中。
+            var occupied: [CGRect] = []
             var result: [Candidate] = []
             for hint in input.hints {
                 guard !Task.isCancelled else { return [] }
@@ -63,9 +64,9 @@ nonisolated enum PDFFormDetection {
                 occupied.append(hint.bounds)
             }
             guard !Task.isCancelled else { return [] }
-            guard let text = page.string,
-                  let expression = try? NSRegularExpression(pattern: "_{3,}") else { return readingOrder(result) }
-            for match in expression.matches(in: text, range: NSRange(text.startIndex..., in: text)) {
+            let text = page.string ?? ""
+            let matches = (try? NSRegularExpression(pattern: "_{3,}"))?.matches(in: text, range: NSRange(text.startIndex..., in: text)) ?? []
+            for match in matches {
                 guard !Task.isCancelled else { return [] }
                 guard let selection = page.selection(for: match.range) else { continue }
                 for line in selection.selectionsByLine() {
@@ -75,6 +76,12 @@ nonisolated enum PDFFormDetection {
                                             legacyIndex: nil, text: ""))
                     occupied.append(bounds)
                 }
+            }
+            for candidate in PDFFormGeometry.candidates(on: page) {
+                guard !Task.isCancelled else { return [] }
+                guard !covered(candidate.bounds, by: occupied) else { continue }
+                result.append(candidate)
+                occupied.append(candidate.bounds)
             }
             return Task.isCancelled ? [] : readingOrder(result)
         }
@@ -89,7 +96,9 @@ nonisolated enum PDFFormDetection {
         let area = bounds.width * bounds.height
         return regions.contains {
             let overlap = bounds.intersection($0)
-            return !overlap.isNull && overlap.width * overlap.height >= area * 0.5
+            let otherArea = $0.width * $0.height
+            // 较小的系统提示位于大格子内时也算同一位置，不能再叠加一个大字段。
+            return otherArea > 0 && !overlap.isNull && overlap.width * overlap.height >= min(area, otherArea) * 0.5
         }
     }
 
