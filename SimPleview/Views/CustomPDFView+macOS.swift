@@ -23,6 +23,8 @@ extension CustomPDFView {
     }
     
     override func viewWillMove(toSuperview newSuperview: NSView?) {
+        // 在 super 及清理回调之前暂停；它们本身可能使旧视图再次失效。
+        if newSuperview == nil { isRenderSnapshotDetached = true }
         super.viewWillMove(toSuperview: newSuperview)
         if newSuperview == nil {
             stopLinkTracking()
@@ -33,12 +35,14 @@ extension CustomPDFView {
     }
 
     override func viewDidMoveToWindow() {
+        if window == nil { isRenderSnapshotDetached = true }
         super.viewDidMoveToWindow()
         if window == nil {
             stopLinkTracking()
             scanCache.removeAll()
             removeRenderObservers()
         } else {
+            isRenderSnapshotDetached = false
             startLinkTracking()
             publishRenderSnapshot()
             scheduleRenderSnapshot()
@@ -316,11 +320,10 @@ struct PDFKitRepresentable: NSViewRepresentable {
         nsView.currentSelectedBatchID = selectedBatchID
     }
     
-    // [专家级内存优化：强制拆卸缓存]
-    // SwiftUI 有极其强烈的视图重用缓存机制（Reuse Pool）。
-    // 如果不显式手写 dismantleNSView，SwiftUI 会将这几百兆的 PDFView 缓存到系统池中永不释放！
-    // 加上这个方法，当窗口或视图被销毁时，系统才会真正彻底地释放底层图形内存。
+    /// SwiftUI 拆卸与文档关闭使用同一准备顺序，先停旧页工作及编辑状态，
+    /// 再让 PDFKit 释放文档和瓦片；不能在释放过程中重新启动预热。
     static func dismantleNSView(_ nsView: CustomPDFView, coordinator: ()) {
+        nsView.prepareForDocumentReplacement()
         nsView.document = nil
         nsView.removeFromSuperview()
     }

@@ -55,7 +55,8 @@ extension CustomPDFView {
     /// 再取 visiblePages，避免把尚未完成布局的空列表当成最终视口。
     /// 每个视图最多排队一次，弱引用不延长窗口寿命；手绘仍同步发布快照。
     func scheduleRenderSnapshot() {
-        guard window != nil, !isRenderSnapshotScheduled else { return }
+        guard !isPreparingDocumentReplacement, !isRenderSnapshotDetached,
+              window != nil, !isRenderSnapshotScheduled else { return }
         isRenderSnapshotScheduled = true
         DispatchQueue.main.async { [weak self] in
             guard let self else { return }
@@ -69,7 +70,8 @@ extension CustomPDFView {
     /// 避免后台瓦片等待主线程或持锁回调造成死锁。
     func publishRenderSnapshot() {
         // shouldDisplay 的更新可能引起同步重绘通知；禁止重入快照构建。
-        guard !isPublishingRenderSnapshot else { return }
+        guard !isPreparingDocumentReplacement, !isRenderSnapshotDetached,
+              !isPublishingRenderSnapshot else { return }
         isPublishingRenderSnapshot = true
         defer { isPublishingRenderSnapshot = false }
         observeRenderViewport()

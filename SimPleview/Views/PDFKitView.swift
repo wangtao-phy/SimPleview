@@ -30,6 +30,8 @@ class CustomPDFView: PDFView {
     // prepareForDocumentReplacement、视图移除和内存压力入口负责清理。
     var isPublishingRenderSnapshot = false
     var isRenderSnapshotScheduled = false
+    var isPreparingDocumentReplacement = false
+    var isRenderSnapshotDetached = false
     var renderObservers: [NSObjectProtocol] = []
     weak var observedRenderClipView: NSClipView?
     weak var backgroundGeometryDocument: PDFDocument?
@@ -182,6 +184,11 @@ class CustomPDFView: PDFView {
     /// 文件替换和关闭共用的引用释放点。弹窗、悬停和拖动状态都可能拥有旧页；
     /// 先关观察者/弹窗，再清状态，避免重载后回调修改已不属于当前文档的批注。
     func prepareForDocumentReplacement() {
+        guard !isPreparingDocumentReplacement else { return }
+        // 清理选择、悬浮框及输入控件也会触发 PDFKit 的失效回调。
+        // 本轮清理期间不能重新构建旧页快照或重新排入扫描预热。
+        isPreparingDocumentReplacement = true
+        defer { isPreparingDocumentReplacement = false }
         isFormFilling = false
         scanCache.source = nil
         backgroundGeometryDocument = nil
