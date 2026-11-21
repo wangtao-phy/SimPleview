@@ -37,6 +37,8 @@ class CustomPDFView: PDFView {
     // prepareForDocumentReplacement、视图移除和内存压力入口负责清理。
     var isPublishingRenderSnapshot = false
     var isRenderSnapshotScheduled = false
+    // nil 表示正常立即更新；批量切换期间只记录是否需要重建快照。
+    var renderSnapshotBatchNeedsUpdate: Bool?
     var isPreparingDocumentReplacement = false
     var isRenderSnapshotDetached = false
     var renderObservers: [NSObjectProtocol] = []

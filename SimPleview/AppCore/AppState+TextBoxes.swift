@@ -27,23 +27,26 @@ extension AppState {
             pdfView.finishTextBoxPlacement()
             return
         }
-        guard canInsertTextBox, pdfView.formSession.commit() else { return }
-        pdfView.commitDraftInk()
-        isFormFilling = false
-        activeType = .none
-        pdfView.activeType = .none
-        selectedAnnotation = nil
-        pdfView.currentSelectedBatchID = nil
-        pdfView.clearTextBoxInteraction()
-        pdfView.clearSelection()
-        pdfView.cleanupMenuObservers()
+        guard canInsertTextBox else { return }
+        pdfView.coalesceRenderSnapshots {
+            guard pdfView.formSession.commit() else { return }
+            pdfView.commitDraftInk()
+            if isFormFilling { isFormFilling = false }
+            if activeType != .none { activeType = .none }
+            pdfView.activeType = .none
+            if selectedAnnotation != nil { selectedAnnotation = nil }
+            pdfView.currentSelectedBatchID = nil
+            pdfView.clearTextBoxInteraction()
+            if pdfView.currentSelection != nil { pdfView.clearSelection() }
+            pdfView.cleanupMenuObservers()
 
-        isPlacingTextBox = true
-        pdfView.textBoxPlacement = { [weak self] target in
-            self?.isPlacingTextBox = false
-            if let target { self?.textBoxTarget = target }
+            isPlacingTextBox = true
+            pdfView.textBoxPlacement = { [weak self] target in
+                self?.isPlacingTextBox = false
+                if let target { self?.textBoxTarget = target }
+            }
+            pdfView.window?.makeFirstResponder(pdfView)
         }
-        pdfView.window?.makeFirstResponder(pdfView)
     }
 
     func saveTextBox(_ text: String, font: NSFont, color: NSColor, at target: PDFTextBoxTarget) -> Bool {

@@ -16,15 +16,21 @@ struct FormToolsButton: View {
         .help(state.L(state.isPlacingTextBox ? "Text Box Placement Help" : "Form and Text Tools"))
         .disabled(!state.canFillForms && !state.canInsertTextBox)
         .popover(isPresented: $isShowingTools, arrowEdge: .bottom) {
-            VStack(alignment: .leading, spacing: 6) {
+            VStack(alignment: .leading, spacing: 8) {
                 Button {
                     isShowingTools = false
                     state.toggleFormFilling()
                 } label: {
-                    HStack {
-                        Label(state.L("Form Filling"), systemImage: "rectangle.and.pencil.and.ellipsis")
+                    HStack(spacing: 8) {
+                        Label {
+                            Text(state.L("Form Filling"))
+                        } icon: {
+                            Image(systemName: "rectangle.and.pencil.and.ellipsis").foregroundStyle(.tint)
+                        }
                         Spacer(minLength: 12)
-                        if state.isFormFilling { Image(systemName: "checkmark").accessibilityHidden(true) }
+                        if state.isFormFilling {
+                            Image(systemName: "checkmark").foregroundStyle(.tint).accessibilityHidden(true)
+                        }
                     }
                 }
                 .accessibilityValue(state.L(state.isFormFilling ? "On" : "Off"))
@@ -35,9 +41,12 @@ struct FormToolsButton: View {
                     isShowingTools = false
                     state.toggleTextBoxPlacement()
                 } label: {
-                    Label(state.L(state.isPlacingTextBox ? "Cancel Text Box Placement" : "Insert Text Box"),
-                          systemImage: "textformat")
-                        .frame(maxWidth: .infinity, alignment: .leading)
+                    Label {
+                        Text(state.L(state.isPlacingTextBox ? "Cancel Text Box Placement" : "Insert Text Box"))
+                    } icon: {
+                        Image(systemName: "textformat").foregroundStyle(.tint)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
                 }
                 .help(state.L("Text Box Placement Help"))
                 .disabled(!state.canInsertTextBox)
@@ -45,9 +54,10 @@ struct FormToolsButton: View {
                     Text(state.L("Text Box Placement Help")).font(.caption).foregroundStyle(.secondary)
                 }
             }
-            .buttonStyle(.borderless)
+            .buttonStyle(.bordered)
+            .controlSize(.large)
             .padding(12)
-            .frame(width: 228)
+            .frame(width: 256)
         }
         .sheet(item: $state.textBoxTarget, onDismiss: {
             state.pdfView.textBoxOverlay?.refresh()

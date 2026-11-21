@@ -71,12 +71,30 @@ extension CustomPDFView {
         }
     }
 
+    /// 模式切换可能依次提交编辑、清空选区和刷新提示。保留各自的重绘区域，
+    /// 等状态一致后只构建一次快照，仍在本次点击返回之前更新画面数据。
+    func coalesceRenderSnapshots(while update: () -> Void) {
+        guard renderSnapshotBatchNeedsUpdate == nil else {
+            update()
+            return
+        }
+        renderSnapshotBatchNeedsUpdate = false
+        update()
+        let needsUpdate = renderSnapshotBatchNeedsUpdate == true
+        renderSnapshotBatchNeedsUpdate = nil
+        if needsUpdate { publishRenderSnapshot() }
+    }
+
     /// 只在主执行器收集可见页。锁仅用于一次值替换，PDFKit/绘图调用均在锁外，
     /// 避免后台瓦片等待主线程或持锁回调造成死锁。
     func publishRenderSnapshot() {
         // shouldDisplay 的更新可能引起同步重绘通知；禁止重入快照构建。
         guard !isPreparingDocumentReplacement, !isRenderSnapshotDetached,
               !isPublishingRenderSnapshot else { return }
+        if renderSnapshotBatchNeedsUpdate != nil {
+            renderSnapshotBatchNeedsUpdate = true
+            return
+        }
         isPublishingRenderSnapshot = true
         defer { isPublishingRenderSnapshot = false }
         observeRenderViewport()
