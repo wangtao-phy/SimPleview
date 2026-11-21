@@ -1,69 +1,6 @@
 import SwiftUI
 import PDFKit
 
-// MARK: - 跨平台的颜色选择菜单
-/// 点击后下拉展示 5 个常用颜色。在 Mac 上，最下面还会多出一个“自定义颜色”呼出系统调色板。
-struct ColorPickerMenu: View {
-    @ObservedObject var state: AppState
-    
-    var body: some View {
-        // Menu 控件自带原生的点击弹窗效果
-        Menu {
-            // 循环生成 5 个标准颜色选项
-            ForEach([
-                (state.L("Blue"), PlatformColor.platformBlue),
-                (state.L("Red"), PlatformColor.platformRed),
-                (state.L("Yellow"), PlatformColor.platformYellow),
-                (state.L("Green"), PlatformColor.platformGreen),
-                (state.L("Purple"), PlatformColor.platformPurple)
-            ], id: \.0) { name, color in
-                colorMenuOption(name, color)
-            }
-            
-            Divider() // 分割线
-            
-            Button(action: {
-                #if os(macOS)
-                // 仅在 macOS 支持高级系统调色板 (NSColorPanel)
-                // 系统颜色面板是共享单例；回调不能长期保留已经关闭的文档窗口。
-                ColorPanelManager.shared.show(initialColor: state.currentColor) { [weak document = state] newColor in
-                    guard let document, !document.isClosed else { return }
-                    document.currentColor = newColor
-                }
-                #endif
-            }) {
-                Label { Text(state.L("Other Color...")) } icon: {
-                    Image(systemName: "paintpalette")
-                }
-            }
-        } label: { // Menu 闭合时，平时显示在界面上的样子（就是一个大圆点）
-            HStack(spacing: 4) {
-                Image(systemName: "circle.fill")
-                    .symbolRenderingMode(.palette)
-                    .foregroundStyle(Color(state.currentColor)) // 圆点颜色实时跟随当前选中的颜色
-                    .imageScale(.large)
-                
-                // 在 macOS 的原生 Toolbar 里，如果只放一个图标，按钮的点击热区会极其小且怪异
-                // 加上一个看不见的空格，能强行把按钮撑宽，这是个非常有效的丑陋黑客技巧。
-                Text(" ") 
-            }
-        }
-    }
-    
-    private func colorMenuOption(_ name: String, _ color: PlatformColor) -> some View {
-        Button(action: { state.currentColor = color }) {
-            colorMenuText(name: name, color: color)
-        }
-    }
-    
-    private func colorMenuText(name: String, color: NSColor) -> Text {
-        var dot = AttributedString("● ")
-        dot.foregroundColor = Color(nsColor: color)
-        let text = AttributedString(name)
-        return Text(dot + text)
-    }
-}
-
 // MARK: - 独立原生手绘按钮（带滑块下拉）
 struct DrawButtonView: View {
     @ObservedObject var state: AppState
@@ -144,29 +81,5 @@ struct AnnotationEditorView: View {
         }
         .padding()
         .frame(width: 250) // 限制宽度，让浮窗不要显得太大太笨重
-    }
-}
-
-class ColorPanelManager: NSObject {
-    static let shared = ColorPanelManager()
-    private var colorUpdateCallback: ((NSColor) -> Void)?
-    
-    func show(initialColor: NSColor, onUpdate: @escaping (NSColor) -> Void) {
-        self.colorUpdateCallback = onUpdate
-        
-        let panel = NSColorPanel.shared
-        // 系统颜色面板由各个 ColorPicker 共用；每次打开都重新指定目标，
-        // 防止设置页改色后，工具栏的颜色回调仍被交给另一个控件。
-        panel.setTarget(self)
-        panel.setAction(#selector(colorDidChange(_:)))
-        panel.color = initialColor
-        panel.showsAlpha = false
-        panel.mode = .RGB
-        
-        panel.makeKeyAndOrderFront(nil)
-    }
-    
-    @objc private func colorDidChange(_ sender: NSColorPanel) {
-        colorUpdateCallback?(sender.color)
     }
 }

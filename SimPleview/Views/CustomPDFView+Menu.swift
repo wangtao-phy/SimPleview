@@ -14,7 +14,7 @@ extension CustomPDFView {
         
         // 如果右键点在了一个批注上...
         if page.displaysAnnotations, let annotation = page.annotation(at: pagePoint),
-           !annotation.isFormFieldPresentation {
+           !annotation.isFormFieldPresentation, !annotation.isAppTextBox {
             lastClickedAnnotation = annotation
             initialAnnotationColor = annotation.color
             

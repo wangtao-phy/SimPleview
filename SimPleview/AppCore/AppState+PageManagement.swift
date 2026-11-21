@@ -159,6 +159,7 @@ extension AppState {
                     batches[name] = replacement
                     annotation.userName = replacement
                 }
+                if annotation.isAppTextBox { annotation.assignTextBoxIdentifier() }
                 if annotation.value(forAnnotationKey: VectorInk.idKey) != nil {
                     annotation.setValue(UUID().uuidString, forAnnotationKey: VectorInk.idKey)
                 }

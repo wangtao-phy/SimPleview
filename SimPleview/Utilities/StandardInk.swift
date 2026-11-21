@@ -16,6 +16,12 @@ enum StandardInk {
         guard annotation.type == "Ink", isAppInk(annotation),
               annotation.shouldDisplay || isScreenHidden(annotation),
               !pagePaths(of: annotation).isEmpty else { return false }
+        hideNativeAppearance(annotation)
+        return true
+    }
+
+    /// 标记只存在于活动绘图文档，保留原始 PDF 标志给独立保存副本使用。
+    static func hideNativeAppearance(_ annotation: PDFAnnotation) {
         if !isScreenHidden(annotation) {
             let flags = (annotation.value(forAnnotationKey: .flags) as? NSNumber)?.intValue ?? 0
             annotation.setValue(flags, forAnnotationKey: originalFlagsKey)
@@ -27,7 +33,6 @@ enum StandardInk {
         // 原始 flags 已独立保存，导出副本恢复原值；矢量快照不依赖这些显示位。
         let flags = (annotation.value(forAnnotationKey: .flags) as? NSNumber)?.intValue ?? 0
         if flags & 2 == 0 { annotation.setValue(flags | 2, forAnnotationKey: .flags) }
-        return true
     }
 
     static func isScreenHidden(_ annotation: PDFAnnotation) -> Bool {
@@ -47,7 +52,8 @@ enum StandardInk {
         var changed = false
         for index in 0..<copy.pageCount {
             for annotation in copy.page(at: index)?.annotations ?? [] where isScreenHidden(annotation) {
-                guard annotation.type == "Ink", isAppInk(annotation) else { continue }
+                let isInk = annotation.type == "Ink" && isAppInk(annotation)
+                guard isInk || annotation.isAppTextBox else { continue }
                 if let original = annotation.value(forAnnotationKey: originalFlagsKey) as? NSNumber {
                     annotation.setValue(original, forAnnotationKey: .flags)
                 } else {
@@ -56,7 +62,11 @@ enum StandardInk {
                     annotation.setValue(flags & ~2, forAnnotationKey: .flags)
                     annotation.shouldDisplay = true
                 }
-                annotation.color = displayColor(of: annotation)
+                if isInk { annotation.color = displayColor(of: annotation) }
+                if annotation.isAppTextBox, !annotation.hasAppearanceStream, let style = annotation.textBoxStyle {
+                    annotation.font = style.font
+                    annotation.fontColor = style.color
+                }
                 annotation.removeValue(forAnnotationKey: screenHiddenKey)
                 annotation.removeValue(forAnnotationKey: originalFlagsKey)
                 changed = true

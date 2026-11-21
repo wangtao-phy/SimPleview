@@ -9,6 +9,7 @@ extension AppState {
 
     func toggleFormFilling() {
         guard canFillForms, pdfView.formSession.commit() else { return }
+        pdfView.finishTextBoxPlacement()
         if !isFormFilling {
             pdfView.commitDraftInk()
             activeType = .none

@@ -5,6 +5,8 @@ import Combine
 extension AppState {
 
     func setupCallbacks() {
+        pdfView.onTextBoxEdit = { [weak self] annotation in self?.openTextBox(annotation) }
+        pdfView.onTextBoxDelete = { [weak self] annotation in self?.deleteAnnotation(annotation) }
         // [闭包与弱引用]
         // [weak self] 是 Swift 避免闭包造成循环引用（互相抓住不放）的终极武器。
         pdfView.onAnnotationSelected = { [weak self] annot in
@@ -68,7 +70,14 @@ extension AppState {
         let nc = NotificationCenter.default
         nc.publisher(for: .PDFViewDocumentChanged, object: pdfView)
             .receive(on: DispatchQueue.main)
-            .sink { [weak self] _ in self?.isFormFilling = false }
+            .sink { [weak self] _ in
+                guard let self else { return }
+                self.isFormFilling = false
+                if let target = self.textBoxTarget,
+                   target.page?.document == nil || target.page?.document !== self.pdfView.document {
+                    self.textBoxTarget = nil
+                }
+            }
             .store(in: &cancellables)
         FeaturePreferences.shared.$eyeCare
             .removeDuplicates().receive(on: DispatchQueue.main)

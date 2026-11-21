@@ -2,7 +2,7 @@ import Foundation
 import PDFKit
 import ObjectiveC
 
-/// 只在 CustomPDFView 的一次原生绘制调用内屏蔽将由我们矢量描边的批注。
+/// 只在 CustomPDFView 的一次原生绘制调用内屏蔽由应用直接绘制的手绘和文本框。
 /// 不改变 shouldDisplay、颜色或 InkList，保存/打印/其他 PDFView 仍使用标准外观。
 /// 作用域在线程本地，嵌套绘制结束后恢复旧值，不能影响其他窗口或后台导出。
 nonisolated enum VectorInkDrawingScope {

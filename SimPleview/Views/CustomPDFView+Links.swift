@@ -54,7 +54,10 @@ extension CustomPDFView {
         let resignKey = NotificationCenter.default.addObserver(forName: NSWindow.didResignKeyNotification,
             object: window, queue: .main) { [weak self] _ in
                 // 原生预览取得键盘焦点后要能选择、复制文字，不能因主窗口失焦而关掉它。
-                MainActor.assumeIsolated { self?.linkMouseGesture = nil }
+                MainActor.assumeIsolated {
+                    self?.linkMouseGesture = nil
+                    self?.clearTextBoxInteraction()
+                }
             }
         linkTrackingObservers.append((.default, resignKey))
         let becomeKey = NotificationCenter.default.addObserver(forName: NSWindow.didBecomeKeyNotification,
@@ -95,7 +98,7 @@ extension CustomPDFView {
     func updateLinkHover(at point: CGPoint) {
         // 窗口级事件也包括侧栏和覆盖在 PDF 上的控件，必须按实际命中的视图过滤。
         // AppKit hitTest 使用接收视图的父坐标系，不能直接传 PDF 页坐标。
-        guard !isFormFilling, activeType == .none, !consumesLinkMouseGesture,
+        guard textBoxPlacement == nil, !isFormFilling, activeType == .none, !consumesLinkMouseGesture,
               NSApplication.shared.isActive, ownsLinkPoint(point),
               let page = page(for: point, nearest: false),
               let annotation = internalLink(at: convert(point, to: page), on: page) else {
@@ -173,34 +176,15 @@ extension CustomPDFView {
         return hit === self || hit.isDescendant(of: self)
     }
 
-    /// 普通事件不改写；只有已接管的链接手势返回 true，由监视器停止再次派发。
-    /// 不启动嵌套事件循环，所以文件刷新、失焦和关闭仍能及时取消本次操作。
+    /// 在 PDFKit 子视图之前分派文本框、表单和链接事件。仅消费已接管的手势，
+    /// 普通选择、滚动和输入继续交给 AppKit。
     func handleLinkMouseEvent(_ event: NSEvent) -> Bool {
         if event.type == .leftMouseDown {
             // 可能在窗口外抬起了鼠标。任何新点击都不继承丢失 up 的旧手势。
             linkMouseGesture = nil
             consumesLinkMouseGesture = false
-        }
-        if event.window === window, event.type == .leftMouseDragged || event.type == .leftMouseUp,
-           consumesFormMouseGesture {
-            if event.type == .leftMouseUp { consumesFormMouseGesture = false }
-            return true // down 已用于打开控件，不能把无配对的 up 交给 PDFKit 清走焦点。
-        }
-        if event.type == .leftMouseDown { consumesFormMouseGesture = false }
-        if event.window === window, formSession.ownsEditorPoint(convert(event.locationInWindow, from: nil)) {
-            return false // 输入框中的定位、拖选和复制完全由 AppKit 处理。
-        }
-        let formModifiers: NSEvent.ModifierFlags = [.command, .control, .option, .shift]
-        if event.type == .leftMouseDown, event.window === window,
-           event.modifierFlags.intersection(formModifiers).isEmpty {
-            let point = convert(event.locationInWindow, from: nil)
-            if ownsLinkPoint(point), formSession.activateField(at: point) {
-                consumesFormMouseGesture = true
-                return true
-            }
-        }
-        if isFormFilling {
-            return false // 原有第三方字段继续使用原生输入，不接管链接手势。
+            consumesFormMouseGesture = false
+            if textBoxDrag != nil { clearTextBoxInteraction() }
         }
         guard let window, event.window === window else {
             if event.type == .leftMouseDown,
@@ -208,8 +192,44 @@ extension CustomPDFView {
             return false
         }
         let point = convert(event.locationInWindow, from: nil)
+        if event.type == .leftMouseDragged || event.type == .leftMouseUp {
+            let finished = event.type == .leftMouseUp
+            if updateTextBoxDrag(at: point, finished: finished) { return true }
+            if consumesFormMouseGesture {
+                if finished { consumesFormMouseGesture = false }
+                return true // 按下已用于打开编辑器，无配对的抬起不能交回 PDFKit。
+            }
+        }
+        if formSession.ownsEditorPoint(point) {
+            return false // 输入框中的定位、拖选和复制完全由 AppKit 处理。
+        }
+        let specialModifiers: NSEvent.ModifierFlags = [.command, .control, .option, .shift]
+        let isPlainClick = event.modifierFlags.intersection(specialModifiers).isEmpty
+        if event.type == .leftMouseDown, isPlainClick {
+            if textBoxOverlay?.hitTest(point) != nil { return false }
+            if ownsLinkPoint(point) {
+                if placeTextBox(at: point) {
+                    consumesFormMouseGesture = true
+                    return true
+                }
+                if beginTextBoxDrag(at: point, with: event) { return true }
+                clearTextBoxInteraction()
+                if formSession.activateField(at: point) {
+                    consumesFormMouseGesture = true
+                    return true
+                }
+            }
+        }
+        if isFormFilling {
+            return false // 原有第三方字段继续使用原生输入，不接管链接手势。
+        }
         switch event.type {
         case .mouseMoved:
+            if textBoxDrag != nil, NSEvent.pressedMouseButtons & 1 == 0 { clearTextBoxInteraction() }
+            if textBoxPlacement != nil, ownsLinkPoint(point) {
+                NSCursor.crosshair.set()
+                return false
+            }
             // 在窗口外松开、休眠等情况下可能收不到 up。这里只取消已结束的手势，
             // 不用按钮全局状态计算拖动轨迹，也不需要定时轮询。
             if consumesLinkMouseGesture, NSEvent.pressedMouseButtons & 1 == 0 {
@@ -222,9 +242,7 @@ extension CustomPDFView {
             resetLinkPreview()
             return false
         case .leftMouseDown:
-            let specialModifiers: NSEvent.ModifierFlags = [.command, .control, .option, .shift]
-            guard activeType == .none, event.clickCount == 1,
-                  event.modifierFlags.intersection(specialModifiers).isEmpty,
+            guard activeType == .none, event.clickCount == 1, isPlainClick,
                   ownsLinkPoint(point), let document,
                   let page = page(for: point, nearest: false), page.displaysAnnotations,
                   let annotation = internalLink(at: convert(point, to: page), on: page),

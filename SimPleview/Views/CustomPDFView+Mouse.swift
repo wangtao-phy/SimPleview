@@ -385,7 +385,7 @@ extension CustomPDFView {
                 }
             }
             if let borderHit = annotations.first(where: { 
-                !$0.isFormFieldPresentation && supportedTypes.contains(($0.type ?? "").lowercased()) &&
+                !$0.isFormFieldPresentation && !$0.isAppTextBox && supportedTypes.contains(($0.type ?? "").lowercased()) &&
                 $0.userName == selectedBatchID && 
                 isClickOnBorder(clickPoint: pagePoint, annotationBounds: $0.bounds) 
             }) {
@@ -399,7 +399,7 @@ extension CustomPDFView {
         // 2. 如果没点中边框/图标，那就看看点中了哪个标注的【内部】
         // 这里加上 10 像素的容错，方便用户选中细小的下划线
         if let targetAnnotation = annotations.first(where: { 
-            !$0.isFormFieldPresentation && supportedTypes.contains(($0.type ?? "").lowercased()) &&
+            !$0.isFormFieldPresentation && !$0.isAppTextBox && supportedTypes.contains(($0.type ?? "").lowercased()) &&
             $0.bounds.insetBy(dx: -10, dy: -10).intersects(clickRect) 
         }) {
             // 乐观更新本地选中状态
@@ -509,10 +509,19 @@ extension CustomPDFView {
     }
     
     override func keyDown(with event: NSEvent) {
+        if event.keyCode == 53, textBoxPlacement != nil {
+            finishTextBoxPlacement()
+            return
+        }
+        if event.keyCode == 53, selectedTextBox != nil {
+            clearTextBoxInteraction()
+            return
+        }
         if isFormFilling { super.keyDown(with: event); return }
         // [用户体验优化：键盘快捷键删除标注]
         // 51 是 Backspace (退格键)，117 是 Forward Delete (删除键)
         if event.keyCode == 51 || event.keyCode == 117 {
+            if activeType == .none, deleteSelectedTextBox() { return }
 
             // 如果当前有被选中的标注框 (选中的时候会记录它的 batchID)
             if let batchID = currentSelectedBatchID, self.document != nil {

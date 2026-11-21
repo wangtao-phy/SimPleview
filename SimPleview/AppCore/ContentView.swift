@@ -227,6 +227,12 @@ struct ContentView: View {
                     }
                     .font(.caption)
                     .foregroundColor(.secondary)
+
+                    if state.isPlacingTextBox {
+                        Text(state.L("Text Box Placement Help"))
+                            .font(.caption)
+                            .lineLimit(1)
+                    }
                     
                     Spacer()
                     

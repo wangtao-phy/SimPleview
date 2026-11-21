@@ -29,11 +29,14 @@ final class AppState: NSObject, ObservableObject, PDFViewDelegate {
     @Published var isFormFilling = false {
         didSet { pdfView.isFormFilling = isFormFilling }
     }
+    @Published var isPlacingTextBox = false
+    @Published var textBoxTarget: PDFTextBoxTarget?
     @Published var areAnnotationsVisible = true {
         didSet {
             guard areAnnotationsVisible != oldValue else { return }
             if !areAnnotationsVisible {
                 guard pdfView.formSession.commit() else { areAnnotationsVisible = true; return }
+                pdfView.finishTextBoxPlacement()
                 isFormFilling = false
                 // 隐藏前结束编辑并提交草稿，避免看不见的对象仍能被拖动/删除。
                 activeType = .none
@@ -112,6 +115,8 @@ final class AppState: NSObject, ObservableObject, PDFViewDelegate {
         didSet {
             if activeType != AnnotationType.none {
                 guard pdfView.formSession.commit() else { activeType = .none; return }
+                pdfView.clearTextBoxInteraction()
+                pdfView.finishTextBoxPlacement()
                 if isFormFilling {
                     isFormFilling = false
                 }
@@ -324,6 +329,7 @@ final class AppState: NSObject, ObservableObject, PDFViewDelegate {
         loadGeneration &+= 1
         cancelHibernation()
         // 直接释放文档及交互状态，不在关闭前重新布局即将丢弃的页面。
+        textBoxTarget = nil
         pdfView.prepareForDocumentReplacement()
         pdfView.document = nil
         pdfView.removeFromSuperview()

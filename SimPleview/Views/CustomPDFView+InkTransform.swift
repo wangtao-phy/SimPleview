@@ -59,8 +59,8 @@ extension CustomPDFView {
             let (old, replacement) = try session.replacements()
             let index = document.index(for: page)
             inkEditSession = nil
-            manager.replaceInk(old, with: replacement, on: page)
-            manager.record(.replaceInk(current: replacement, previous: old, pageIndex: index))
+            manager.replaceAnnotations(old, with: replacement, on: page)
+            manager.record(.replaceAnnotations(current: replacement, previous: old, pageIndex: index))
             onAnnotationSelected?(replacement.first { $0.userName == currentSelectedBatchID })
             onAnnotationPagesChanged?([index])
             onSaveRequired?()

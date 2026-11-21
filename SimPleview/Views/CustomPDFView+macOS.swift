@@ -27,6 +27,8 @@ extension CustomPDFView {
         if newSuperview == nil { isRenderSnapshotDetached = true }
         super.viewWillMove(toSuperview: newSuperview)
         if newSuperview == nil {
+            clearTextBoxInteraction()
+            textBoxOverlay?.isHidden = true
             stopLinkTracking()
             scanCache.removeAll()
             cleanupMenuObservers()
@@ -38,6 +40,8 @@ extension CustomPDFView {
         if window == nil { isRenderSnapshotDetached = true }
         super.viewDidMoveToWindow()
         if window == nil {
+            clearTextBoxInteraction()
+            textBoxOverlay?.isHidden = true
             stopLinkTracking()
             scanCache.removeAll()
             removeRenderObservers()
@@ -158,7 +162,8 @@ extension CustomPDFView {
         let snapshot = renderSnapshot.withLock { $0 }
         // 先绘制页面及其余原生批注，再仅绘制一次手绘矢量路径。若不屏蔽
         // 本次调用中的原生手绘，半透明笔迹会加深，边缘也会出现缓存重影。
-        let scan = snapshot.pages[ObjectIdentifier(page)]?.scan
+        let content = snapshot.pages[ObjectIdentifier(page)]
+        let scan = content?.scan
         let scale = max(hypot(context.ctm.a, context.ctm.b), hypot(context.ctm.c, context.ctm.d))
         // 屏幕只复用已就绪图像，未命中不等待后台整页绘制；PDF/打印保持原生绘制。
         if context.width > 0, context.height > 0, let scan,
@@ -171,7 +176,7 @@ extension CustomPDFView {
                 size: CGSize(width: CGFloat(image.width) / scale, height: CGFloat(image.height) / scale)))
             context.restoreGState()
         } else {
-            VectorInkDrawingScope.perform(suppressing: snapshot.pages[ObjectIdentifier(page)]?.vectorInkIDs ?? []) {
+            VectorInkDrawingScope.perform(suppressing: content?.suppressedAnnotationIDs ?? []) {
                 unsafeBitCast(implementation, to: Draw.self)(self, selector, page, context)
             }
         }
@@ -193,7 +198,7 @@ extension CustomPDFView {
             context.fill(bounds)
             context.restoreGState()
         }
-        guard let content = snapshot.pages[ObjectIdentifier(page)] else { return }
+        guard let content else { return }
         context.saveGState()
         defer { context.restoreGState() }
         context.concatenate(content.transform)

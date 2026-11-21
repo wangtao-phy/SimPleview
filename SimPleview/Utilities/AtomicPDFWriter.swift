@@ -100,6 +100,7 @@ enum AtomicPDFWriter {
                 }
             }
             guard widgetValues[0] == widgetValues[1] else { throw validationError("表单字段名称或填写内容未完整保留") }
+            try validateTextBoxes(before, in: after)
             for annotation in before where annotation.type == "Ink" && StandardInk.isAppInk(annotation) {
                 let strokeID = annotation.value(forAnnotationKey: VectorInk.idKey) as? String
                 guard let restored = after.first(where: {
@@ -132,6 +133,26 @@ enum AtomicPDFWriter {
                 if annotation.type == "Ink", annotation.paths?.isEmpty == false,
                    restored.paths?.count != annotation.paths?.count { throw validationError("标准手绘笔划数量发生变化") }
             }
+        }
+    }
+
+    private static func validateTextBoxes(_ before: [PDFAnnotation], in after: [PDFAnnotation]) throws {
+        let originals = before.filter(\.isAppTextBox)
+        var written = after.filter(\.isAppTextBox)
+        let error = "文本框的位置、文字或格式未完整保留"
+        guard originals.count == written.count else { throw validationError(error) }
+        for original in originals {
+            // PDFKit 可以改变批注顺序并舍入页面坐标。逐个配对，不能只比数量，
+            // 也不能用同一个保存对象匹配多个来源对象。
+            let old = original.bounds
+            guard let index = written.firstIndex(where: { candidate in
+                let new = candidate.bounds
+                return candidate.userName == original.userName && candidate.contents == original.contents &&
+                    candidate.textBoxStyleData == original.textBoxStyleData &&
+                    abs(old.minX - new.minX) < 0.01 && abs(old.minY - new.minY) < 0.01 &&
+                    abs(old.width - new.width) < 0.01 && abs(old.height - new.height) < 0.01
+            }) else { throw validationError(error) }
+            written.remove(at: index)
         }
     }
 

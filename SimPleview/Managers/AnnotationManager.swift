@@ -106,7 +106,7 @@ final class AnnotationManager: ObservableObject {
 
     /// 已挂入当前文档的标注才可进入侧栏，批次去重与排序都由管理器维护。
     func register(_ annotation: PDFAnnotation, in document: PDFDocument) {
-        guard annotation.page?.document === document, !annotation.isFormFieldPresentation else { return }
+        guard annotation.page?.document === document, !annotation.isFormFieldPresentation, !annotation.isAppTextBox else { return }
         let id = annotation.userName ?? ""
         guard !allAnnotations.contains(where: {
             $0 === annotation || (id.hasPrefix("B-") && $0.userName == id)
@@ -160,7 +160,7 @@ final class AnnotationManager: ObservableObject {
         for i in 0..<document.pageCount {
             guard let page = document.page(at: i) else { continue }
             for annot in page.annotations {
-                guard !annot.isFormFieldPresentation else { continue }
+                guard !annot.isFormFieldPresentation, !annot.isAppTextBox else { continue }
                 guard let type = annot.type, lowercasedTargets.contains(type.lowercased()) else { continue }
                 // [防污染] 跳过搜索闪烁的临时批注，避免其进入侧边栏列表
                 if (annot.userName ?? "") == "SEARCH_FLASH" { continue }
@@ -332,7 +332,7 @@ final class AnnotationManager: ObservableObject {
         batchIndex.invalidate()
 
         if !deletedAnnots.isEmpty {
-            if isInternalBatch {
+            if isInternalBatch || annotation.isAppTextBox {
                 // 将删除动作压入撤销栈
                 // [防崩溃保护]：系统 Markup 产生的外部标注在被移除后，若强行重新 addAnnotation 会触发 PDFKit 的底层 C++ 崩溃。
                 // 按照用户的合理逻辑：外部手绘被删除后直接视为永久删除，不纳入撤销回退栈。

@@ -36,8 +36,8 @@ extension AnnotationManager {
         }
         // 本次编辑只属于当前窗口；该入口同时更新其矢量快照，无需刷新所有窗口。
         pdfView?.setPlatformNeedsDisplay()
-        if case .replaceInk = action, let view = pdfView as? CustomPDFView,
-           let id = view.currentSelectedBatchID {
+        if case .replaceAnnotations(let current, _, _) = action, let view = pdfView as? CustomPDFView,
+           let id = view.currentSelectedBatchID, current.contains(where: { $0.userName == id }) {
             let selected = change.affectedPages.compactMap { document.page(at: $0) }
                 .flatMap { $0.annotations }.first { $0.userName == id }
             view.onAnnotationSelected?(selected)
@@ -81,11 +81,19 @@ extension AnnotationManager {
             })
             return HistoryChange(inverse: .annotation(batchID: batchID, pageIndices: Set(indices)), affectedPages: Set(indices), nativeFormPages: nativeFormPages)
 
-        case .replaceInk(let current, let previous, let index):
+        case .replaceAnnotations(let current, let previous, let index):
             guard let page = document.page(at: index), !current.isEmpty, !previous.isEmpty,
                   current.allSatisfy({ $0.page === page }), previous.allSatisfy({ $0.page == nil }) else { return nil }
-            replaceInk(current, with: previous, on: page)
-            return HistoryChange(inverse: .replaceInk(current: previous, previous: current, pageIndex: index), affectedPages: [index])
+            replaceAnnotations(current, with: previous, on: page)
+            return HistoryChange(inverse: .replaceAnnotations(current: previous, previous: current, pageIndex: index), affectedPages: [index])
+
+        case .moveTextBox(let annotation, let bounds):
+            guard let page = annotation.page, page.document === document else { return nil }
+            let index = document.index(for: page)
+            guard index != NSNotFound else { return nil }
+            let previous = annotation.bounds
+            annotation.bounds = bounds
+            return HistoryChange(inverse: .moveTextBox(annotation, bounds: previous), affectedPages: [index])
 
         case .deletePage(let page, let index):
             return restorePages([page], at: [index], in: document)
@@ -128,7 +136,7 @@ extension AnnotationManager {
     }
 
     /// 完成一次拖拽或执行历史时才替换标注；预览不改文档，不反复触发自动保存。
-    func replaceInk(_ current: [PDFAnnotation], with replacement: [PDFAnnotation], on page: PDFPage) {
+    func replaceAnnotations(_ current: [PDFAnnotation], with replacement: [PDFAnnotation], on page: PDFPage) {
         guard let document = page.document else { return }
         for annotation in current { page.removeAnnotation(annotation) }
         for annotation in replacement { page.addAnnotation(annotation) }

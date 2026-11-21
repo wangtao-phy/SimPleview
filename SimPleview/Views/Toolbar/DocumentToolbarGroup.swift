@@ -26,13 +26,7 @@ struct DocumentToolbarGroup: CustomizableToolbarContent {
             }
         }
         ToolbarItem(id: "FormFilling", placement: .primaryAction) {
-            Button(action: { state.toggleFormFilling() }) {
-                Label(state.L("Form Filling"), systemImage: "rectangle.and.pencil.and.ellipsis")
-                    .foregroundStyle(state.isFormFilling ? Color.accentColor : Color.primary)
-            }
-            .help(state.L("Form Filling Help"))
-            .accessibilityValue(state.isFormFilling ? state.L("On") : state.L("Off"))
-            .disabled(!state.canFillForms)
+            FormToolsButton(state: state)
         }
         ToolbarItem(id: "RotateLeft", placement: .primaryAction) {
             Button(action: { state.rotateSelectedPagesLeft() }) {

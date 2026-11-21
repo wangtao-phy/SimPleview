@@ -16,12 +16,17 @@ nonisolated struct PDFRenderSnapshot: @unchecked Sendable {
         let bounds: CGRect
         let strokes: [Stroke]
         let noteIcons: [NoteIcon]
-        var vectorInkIDs: Set<ObjectIdentifier> = []
+        var suppressedAnnotationIDs: Set<ObjectIdentifier> = []
+        var textBoxes: [TextBox] = []
         var scan: ScanPage? = nil
     }
     struct NoteIcon {
         let image: CGImage
         let rect: CGRect
+    }
+    struct TextBox {
+        let id: ObjectIdentifier
+        let drawing: PDFTextBoxDrawing
     }
     var background = 0
     var backgroundBounds: [ObjectIdentifier: CGRect] = [:]
@@ -78,7 +83,8 @@ extension CustomPDFView {
         preparePageBackground(for: document)
         var snapshot = PDFRenderSnapshot()
         snapshot.background = _threadSafePageBackgroundColor.rawValue
-        snapshot.backgroundBounds = renderSnapshot.withLock { $0.backgroundBounds }
+        let previous = renderSnapshot.withLock { $0 }
+        snapshot.backgroundBounds = previous.backgroundBounds
         var pages = visiblePages
         // 目标页最多额外保留一页；普通滚动也纳入 currentPage，不能只信任
         // PDFKit 尚未更新的 visiblePages。全部仍在主执行器构建不可变绘图值。
@@ -91,12 +97,27 @@ extension CustomPDFView {
         for page in pages {
             var strokes: [PDFRenderSnapshot.Stroke] = []
             var noteIcons: [PDFRenderSnapshot.NoteIcon] = []
-            var vectorInkIDs = Set<ObjectIdentifier>()
+            var suppressedAnnotationIDs = Set<ObjectIdentifier>()
+            var textBoxes: [PDFRenderSnapshot.TextBox] = []
             func add(_ path: NSBezierPath, color: NSColor, width: CGFloat = 1, fill: Bool = false) {
                 guard let immutable = path.cgPath.copy() else { return }
                 strokes.append(.init(path: immutable, color: color.cgColor, width: width, fill: fill))
             }
-            let annotations = page.displaysAnnotations ? page.annotations : []
+            let pageID = ObjectIdentifier(page)
+            let pageAnnotations = page.annotations
+            let cachedBoxes = Dictionary(uniqueKeysWithValues: (previous.pages[pageID]?.textBoxes ?? []).map { ($0.id, $0.drawing) })
+            // 文本框属于页面文本工具，即使普通标注隐藏也继续绘制。已经完成排版的
+            // 文本随可见页快照复用；滚动和缩放只改变绘图变换，不重新排字。
+            for box in pageAnnotations where box.isAppTextBox && (box.shouldDisplay || StandardInk.isScreenHidden(box)) {
+                let id = ObjectIdentifier(box)
+                if VectorInkDrawingScope.installed,
+                   let drawing = PDFTextBoxDrawing.capture(box, rotation: page.rotation, reusing: cachedBoxes[id]) {
+                    StandardInk.hideNativeAppearance(box)
+                    suppressedAnnotationIDs.insert(id)
+                    textBoxes.append(.init(id: id, drawing: drawing))
+                }
+            }
+            let annotations = page.displaysAnnotations ? pageAnnotations : []
             if isFormFilling {
                 // 填表提示只属于屏幕快照，不写入 PDF，也不改变原字段的背景或边框。
                 for field in annotations where field.type == "Widget" && !field.isReadOnly {
@@ -122,7 +143,7 @@ extension CustomPDFView {
                 // 上重新描边；保存仍保留标准 InkList，外部阅读器也能读到笔迹。
                 if VectorInkDrawingScope.installed, StandardInk.prepareForScreen(annotation) {
                     let paths = StandardInk.pagePaths(of: annotation)
-                    if !paths.isEmpty { vectorInkIDs.insert(ObjectIdentifier(annotation)) }
+                    if !paths.isEmpty { suppressedAnnotationIDs.insert(ObjectIdentifier(annotation)) }
                     for path in paths {
                         var width = annotation.border?.lineWidth ?? 3
                         if let edit, edit.selected.contains(annotation) {
@@ -188,14 +209,21 @@ extension CustomPDFView {
                     for path in draftInkPaths { add(path, color: inkColor, width: _threadSafeLineWidth) }
                 }
             }
-            snapshot.pages[ObjectIdentifier(page)] = .init(transform: page.transform(for: .cropBox),
+            snapshot.pages[pageID] = .init(transform: page.transform(for: .cropBox),
                                                            bounds: page.bounds(for: .cropBox), strokes: strokes, noteIcons: noteIcons,
-                                                           vectorInkIDs: vectorInkIDs)
+                                                           suppressedAnnotationIDs: suppressedAnnotationIDs, textBoxes: textBoxes)
             // 仅优化没有普通标注的扫描页。标准标注仍交给 PDFKit，避免缓存
             // 遮挡选择、高亮或外部软件创建的外观；手绘草稿在缓存之上照常矢量绘制。
             if displayBox == .cropBox { snapshot.pages[ObjectIdentifier(page)]?.scan = ScanPage.capture(page) }
         }
         renderSnapshot.withLock { [snapshot] in $0 = snapshot }
+        if window != nil, textBoxOverlay?.superview !== self,
+           snapshot.pages.values.contains(where: { !$0.textBoxes.isEmpty }) {
+            let overlay = textBoxOverlay ?? PDFTextBoxOverlay(reader: self)
+            textBoxOverlay = overlay
+            addSubview(overlay, positioned: .above, relativeTo: nil)
+        }
+        textBoxOverlay?.refresh()
         // 只在实际显示时预备当前页及紧邻的一页；不因打开长文档而生成整本图片。
         // 瓦片未命中仍立即走 PDFKit，后台图像就绪后供后续瓦片/回滚复用。
         if window != nil, displayBox == .cropBox, let document {

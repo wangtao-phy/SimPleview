@@ -16,7 +16,7 @@ struct AnnotationToolbarGroup: CustomizableToolbarContent {
                 }
                 .pickerStyle(.segmented)
                 .frame(width: 150)
-                ColorPickerMenu(state: state)
+                AnnotationPaletteButton(state: state)
                 Button {
                     state.areAnnotationsVisible.toggle()
                 } label: {

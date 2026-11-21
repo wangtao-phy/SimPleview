@@ -17,9 +17,16 @@ class CustomPDFView: PDFView {
     nonisolated let scanCache = ScanPageCache()
     lazy var formSession = PDFFormSession(view: self)
     var consumesFormMouseGesture = false
+    var textBoxPlacement: ((PDFTextBoxTarget?) -> Void)?
+    var onTextBoxEdit: ((PDFAnnotation) -> Void)?
+    var onTextBoxDelete: ((PDFAnnotation) -> Void)?
+    var textBoxOverlay: PDFTextBoxOverlay?
+    weak var selectedTextBox: PDFAnnotation?
+    var textBoxDrag: PDFTextBoxDrag?
     var isFormFilling = false {
         didSet {
             guard isFormFilling != oldValue else { return }
+            if isFormFilling { clearTextBoxInteraction() }
             resetLinkPreview()
             if !isFormFilling { formSession.cancelDetection() }
             setPlatformNeedsDisplay()
@@ -189,6 +196,11 @@ class CustomPDFView: PDFView {
         // 本轮清理期间不能重新构建旧页快照或重新排入扫描预热。
         isPreparingDocumentReplacement = true
         defer { isPreparingDocumentReplacement = false }
+        finishTextBoxPlacement()
+        clearTextBoxInteraction()
+        textBoxOverlay?.isHidden = true
+        textBoxOverlay?.removeFromSuperview()
+        textBoxOverlay = nil
         isFormFilling = false
         scanCache.source = nil
         backgroundGeometryDocument = nil
